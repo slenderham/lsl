@@ -19,10 +19,10 @@ from utils import (
 )
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
-from models import ImageRep, TextRep, TextProposal, ExWrapper
+from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity
 from models import MultimodalRep
-from models import DotPScorer, BilinearScorer
-from vision import Conv4NP, ResNet18
+from models import DotPScorer, BilinearScorer, CosineScorer
+from vision import Conv4NP, ResNet18, Conv4NP
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 
 TRE_COMP_FNS = {
@@ -60,25 +60,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('exp_dir', type=str, help='Output directory')
     hyp_prediction = parser.add_mutually_exclusive_group()
-    hyp_prediction.add_argument(
-        '--predict_concept_hyp',
-        action='store_true',
-        help='Predict concept hypotheses during training')
-    hyp_prediction.add_argument(
-        '--predict_image_hyp',
-        action='store_true',
-        help='Predict image hypotheses during training')
+    hyp_prediction.add_argument('--predict_concept_hyp',
+                                action='store_true',
+                                help='Predict concept hypotheses during training')
+    hyp_prediction.add_argument('--predict_image_hyp',
+                                action='store_true',
+                                help='Predict image hypotheses during training')
     hyp_prediction.add_argument('--infer_hyp',
                                 action='store_true',
                                 help='Use hypotheses for prediction')
     parser.add_argument('--backbone',
-                        choices=['vgg16_fixed', 'conv4', 'resnet18'],
+                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'identity'],
                         default='vgg16_fixed',
                         help='Image model')
-    parser.add_argument(
-        '--multimodal_concept',
-        action='store_true',
-        help='Concept is a combination of hypothesis + image rep')
+    parser.add_argument('--multimodal_concept',
+                        action='store_true',
+                        help='Concept is a combination of hypothesis + image rep')
     parser.add_argument('--comparison',
                         choices=['dotp', 'bilinear'],
                         default='dotp',
@@ -90,11 +87,10 @@ if __name__ == "__main__":
     parser.add_argument('--debug_bilinear',
                         action='store_true',
                         help='If using bilinear term, use identity matrix')
-    parser.add_argument(
-        '--poe',
-        action='store_true',
-        help='Product of experts: support lang -> query img '
-             'x support img -> query img'
+    parser.add_argument('--poe',
+                        action='store_true',
+                        help='Product of experts: support lang -> query img '
+                            'x support img -> query img'
     )
     parser.add_argument('--predict_hyp_task',
                         default='generate',
@@ -104,10 +100,9 @@ if __name__ == "__main__":
                         type=int,
                         default=10,
                         help='Number of hypotheses to infer')
-    parser.add_argument(
-        '--oracle',
-        action='store_true',
-        help='Use oracle hypotheses for prediction (requires --infer_hyp)')
+    parser.add_argument('--oracle',
+                        action='store_true',
+                        help='Use oracle hypotheses for prediction (requires --infer_hyp)')
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -116,11 +111,10 @@ if __name__ == "__main__":
                         type=float,
                         default=0.0,
                         help='Amount of noise to add to each example')
-    parser.add_argument(
-        '--class_noise_weight',
-        type=float,
-        default=0.0,
-        help='How much of that noise should be class diagnostic?')
+    parser.add_argument('--class_noise_weight',
+                        type=float,
+                        default=0.0,
+                        help='How much of that noise should be class diagnostic?')
     parser.add_argument('--noise_at_test',
                         action='store_true',
                         help='Add instance-level noise at test time')
@@ -224,10 +218,14 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    device = torch.device('cuda' if args.cuda else 'cpu')
+    if (not torch.cuda.is_available()):
+        print("No CUDA available so not using it");
+        device = torch.device('cpu');
+    else:
+        device = torch.device('cuda' if args.cuda else 'cpu')
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
-    precomputed_features = args.backbone == 'vgg16_fixed'
+    precomputed_features = (args.backbone == 'vgg16_fixed' or args.backbone=="identity");
     preprocess = args.backbone == 'resnet18'
     train_dataset = ShapeWorld(
         split='train',
@@ -325,10 +323,12 @@ if __name__ == "__main__":
         backbone_model = Conv4NP()
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
+    elif args.backbone == "identity":
+        backbone_model = None;
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model))
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256))
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -339,6 +339,8 @@ if __name__ == "__main__":
         scorer_model = BilinearScorer(512,
                                       dropout=args.dropout,
                                       identity_debug=args.debug_bilinear)
+    elif args.comparison == 'cosine':
+        scorer_model = CosineScorer(temperature=1.0);
     else:
         raise NotImplementedError
     scorer_model = scorer_model.to(device)
@@ -665,7 +667,8 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch)
+        if (args.backbone!="Identity"):
+            train_loss = train(epoch, n_steps = len(train_loader));
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         # Evaluate tre on validation set

@@ -3,7 +3,7 @@ Models
 """
 
 import numpy as np
-
+import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -53,11 +53,11 @@ class ImageRep(nn.Module):
     Paper uses 512 hidden dimension.
     """
 
-    def __init__(self, backbone=None, hidden_size=512):
+    def __init__(self, backbone=None, final_feat_dim = 4608, hidden_size=512):
         super(ImageRep, self).__init__()
         if backbone is None:
             self.backbone = Identity()
-            self.backbone.final_feat_dim = 4608
+            self.backbone.final_feat_dim = final_feat_dim
         else:
             self.backbone = backbone
         self.model = nn.Sequential(
@@ -68,6 +68,29 @@ class ImageRep(nn.Module):
         x_enc = self.backbone(x)
         return self.model(x_enc)
 
+class MLP(nn.Module):
+    r"""
+    MLP projection head
+    """
+    def __init__(self, input_size, hidden_size, output_size, num_layers=1):
+        super(MLP, self).__init__();
+        assert(num_layers>=0), "At least 0 hidden_layers (a simple linear transform)";
+        layers = [];
+        if (num_layers==0):
+            layers.append(nn.Linear(input_size, output_size));
+        else:
+            layers.append(nn.Linear(input_size, hidden_size));
+            layers.append(nn.ReLU());
+            for _ in range(num_layers-1):
+                layers.append(nn.Linear(hidden_size, hidden_size));
+                layers.append(nn.ReLU());
+            layers.append(nn.Linear(hidden_size, output_size));
+
+        self.model = nn.Sequential(*layers);
+
+    def forward(self, x):
+        return self.model(x);
+
 
 class TextRep(nn.Module):
     r"""Deterministic Bowman et. al. model to form
@@ -76,11 +99,11 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module):
+    def __init__(self, embedding_module, hidden_size):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, 512)
+        self.gru = nn.GRU(self.embedding_dim, hidden_size)
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -318,6 +341,11 @@ class EmbedTextRep(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+"""
+
+Similarity Scores
+
+"""
 
 class Scorer(nn.Module):
     def __init__(self):
@@ -345,6 +373,27 @@ class DotPScorer(Scorer):
         bw_scores = torch.einsum('ijk,ik->ij', (x, y))
         return torch.sum(bw_scores, dim=1)
 
+class CosineScorer(Scorer):
+    def __init__(self, temperature):
+        super(CosineScorer, self).__init__()
+        self.temperature = temperature
+
+    def score(self, x, y, input_is_normed=False):
+        if not input_is_normed:
+            x = F.normalize(x, p=2, dim=1);
+            y = F.normalize(y, p=2, dim=1);
+        return torch.mm(x, y.t())/self.temperature;
+    
+    def score_with_example(self, im, hint, input_is_normed=False):
+        assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
+        assert(len(hint.shape)==2), "Hint tensor should be of size (N, hidden_size)";
+        N, n_ex, hidden_size = im.shape;
+        if not input_is_normed:
+            im = F.normalize(im, p=2, dim=-1);
+            hint = F.normalize(hint, p=2, dim=-1);
+        scores = torch.einsum("ijk,lk->ilj", im, hint); 
+        assert(scores.shape[0]==scores.shape[1]==N and scores.shape[2]==n_ex), "The size of scores should be of size NxNx(n_ex)";
+        return scores/self.temperature;
 
 class BilinearScorer(DotPScorer):
     def __init__(self, hidden_size, dropout=0.0, identity_debug=False):
@@ -378,3 +427,63 @@ class BilinearScorer(DotPScorer):
         wy = self.dropout(wy)
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
+
+
+class ContrastiveLoss(nn.Module):
+    """
+    Compute contrastive loss
+    """
+
+    def __init__(self, margin=0, temperature=0.1, max_violation=False, loss_type="cpc"):
+        super(ContrastiveLoss, self).__init__()
+        assert(loss_type in ["cpc", "margin"]), "please select cpc (logit) or margin loss"
+        self.loss_type = loss_type;
+        self.margin = margin
+        self.sim = CosineScorer(temperature);
+        self.max_violation = max_violation
+
+    def forward(self, im, s):
+        # compute image-sentence score matrix
+        # im, s \in R^N*H
+        scores = self.sim.score_with_example(im, s); #--> N x N x n_ex
+        positive_scores = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
+        # diagonal = scores.diag().view(im.size(0), 1)
+
+        # mask over negative pairs
+        mask = torch.eye(scores.size(0)) > .5;
+        I = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
+        if torch.cuda.is_available():
+            I = I.cuda()
+
+        if (self.loss_type=="margin"):
+            d1 = positive_scores.expand_as(scores);
+            d2 = positive_scores.t().expand_as(scores);
+
+            # compare every diagonal score to scores in its column
+            # caption retrieval
+            cost_s = (self.margin + scores - d1).clamp(min=0)
+            # compare every diagonal score to scores in its row
+            # image retrieval
+            cost_im = (self.margin + scores - d2).clamp(min=0)
+
+            # clear diagonals
+            mask = torch.eye(scores.size(0)) > .5
+            I = Variable(mask)
+            if torch.cuda.is_available():
+                I = I.cuda()
+            cost_s = cost_s.masked_fill_(I, 0)
+            cost_im = cost_im.masked_fill_(I, 0)
+
+            # keep the maximum violating negative for each query
+            if self.max_violation:
+                cost_s = cost_s.max(1)[0]
+                cost_im = cost_im.max(0)[0]
+
+            return cost_s.sum() + cost_im.sum()
+        
+        elif (self.loss_type=="cpc"):
+            negative_scores = scores.masked_fill(I, 0);
+            denom = torch.logsumexp(negative_scores.flatten(), dim=0);
+            
+            return (- positive_scores.sum() + denom - math.log(im.shape[0]))/im.shape[1], \
+                torch.mean(positive_scores), torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]);

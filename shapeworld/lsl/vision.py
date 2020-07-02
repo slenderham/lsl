@@ -180,6 +180,44 @@ class ConvBlock(nn.Module):
         out = self.trunk(x)
         return out
 
+# Conv Block with Coordinate Information Appended to Channels
+class ConvBlockPosAware(nn.Module):
+    maml = False  # Default
+
+    def __init__(self, indim, outdim, pool=True, padding=1):
+        super(ConvBlock, self).__init__()
+        self.indim = indim
+        self.outdim = outdim
+        if self.maml:
+            self.C = Conv2d_fw(indim+2, outdim, 3, padding=padding)
+            self.BN = BatchNorm2d_fw(outdim)
+        else:
+            self.C = nn.Conv2d(indim+2, outdim, 3, padding=padding)
+            self.BN = nn.BatchNorm2d(outdim)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.parametrized_layers = [self.C, self.BN, self.relu]
+        if pool:
+            self.pool = nn.MaxPool2d(2)
+            self.parametrized_layers.append(self.pool)
+
+        for layer in self.parametrized_layers:
+            init_layer(layer)
+
+        self.trunk = nn.Sequential(*self.parametrized_layers)
+
+    def forward(self, x):
+        N, C, H, W = x.shape;
+        h_coord_emb = torch.linspace(-1, +1, steps=H).reshape(1, 1, H, 1).expand(N, 1, -1, W);
+        w_coord_emb = torch.linspace(-1, +1, steps=W).reshape(1, 1, 1, W).expand(N, 1, H, -1);
+        x_pos_aware = torch.cat([
+            x, 
+            h_coord_emb,
+            w_coord_emb
+        ], dim=1);
+        out = self.trunk(x)
+        return out
+
 
 # Simple ResNet Block
 class SimpleBlock(nn.Module):
@@ -408,6 +446,36 @@ class ConvNetNopool(nn.Module):
         out = self.trunk(x)
         return out
 
+class ConvNetNopoolPosAware(nn.Module):
+    # Relation net use a 4 layer conv with pooling in only first two layers,
+    # else no pooling
+    def __init__(self, depth, flatten=False):
+        super(ConvNetNopoolPosAware, self).__init__()
+        trunk = []
+        for i in range(depth):
+            indim = 3 if i == 0 else 64
+            outdim = 64
+            # Only first two layer has pooling and no padding
+            B = ConvBlockPosAware(indim,
+                          outdim,
+                          pool=(i in [0, 1]),
+                          padding=0 if i in [0, 1] else 1)
+            trunk.append(B)
+
+        if flatten:
+            trunk.append(Flatten())
+
+        self.trunk = nn.Sequential(*trunk)
+        if flatten:
+            # FIXME: This dimension is for conv4 only
+            self.final_feat_dim = 12544
+        else:
+            self.final_feat_dim = [64, 19, 19]
+
+    def forward(self, x):
+        out = self.trunk(x)
+        return out
+
 
 class ConvNetS(nn.Module):
     # For omniglot, only 1 input channel, output dim is 64
@@ -532,6 +600,8 @@ def Conv6():
 def Conv4NP():
     return ConvNetNopool(4, flatten=True)
 
+def Conv4NPPosAware():
+    return ConvNetNopoolPosAware(4, flatten=True);
 
 def Conv6NP():
     return ConvNetNopool(6)

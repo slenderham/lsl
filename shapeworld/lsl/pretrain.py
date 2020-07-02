@@ -13,6 +13,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 
+from matplotlib import pyplot as plt
+
 from utils import (
     AverageMeter,
     save_defaultdict_to_fs,
@@ -87,13 +89,16 @@ if __name__ == "__main__":
                         type=int,
                         default=256,
                         help='Size of hidden representations')
-    parser.add_argument('--epochs', type=int, default=5, help='Train epochs')
+    parser.add_argument('--epochs', type=int, default=50, help='Train epochs')
+    parser.add_argument('--debug_example', 
+                        action="store_true",
+                        help="If true, print out example images and hint");
     parser.add_argument('--data_dir',
                         default=None,
                         help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--lr',
                         type=float,
-                        default=0.0001,
+                        default=0.00001,
                         help='Learning rate')
     parser.add_argument('--optimizer',
                         choices=['adam', 'rmsprop', 'sgd'],
@@ -252,7 +257,7 @@ if __name__ == "__main__":
     Loss
     """
     
-    criterion = ContrastiveLoss(loss_type=args.loss_type);
+    criterion = ContrastiveLoss(loss_type=args.loss_type, temperature=args.temperature);
 
     """
     Scorer Model
@@ -319,10 +324,18 @@ if __name__ == "__main__":
             batch_size = len(image)
             n_ex = examples.shape[1]
 
+            if args.debug_example:
+                rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
+                print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
+                fig, axes = plt.subplots(4);
+                for i in range(4):
+                    axes[i].imshow(examples[rand_idx][i].transpose(0, 2)); # plot examples, transpose to put channel in the last dim
+                plt.show();
+                return 0;
             # Load hint
             hint_seq = hint_seq.to(device)
             hint_length = hint_length.to(device)
-            max_hint_length = hint_length.max().item()
+            max_hint_length = hint_length.max().item();
             # Cap max length if it doesn't fill out the tensor
             if max_hint_length != hint_seq.shape[1]:
                 hint_seq = hint_seq[:, :max_hint_length]
@@ -411,7 +424,8 @@ if __name__ == "__main__":
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
-    for epoch in range(1, args.epochs + 1):
+    total_epoch = 1 if args.debug_example else args.epochs;
+    for epoch in range(1, total_epoch + 1):
         train_loss = train(epoch);
         metrics['pretrain_loss'] = train_loss;
         save_defaultdict_to_fs(metrics,

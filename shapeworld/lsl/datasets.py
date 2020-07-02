@@ -14,8 +14,8 @@ from torchvision import transforms
 from utils import next_random, OrderedCounter
 
 # Set your data directory here!
-# DATA_DIR = '/Users/wangchong/Downloads/easy_sw'
-DATA_DIR = "/content/minishapeworld-master"
+DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
+# DATA_DIR = "/content/minishapeworld-master"
 
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 

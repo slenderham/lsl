@@ -40,7 +40,7 @@ if __name__ == "__main__":
                         help='Form of loss function')
     parser.add_argument('--comparison',
                         choices=['dotp', 'bilinear', 'cosine'],
-                        default='cosine',
+                        default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--dropout',
                         default=0.0,
@@ -372,6 +372,40 @@ if __name__ == "__main__":
 
         return loss_total
 
+    def test(epoch, split='train'):
+        image_model.eval()
+        scorer_model.eval()
+
+        accuracy_meter = AverageMeter(raw=True)
+        data_loader = data_loader_dict[split]
+
+        with torch.no_grad():
+            for examples, image, label, hint_seq, hint_length, *rest in data_loader:
+                examples = examples.to(device)
+                image = image.to(device)
+                label = label.to(device)
+                label_np = label.cpu().numpy().astype(np.uint8)
+                batch_size = len(image)
+
+                image_rep = image_model(image)
+                examples_rep = image_model(examples)
+                examples_rep_mean = torch.mean(examples_rep, dim=1)
+
+                score = scorer_model.score(examples_rep_mean, image_rep);
+
+                label_hat = torch.as_tensor(score > 0, dtype=torch.uint8);
+                label_hat = label_hat.cpu().numpy();
+
+                accuracy = accuracy_score(label_np, label_hat)
+                accuracy_meter.update(accuracy,
+                                    batch_size,
+                                    raw_scores=(label_hat == label_np))
+
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg))
+
+        return accuracy_meter.avg, accuracy_meter.raw_scores
+
     def featurize():
         image_model.eval()
         N_FEATS = args.hidden_size
@@ -415,25 +449,67 @@ if __name__ == "__main__":
     best_epoch_acc = 0
     best_val_acc = 0
     best_val_same_acc = 0
-    best_val_tre = 0
-    best_val_tre_std = 0
     best_test_acc = 0
     best_test_same_acc = 0
     best_test_acc_ci = 0
-    lowest_val_tre = 1e10
-    lowest_val_tre_std = 0
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
         train_loss = train(epoch);
-        metrics['pretrain_loss'] = train_loss;
+        train_acc, _ = test(epoch, 'train')
+        val_acc, _ = test(epoch, 'val')
+        # Evaluate tre on validation set
+        #  val_tre, val_tre_std = eval_tre(epoch, 'val')
+
+        test_acc, test_raw_scores = test(epoch, 'test')
+        if has_same:
+            val_same_acc, _ = test(epoch, 'val_same')
+            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
+            all_test_raw_scores = test_raw_scores + test_same_raw_scores
+        else:
+            val_same_acc = val_acc
+            test_same_acc = test_acc
+            all_test_raw_scores = test_raw_scores
+
+        # Compute confidence intervals
+        n_test = len(all_test_raw_scores)
+        test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
+
+        epoch_acc = (val_acc + val_same_acc) / 2
+        is_best_epoch = epoch_acc > best_val_acc
+        if is_best_epoch:
+            best_epoch = epoch
+            best_epoch_acc = epoch_acc
+            best_val_acc = val_acc
+            best_val_same_acc = val_same_acc
+            best_test_acc = test_acc
+            best_test_same_acc = test_same_acc
+            best_test_acc_ci = test_acc_ci
+
+        if args.save_checkpoint:
+            raise NotImplementedError
+
+        metrics['train_acc'].append(train_acc)
+        metrics['val_acc'].append(val_acc)
+        metrics['val_same_acc'].append(val_same_acc)
+        metrics['test_acc'].append(test_acc)
+        metrics['test_same_acc'].append(test_same_acc)
+        metrics['test_acc_ci'].append(test_acc_ci)
+
+        metrics = dict(metrics)
+        # Assign best accs
+        metrics['best_epoch'] = best_epoch
+        metrics['best_val_acc'] = best_val_acc
+        metrics['best_val_same_acc'] = best_val_same_acc
+        metrics['best_test_acc'] = best_test_acc
+        metrics['best_test_same_acc'] = best_test_same_acc
+        metrics['best_test_acc_ci'] = best_test_acc_ci
+        metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
 
-    featurize();
-    
     print('====> DONE')
     print('====> BEST EPOCH: {}'.format(best_epoch))
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(

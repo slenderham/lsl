@@ -328,7 +328,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=512));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

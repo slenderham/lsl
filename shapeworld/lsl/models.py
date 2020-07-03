@@ -27,7 +27,7 @@ class ExWrapper(nn.Module):
             n_ex = x.shape[1]
             img_dim = x.shape[2:]
             # Flatten out examples first
-            x_flat = x.view(batch_size * n_ex, *img_dim)
+            x_flat = x.reshape(batch_size * n_ex, *img_dim)
         else:
             x_flat = x
 

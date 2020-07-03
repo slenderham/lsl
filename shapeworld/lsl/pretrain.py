@@ -463,7 +463,6 @@ if __name__ == "__main__":
     for epoch in range(1, total_epoch + 1):
         train_loss = train(epoch);
         if args.save_feats:
-            featurize();
             continue;
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
@@ -517,19 +516,22 @@ if __name__ == "__main__":
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
 
-    print('====> DONE')
-    print('====> BEST EPOCH: {}'.format(best_epoch))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_val)', best_epoch, best_val_acc))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_val_same)', best_epoch, best_val_same_acc))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_test)', best_epoch, best_test_acc))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_test_same)', best_epoch, best_test_same_acc))
-    print('====>')
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_val_avg)', best_epoch, (best_val_acc + best_val_same_acc) / 2))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_test_avg)', best_epoch,
-        (best_test_acc + best_test_same_acc) / 2))
+    if (args.save_feats):
+        featurize();
+    else:
+        print('====> DONE')
+        print('====> BEST EPOCH: {}'.format(best_epoch))
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_val)', best_epoch, best_val_acc))
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_val_same)', best_epoch, best_val_same_acc))
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_test)', best_epoch, best_test_acc))
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_test_same)', best_epoch, best_test_same_acc))
+        print('====>')
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_val_avg)', best_epoch, (best_val_acc + best_val_same_acc) / 2))
+        print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
+            '(best_test_avg)', best_epoch,
+            (best_test_acc + best_test_same_acc) / 2))

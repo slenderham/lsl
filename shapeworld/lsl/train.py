@@ -140,7 +140,7 @@ if __name__ == "__main__":
                         help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--lr',
                         type=float,
-                        default=0.0001,
+                        default=0.001,
                         help='Learning rate')
     parser.add_argument('--tre_err',
                         default='cos',

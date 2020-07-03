@@ -149,12 +149,12 @@ if __name__ == "__main__":
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     preprocess = args.backbone == 'resnet18'
-    precomputed_features = False;
+    precomputed_features = None;
     train_dataset = ShapeWorld(
         split='train',
         vocab=None,
         augment=True,
-        precomputed_features=False,
+        precomputed_features=None,
         max_size=args.max_train,
         preprocess=preprocess,
         noise=args.noise,

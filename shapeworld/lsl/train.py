@@ -90,8 +90,7 @@ if __name__ == "__main__":
     parser.add_argument('--poe',
                         action='store_true',
                         help='Product of experts: support lang -> query img '
-                            'x support img -> query img'
-    )
+                            'x support img -> query img')
     parser.add_argument('--predict_hyp_task',
                         default='generate',
                         choices=['generate', 'embed'],
@@ -122,27 +121,23 @@ if __name__ == "__main__":
                         default='gaussian',
                         choices=['gaussian', 'uniform'],
                         help='Type of noise')
-    parser.add_argument(
-        '--fixed_noise_colors',
-        default=None,
-        type=int,
-        help='Fix noise based on class, with a max of this many')
-    parser.add_argument(
-        '--fixed_noise_colors_max_rgb',
-        default=0.2,
-        type=float,
-        help='Maximum color value a single color channel '
-             'can have for noise background'
-    )
+    parser.add_argument('--fixed_noise_colors',
+                        default=None,
+                        type=int,
+                        help='Fix noise based on class, with a max of this many')
+    parser.add_argument('--fixed_noise_colors_max_rgb',
+                        default=0.2,
+                        type=float,
+                        help='Maximum color value a single color channel '
+                            'can have for noise background')
     parser.add_argument('--batch_size',
                         type=int,
                         default=100,
                         help='Train batch size')
     parser.add_argument('--epochs', type=int, default=50, help='Train epochs')
-    parser.add_argument(
-        '--data_dir',
-        default=None,
-        help='Specify custom data directory (must have shapeworld folder)')
+    parser.add_argument('--data_dir',
+                        default=None,
+                        help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--lr',
                         type=float,
                         default=0.0001,
@@ -328,7 +323,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256))
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256, hidden_size=None));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

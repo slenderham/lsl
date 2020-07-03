@@ -47,7 +47,7 @@ if __name__ == "__main__":
                         type=float,
                         help='Apply dropout to comparison layer')
     parser.add_argument('--temperature',
-                        default=0.1,
+                        default=0.2,
                         type=float,
                         help='Temperature parameter used in contrastive loss')
     parser.add_argument('--debug_bilinear',
@@ -98,7 +98,7 @@ if __name__ == "__main__":
                         help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--lr',
                         type=float,
-                        default=0.00001,
+                        default=0.001,
                         help='Learning rate')
     parser.add_argument('--optimizer',
                         choices=['adam', 'rmsprop', 'sgd'],
@@ -281,10 +281,10 @@ if __name__ == "__main__":
     Projection heads
     """
 
-    image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
-    hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
-    params_to_optimize.extend(image_projection.parameters());
-    params_to_optimize.extend(hint_projection.parameters());
+    # image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
+    # hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
+    # params_to_optimize.extend(image_projection.parameters());
+    # params_to_optimize.extend(hint_projection.parameters());
 
     """
     Language Model
@@ -327,6 +327,7 @@ if __name__ == "__main__":
             if args.debug_example:
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
                 print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
+                print(examples[rand_idx][0].shape)
                 fig, axes = plt.subplots(4);
                 for i in range(4):
                     axes[i].imshow(examples[rand_idx][i].transpose(0, 2)); # plot examples, transpose to put channel in the last dim
@@ -348,7 +349,7 @@ if __name__ == "__main__":
             # Encode hints, minimize distance between hint and images/examples
             hint_rep = hint_model(hint_seq, hint_length) # N * H
 
-            loss, pos_score, neg_score = criterion(image_projection(examples_rep), hint_projection(hint_rep));
+            loss, pos_score, neg_score = criterion(examples_rep, hint_rep);
 
             loss_total += loss.item()
             pos_score_total += pos_score.item();
@@ -374,7 +375,7 @@ if __name__ == "__main__":
     def featurize():
         image_model.eval()
         N_FEATS = args.hidden_size
-        DATA_DIR = "/content/minishapeworld-master"
+        DATA_DIR = ""
 
         with torch.no_grad():
             for split in ("train", "val", "test", "val_same", "test_same"):

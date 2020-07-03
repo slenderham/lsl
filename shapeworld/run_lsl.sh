@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HYPO_LAMBDA=20
+HYPO_LAMBDA=0
 
 python lsl/train.py --cuda \
     --predict_concept_hyp \

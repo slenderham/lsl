@@ -431,7 +431,8 @@ if __name__ == "__main__":
                     batch = ex[i:i+args.batch_size, ...]
                     n_batch = batch.shape[0]
                     batch = torch.from_numpy(batch).float().to(device);
-                    feats = image_model(batch).cpu().numpy()
+                    feats = image_model(batch).cpu();
+                    feats = F.normalize(feats, p=2, dim=-1).numpy();
                     ex_feats[i:i+args.batch_size, ...] = feats
                 np.savez("{}/shapeworld/{}/examples.feats.npz".format(DATA_DIR, split), ex_feats);
 
@@ -445,6 +446,7 @@ if __name__ == "__main__":
                     batch = inp[i:i+args.batch_size, ...]
                     batch = torch.from_numpy(batch).float().to(device)
                     feats = image_model(batch).cpu().numpy()
+                    feats = F.normalize(feats, p=2, dim=-1).numpy();
                     feats = feats.reshape((-1, N_FEATS))
                     inp_feats[i:i+args.batch_size, :] = feats
                 np.savez("{}/shapeworld/{}/inputs.feats.npz".format(DATA_DIR, split), inp_feats)

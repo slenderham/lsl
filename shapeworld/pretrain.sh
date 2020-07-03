@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HYPO_LAMBDA=20
+HYPO_LAMBDA=1
 
 python lsl/pretrain.py --cuda \
     --batch_size 100 \
@@ -14,4 +14,4 @@ python lsl/train.py --cuda \
     --hypo_lambda $HYPO_LAMBDA \
     --batch_size 100 \
     --seed $RANDOM \
-    exp/contrastive
+    exp/lsl

@@ -3,7 +3,7 @@
 HYPO_LAMBDA=20
 
 python lsl/pretrain.py --cuda \
-    --batch_size 64 \
+    --batch_size 128 \
     --seed $RANDOM \
     --log_interval 10\
     --save_feats\
@@ -12,6 +12,6 @@ python lsl/pretrain.py --cuda \
 python lsl/train.py --cuda \
     --predict_concept_hyp \
     --hypo_lambda $HYPO_LAMBDA \
-    --batch_size 64 \
+    --batch_size 128 \
     --seed $RANDOM \
     exp/contrastive

@@ -7,6 +7,8 @@ python lsl/pretrain.py --cuda \
     --seed $RANDOM \
     --log_interval 10\
     --save_feats\
+    --epochs 50\
+    --temperature 0.5\
     exp/contrastive
 
 python lsl/train.py --cuda \

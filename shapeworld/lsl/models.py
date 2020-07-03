@@ -381,11 +381,14 @@ class CosineScorer(Scorer):
         super(CosineScorer, self).__init__()
         self.temperature = temperature
 
-    def score(self, x, y, input_is_normed=False):
+    def score(self, x, y, input_is_normed=False, get_diag=True):
         if not input_is_normed:
             x = F.normalize(x, p=2, dim=1);
             y = F.normalize(y, p=2, dim=1);
-        return torch.mm(x, y.t())/self.temperature;
+        if get_diag:
+            return torch.sum(x * y, dim=1);
+        else:
+            return torch.mm(x, y.t())/self.temperature;
     
     def score_with_example(self, im, hint, input_is_normed=False):
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
@@ -464,6 +467,5 @@ class ContrastiveLoss(nn.Module):
             raise NotImplementedError;
         
         elif (self.loss_type=="cpc"):
-            
             return -torch.diagonal(F.log_softmax(scores, dim=1), dim1=0, dim2=1).mean(), \
                 torch.mean(positive_scores), torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]);

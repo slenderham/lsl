@@ -6,4 +6,12 @@ python lsl/pretrain.py --cuda \
     --batch_size 32 \
     --seed $RANDOM \
     --log_interval 10\
+    --save_feats\
+    exp/contrastive
+
+python lsl/train.py --cuda \
+    --predict_concept_hyp \
+    --hypo_lambda $HYPO_LAMBDA \
+    --batch_size 32 \
+    --seed $RANDOM \
     exp/contrastive

@@ -141,7 +141,7 @@ class ShapeWorld(data.Dataset):
                  vocab=None,
                  augment=False,
                  max_size=None,
-                 precomputed_features=True,
+                 precomputed_features=None,
                  preprocess=False,
                  noise=0.0,
                  class_noise_weight=0.5,
@@ -163,8 +163,8 @@ class ShapeWorld(data.Dataset):
         self.noise_type = noise_type
 
         # Positive class noise
-        if precomputed_features:
-            self.image_dim = (4608, )
+        if precomputed_features!=None:
+            self.image_dim = (precomputed_features, )
         else:
             self.image_dim = (3, 64, 64)
 

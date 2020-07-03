@@ -70,8 +70,8 @@ if __name__ == "__main__":
                                 action='store_true',
                                 help='Use hypotheses for prediction')
     parser.add_argument('--backbone',
-                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'identity'],
-                        default='vgg16_fixed',
+                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
+                        default='pretrained',
                         help='Image model')
     parser.add_argument('--multimodal_concept',
                         action='store_true',
@@ -220,7 +220,10 @@ if __name__ == "__main__":
         device = torch.device('cuda' if args.cuda else 'cpu')
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
-    precomputed_features = (args.backbone == 'vgg16_fixed' or args.backbone=="identity");
+    precomputed_features= {
+        "vgg16_fixed": 4608,
+        "pretrained": 256,
+    }.get(args.backbone, None);
     preprocess = args.backbone == 'resnet18'
     train_dataset = ShapeWorld(
         split='train',
@@ -312,18 +315,20 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
+    final_feat_dim = 256 if args.backbone=="pretrained" else 4608
+
     if args.backbone == 'vgg16_fixed':
         backbone_model = None
     elif args.backbone == 'conv4':
         backbone_model = Conv4NP()
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
-    elif args.backbone == "identity":
+    elif args.backbone == "pretrained":
         backbone_model = None;
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256, hidden_size=None));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

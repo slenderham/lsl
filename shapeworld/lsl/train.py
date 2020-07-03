@@ -222,7 +222,7 @@ if __name__ == "__main__":
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     precomputed_features= {
         "vgg16_fixed": 4608,
-        "pretrained": 256,
+        "pretrained": 512,
     }.get(args.backbone, None);
     preprocess = args.backbone == 'resnet18'
     train_dataset = ShapeWorld(
@@ -315,7 +315,7 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
-    final_feat_dim = 256 if args.backbone=="pretrained" else 4608
+    final_feat_dim = 512 if args.backbone=="pretrained" else 4608
 
     if args.backbone == 'vgg16_fixed':
         backbone_model = None
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=512));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

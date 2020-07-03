@@ -6,7 +6,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 import torch
 import torch.nn as nn
@@ -93,6 +93,9 @@ if __name__ == "__main__":
     parser.add_argument('--debug_example', 
                         action="store_true",
                         help="If true, print out example images and hint");
+    parser.add_argument('--save_feats',
+                        action="store_true",
+                        help="If true, store precomputed features. Otherwise, directly evaluate using chosen metric.")
     parser.add_argument('--data_dir',
                         default=None,
                         help='Specify custom data directory (must have shapeworld folder)')
@@ -367,7 +370,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPositive Score {:.4f}\tNegative Score{:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPositive Score {:.4f}\tNegative Score {:.4f}'.format(
             '(train)', epoch, loss_total, pos_score_total, neg_score_total))
 
         return loss_total
@@ -409,7 +412,8 @@ if __name__ == "__main__":
     def featurize():
         image_model.eval()
         N_FEATS = args.hidden_size
-        DATA_DIR = ""
+        # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
+        DATA_DIR = '/data/cw9951/hard_sw'
 
         with torch.no_grad():
             for split in ("train", "val", "test", "val_same", "test_same"):
@@ -458,6 +462,9 @@ if __name__ == "__main__":
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
         train_loss = train(epoch);
+        if args.save_feats:
+            featurize();
+            continue;
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         # Evaluate tre on validation set

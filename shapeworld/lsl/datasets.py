@@ -14,9 +14,9 @@ from torchvision import transforms
 from utils import next_random, OrderedCounter
 
 # Set your data directory here!
-DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
+# DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
 # DATA_DIR = "/content/minishapeworld-master"
-# DATA_DIR = "/data/cw9951/hard_sw"
+DATA_DIR = "/data/cw9951/hard_sw"
 
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 
@@ -141,7 +141,7 @@ class ShapeWorld(data.Dataset):
                  vocab=None,
                  augment=False,
                  max_size=None,
-                 precomputed_features=True,
+                 precomputed_features=None,
                  preprocess=False,
                  noise=0.0,
                  class_noise_weight=0.5,
@@ -163,8 +163,8 @@ class ShapeWorld(data.Dataset):
         self.noise_type = noise_type
 
         # Positive class noise
-        if precomputed_features:
-            self.image_dim = (4608, )
+        if precomputed_features!=None:
+            self.image_dim = (precomputed_features, )
         else:
             self.image_dim = (3, 64, 64)
 

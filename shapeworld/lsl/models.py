@@ -34,7 +34,7 @@ class ExWrapper(nn.Module):
         x_enc = self.model(x_flat)
 
         if len(x.shape) == 5:
-            x_enc = x_enc.view(batch_size, n_ex, -1)
+            x_enc = x_enc.reshape(batch_size, n_ex, -1)
 
         return x_enc
 

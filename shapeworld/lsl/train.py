@@ -668,7 +668,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
         if (args.backbone!="Identity"):
-            train_loss = train(epoch, n_steps = len(train_loader));
+            train_loss = train(epoch);
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         # Evaluate tre on validation set

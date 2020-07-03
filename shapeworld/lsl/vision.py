@@ -61,8 +61,7 @@ class Flatten(nn.Module):
         super(Flatten, self).__init__()
 
     def forward(self, x):
-        return x.view(x.size(0), -1)
-
+        return x.reshape(x.size(0), -1)
 
 class Linear_fw(nn.Linear):  # used in MAML to forward input with fast weight
     def __init__(self, in_features, out_features):

@@ -47,7 +47,7 @@ if __name__ == "__main__":
                         type=float,
                         help='Apply dropout to comparison layer')
     parser.add_argument('--temperature',
-                        default=0.2,
+                        default=0.5,
                         type=float,
                         help='Temperature parameter used in contrastive loss')
     parser.add_argument('--debug_bilinear',
@@ -87,9 +87,9 @@ if __name__ == "__main__":
                         help='Train batch size')
     parser.add_argument('--hidden_size',
                         type=int,
-                        default=512,
+                        default=256,
                         help='Size of hidden representations')
-    parser.add_argument('--epochs', type=int, default=50, help='Train epochs')
+    parser.add_argument('--epochs', type=int, default=30, help='Train epochs')
     parser.add_argument('--debug_example', 
                         action="store_true",
                         help="If true, print out example images and hint");
@@ -284,10 +284,10 @@ if __name__ == "__main__":
     Projection heads
     """
 
-    # image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
-    # hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
-    # params_to_optimize.extend(image_projection.parameters());
-    # params_to_optimize.extend(hint_projection.parameters());
+    image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
+    hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
+    params_to_optimize.extend(image_projection.parameters());
+    params_to_optimize.extend(hint_projection.parameters());
 
     """
     Language Model
@@ -352,7 +352,7 @@ if __name__ == "__main__":
             # Encode hints, minimize distance between hint and images/examples
             hint_rep = hint_model(hint_seq, hint_length) # N * H
 
-            loss, pos_score, neg_score = criterion(examples_rep, hint_rep);
+            loss, pos_score, neg_score = criterion(image_projection(examples_rep), hint_projection(hint_rep));
 
             loss_total += loss.item()
             pos_score_total += pos_score.item();

@@ -362,7 +362,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, 5.0);
+            torch.nn.utils.clip_grad_norm_(params_to_optimize, 20.0);
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:

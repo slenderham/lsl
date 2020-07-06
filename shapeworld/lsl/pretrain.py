@@ -413,7 +413,7 @@ if __name__ == "__main__":
                                     raw_scores=(label_hat == label_np))
 
         avg_prec = average_precision_score(true_ys, scores);
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tAverage Precision{:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tAverage Precision: {:.4f}'.format(
             '({})'.format(split), epoch, accuracy_meter.avg, avg_prec));
 
         return accuracy_meter.avg, accuracy_meter.raw_scores, avg_prec;
@@ -471,8 +471,6 @@ if __name__ == "__main__":
     best_test_same_ap = 0;
     metrics = defaultdict(lambda: [])
 
-    best_val_ap_avg = 0;
-
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
@@ -498,10 +496,8 @@ if __name__ == "__main__":
         n_test = len(all_test_raw_scores)
         test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
 
-        # epoch_acc = (val_acc + val_same_acc) / 2
-        # is_best_epoch = epoch_acc > best_val_acc
-        epoch_ap = (val_avg_prec+val_same_avg_prec)/2
-        is_best_epoch = epoch_ap > best_val_ap_avg;
+        epoch_acc = (val_acc + val_same_acc) / 2
+        is_best_epoch = epoch_acc > best_val_acc
         if is_best_epoch:
             best_epoch = epoch
             best_epoch_acc = epoch_acc
@@ -514,8 +510,6 @@ if __name__ == "__main__":
             best_test_ap = test_avg_prec
             best_val_same_ap = val_same_avg_prec
             best_test_same_ap = test_same_avg_prec
-            
-            best_val_ap_avg = epoch_ap;
 
         if args.save_checkpoint:
             raise NotImplementedError

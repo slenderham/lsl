@@ -475,8 +475,8 @@ if __name__ == "__main__":
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
         train_loss, pos_score, neg_score, acc = train(epoch);
-        # if args.save_feats:
-        #     continue;
+        if args.save_feats:
+            continue;
         train_acc, _, train_avg_prec = test(epoch, 'train')
         val_acc, _, val_avg_prec = test(epoch, 'val')
         # Evaluate tre on validation set

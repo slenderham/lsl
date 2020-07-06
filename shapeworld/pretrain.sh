@@ -8,5 +8,6 @@ python lsl/pretrain.py --cuda \
     --log_interval 10\
     --backbone resnet18\
     --comparison cosine\
-    --data_dir /data/cw9951/hard_sw\
+    --save_feats\
+    --data_dir /data/cw9951/easy_sw\
     exp/contrastive

@@ -6,7 +6,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
 
 import torch
 import torch.nn as nn
@@ -316,6 +316,7 @@ if __name__ == "__main__":
         loss_total = 0
         pos_score_total = 0
         neg_score_total = 0
+        acc_total = 0
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -352,11 +353,12 @@ if __name__ == "__main__":
             # Encode hints, minimize distance between hint and images/examples
             hint_rep = hint_model(hint_seq, hint_length) # N * H
 
-            loss, pos_score, neg_score = criterion(image_projection(examples_rep), hint_projection(hint_rep));
+            loss, pos_score, neg_score, acc = criterion(image_projection(examples_rep), hint_projection(hint_rep));
 
             loss_total += loss.item()
             pos_score_total += pos_score.item();
             neg_score_total += neg_score.item();
+            acc_total += acc.item();
 
             optimizer.zero_grad()
             loss.backward()
@@ -373,7 +375,7 @@ if __name__ == "__main__":
         print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPositive Score {:.4f}\tNegative Score {:.4f}'.format(
             '(train)', epoch, loss_total, pos_score_total, neg_score_total))
 
-        return loss_total
+        return loss_total, pos_score_total, neg_score_total, acc_total
 
     def test(epoch, split='train'):
         image_model.eval()
@@ -381,6 +383,9 @@ if __name__ == "__main__":
 
         accuracy_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
+
+        scores = [];
+        true_ys = [];
 
         with torch.no_grad():
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
@@ -396,6 +401,9 @@ if __name__ == "__main__":
 
                 score = scorer_model.score(examples_rep_mean, image_rep);
 
+                scores.extend(score.flatten().cpu().tolist());
+                true_ys.extend(label_np.tolist());
+
                 label_hat = torch.as_tensor(score > 0, dtype=torch.uint8);
                 label_hat = label_hat.cpu().numpy();
 
@@ -404,16 +412,17 @@ if __name__ == "__main__":
                                     batch_size,
                                     raw_scores=(label_hat == label_np))
 
+        avg_prec = average_precision_score(true_ys, scores);
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, accuracy_meter.avg))
 
-        return accuracy_meter.avg, accuracy_meter.raw_scores
+        return accuracy_meter.avg, accuracy_meter.raw_scores, avg_prec;
 
     def featurize():
         image_model.eval()
         N_FEATS = args.hidden_size
         # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
-        DATA_DIR = '/data/cw9951/hard_sw'
+        DATA_DIR = args.data_dir
 
         with torch.no_grad():
             for split in ("train", "val", "test", "val_same", "test_same"):
@@ -456,23 +465,27 @@ if __name__ == "__main__":
     best_test_acc = 0
     best_test_same_acc = 0
     best_test_acc_ci = 0
+    best_val_ap = 0;
+    best_test_ap = 0;
+    best_val_same_ap = 0;
+    best_test_same_ap = 0;
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
-        train_loss = train(epoch);
+        train_loss, pos_score, neg_score, acc = train(epoch, n_steps=0);
         if args.save_feats:
             continue;
-        train_acc, _ = test(epoch, 'train')
-        val_acc, _ = test(epoch, 'val')
+        train_acc, _, train_avg_prec = test(epoch, 'train')
+        val_acc, _, val_avg_prec = test(epoch, 'val')
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
 
-        test_acc, test_raw_scores = test(epoch, 'test')
+        test_acc, test_raw_scores, test_avg_prec = test(epoch, 'test')
         if has_same:
-            val_same_acc, _ = test(epoch, 'val_same')
-            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
+            val_same_acc, _, val_same_avg_prec = test(epoch, 'val_same')
+            test_same_acc, test_same_raw_scores, test_same_avg_prec = test(epoch, 'test_same')
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
@@ -493,6 +506,10 @@ if __name__ == "__main__":
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
             best_test_acc_ci = test_acc_ci
+            best_val_ap = val_avg_prec
+            best_test_ap = test_avg_prec
+            best_val_same_ap = val_same_avg_prec
+            best_test_same_ap = test_same_avg_prec
 
         if args.save_checkpoint:
             raise NotImplementedError
@@ -503,6 +520,9 @@ if __name__ == "__main__":
         metrics['test_acc'].append(test_acc)
         metrics['test_same_acc'].append(test_same_acc)
         metrics['test_acc_ci'].append(test_acc_ci)
+        metrics['positive_scores'].append(pos_score)
+        metrics['negative_scores'].append(neg_score)
+        metrics['contrastive_train_acc'].append(acc) # how many times is the positive pair's score the greatest among all pairs
 
         metrics = dict(metrics)
         # Assign best accs
@@ -512,6 +532,10 @@ if __name__ == "__main__":
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_same_acc'] = best_test_same_acc
         metrics['best_test_acc_ci'] = best_test_acc_ci
+        metrics['best_val_ap'] = val_avg_prec
+        metrics['best_test_ap'] = test_avg_prec
+        metrics['best_val_same_ap'] = val_same_avg_prec
+        metrics['best_test_same_ap'] = test_same_avg_prec
         metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))

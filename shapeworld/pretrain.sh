@@ -3,17 +3,9 @@
 HYPO_LAMBDA=1
 
 python lsl/pretrain.py --cuda \
-    --batch_size 100 \
+    --batch_size 32 \
     --seed $RANDOM \
     --log_interval 10\
-    --save_feats\
-    --epochs 50\
-    --temperature 0.5\
+    --backbone resnet18\
+    --data_dir /Users/wangchong/Downloads/easy_sw\
     exp/contrastive
-
-python lsl/train.py --cuda \
-    --predict_concept_hyp \
-    --hypo_lambda $HYPO_LAMBDA \
-    --batch_size 100 \
-    --seed $RANDOM \
-    exp/lsl

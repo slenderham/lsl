@@ -89,7 +89,7 @@ if __name__ == "__main__":
                         type=int,
                         default=256,
                         help='Size of hidden representations')
-    parser.add_argument('--epochs', type=int, default=30, help='Train epochs')
+    parser.add_argument('--epochs', type=int, default=50, help='Train epochs')
     parser.add_argument('--debug_example', 
                         action="store_true",
                         help="If true, print out example images and hint");
@@ -101,7 +101,7 @@ if __name__ == "__main__":
                         help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--lr',
                         type=float,
-                        default=0.001,
+                        default=0.0001,
                         help='Learning rate')
     parser.add_argument('--optimizer',
                         choices=['adam', 'rmsprop', 'sgd'],
@@ -474,7 +474,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
-        train_loss, pos_score, neg_score, acc = train(epoch, n_steps=0);
+        train_loss, pos_score, neg_score, acc = train(epoch);
         if args.save_feats:
             continue;
         train_acc, _, train_avg_prec = test(epoch, 'train')

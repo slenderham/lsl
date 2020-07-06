@@ -470,7 +470,10 @@ class ContrastiveLoss(nn.Module):
             assert(loss.shape[0]==im.shape[1] and loss.shape[1]==im.shape[0]);
             loss = loss.mean();
             best_score = torch.argmax(scores, dim=1);
-            acc = torch.as_tensor(best_score==torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]), dtype=torch.float).mean();
+            targets = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
+            if torch.cuda.is_available():
+                targets = targets.cuda();
+            acc = torch.as_tensor(best_score==targets, dtype=torch.float).mean();
             return loss, \
                 torch.mean(positive_scores), \
                 torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \

@@ -7,5 +7,5 @@ python lsl/pretrain.py --cuda \
     --seed $RANDOM \
     --log_interval 10\
     --backbone resnet18\
-    --data_dir /Users/wangchong/Downloads/easy_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/contrastive

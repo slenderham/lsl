@@ -453,7 +453,6 @@ class ContrastiveLoss(nn.Module):
         # im, s \in R^N*H
         scores = self.sim.score_with_example(im, s); #--> N x N x n_ex
         positive_scores = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
-        # diagonal = scores.diag().view(im.size(0), 1)
 
         # mask over negative pairs
         mask = torch.eye(scores.size(0)) > .5;
@@ -467,5 +466,12 @@ class ContrastiveLoss(nn.Module):
             raise NotImplementedError;
         
         elif (self.loss_type=="cpc"):
-            return -torch.diagonal(F.log_softmax(scores, dim=1), dim1=0, dim2=1).mean(), \
-                torch.mean(positive_scores), torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]);
+            loss = -torch.diagonal(F.log_softmax(scores, dim=1), dim1=0, dim2=1); 
+            assert(loss.shape[0]==im.shape[1] and loss.shape[1]==im.shape[0]);
+            loss = loss.mean();
+            best_score = torch.argmax(scores, dim=1);
+            acc = torch.as_tensor(best_score==torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]), dtype=torch.float).mean();
+            return loss, \
+                torch.mean(positive_scores), \
+                torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
+                acc;

@@ -71,7 +71,7 @@ if __name__ == "__main__":
                                 help='Use hypotheses for prediction')
     parser.add_argument('--backbone',
                         choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
-                        default='pretrained',
+                        default='vgg16_fixed',
                         help='Image model')
     parser.add_argument('--multimodal_concept',
                         action='store_true',
@@ -315,7 +315,7 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
-    final_feat_dim = 256 if args.backbone=="pretrained" else 4608
+    final_feat_dim = precomputed_features
 
     if args.backbone == 'vgg16_fixed':
         backbone_model = None
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=256));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

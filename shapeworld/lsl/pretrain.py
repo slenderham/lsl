@@ -284,10 +284,10 @@ if __name__ == "__main__":
     Projection heads
     """
 
-    image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
-    hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
-    params_to_optimize.extend(image_projection.parameters());
-    params_to_optimize.extend(hint_projection.parameters());
+    # image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
+    # hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
+    # params_to_optimize.extend(image_projection.parameters());
+    # params_to_optimize.extend(hint_projection.parameters());
 
     """
     Language Model
@@ -353,7 +353,7 @@ if __name__ == "__main__":
             # Encode hints, minimize distance between hint and images/examples
             hint_rep = hint_model(hint_seq, hint_length) # N * H
 
-            loss, pos_score, neg_score, acc = criterion(image_projection(examples_rep), hint_projection(hint_rep));
+            loss, pos_score, neg_score, acc = criterion(examples_rep, hint_rep);
 
             loss_total += loss.item()
             pos_score_total += pos_score.item();
@@ -366,14 +366,14 @@ if __name__ == "__main__":
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
-                pbar.set_description('Epoch {} Loss: {:.6f} pos-score {:.6f} neg-score {:.6f}'.format(
-                    epoch, loss.item(), pos_score.item(), neg_score.item()))
+                pbar.set_description('Epoch {} Loss: {:.6f} Positive Score: {:.6f} Negative Score: {:.6f} Acc: {:.6f}'.format(
+                    epoch, loss.item(), pos_score.item(), neg_score.item(), acc.item()))
                 pbar.refresh()
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPositive Score {:.4f}\tNegative Score {:.4f}'.format(
-            '(train)', epoch, loss_total, pos_score_total, neg_score_total))
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPositive Score {:.4f}\tNegative Score {:.4f}\tAccuracy: {:.4f}'.format(
+            '(train)', epoch, loss_total, pos_score_total, neg_score_total, acc_total))
 
         return loss_total, pos_score_total, neg_score_total, acc_total
 

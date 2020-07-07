@@ -3,6 +3,6 @@
 python lsl/train.py --cuda \
     --batch_size 100 \
     --seed $RANDOM \
-    --lr 0.01\
-    --optim sgd\
+    --backbone conv4\
+    --tune_backbone\
     exp/meta

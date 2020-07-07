@@ -405,12 +405,13 @@ class CosineScorer(Scorer):
         return scores/self.temperature;
 
     def score_im_im(self, im, input_is_normed=False):
+        raise NotImplementedError;
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
         N, n_ex, hidden_size = im.shape;
         if not input_is_normed:
             im = F.normalize(im, p=2, dim=-1);
         im = im.reshape(N*n_ex, hidden_size);
-        scores = 
+        scores = None; 
         assert(scores.shape[0]==scores.shape[2]==N and scores.shape[1]==scores.shape[3]==n_ex), "The size of scores should be of size Nx(n_ex)xNx(n_ex)";
         return scores/self.temperature;
 

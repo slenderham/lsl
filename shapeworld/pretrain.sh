@@ -3,12 +3,13 @@
 HYPO_LAMBDA=1
 
 python lsl/pretrain.py --cuda \
-    --batch_size 64 \
+    --batch_size 100\
     --seed $RANDOM \
+    --temperature 0.1\
+    --lr 0.001\
     --log_interval 10\
-    --backbone resnet18\
+    --backbone conv4\
     --comparison cosine\
     --save_feats\
-    --data_dir /Users/wangchong/Downloads/hard_sw\
-    --debug_example\
+    --data_dir /data/cw9951/easy_sw\
     exp/contrastive

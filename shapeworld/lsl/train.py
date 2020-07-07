@@ -221,7 +221,7 @@ if __name__ == "__main__":
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     precomputed_features= {
-        "vgg16_fixed": 4608,
+        "vgg16_fixed": 256,
         "pretrained": 256,
     }.get(args.backbone, None);
     preprocess = args.backbone == 'resnet18'

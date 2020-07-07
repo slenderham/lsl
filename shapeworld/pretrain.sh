@@ -9,5 +9,6 @@ python lsl/pretrain.py --cuda \
     --backbone resnet18\
     --comparison cosine\
     --save_feats\
-    --data_dir /data/cw9951/easy_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --debug_example\
     exp/contrastive

@@ -332,9 +332,12 @@ if __name__ == "__main__":
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
                 print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
                 print(examples[rand_idx][0].shape)
-                fig, axes = plt.subplots(4);
+                fig, axes = plt.subplots(5);
                 for i in range(4):
                     axes[i].imshow(examples[rand_idx][i].transpose(0, 2)); # plot examples, transpose to put channel in the last dim
+                    axes[i].axis('off');
+                axes[4].imshow(image[rand_idx].transpose(0, 2));
+                axes[4].axis('off')
                 plt.show();
                 return 0;
             # Load hint

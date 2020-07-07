@@ -221,7 +221,7 @@ if __name__ == "__main__":
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     precomputed_features= {
-        "vgg16_fixed": 4608,
+        "vgg16_fixed": 256,
         "pretrained": 256,
     }.get(args.backbone, None);
     preprocess = args.backbone == 'resnet18'
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim, hidden_size=256));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 

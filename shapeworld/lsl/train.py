@@ -74,7 +74,7 @@ if __name__ == "__main__":
                         default='vgg16_fixed',
                         help='Image model')
     parser.add_argument('--tune_backbone',
-                        action="store_true",
+                        action="store_false",
                         help="Set to false to get random backbone as baseline to pretrained representation")
     parser.add_argument('--multimodal_concept',
                         action='store_true',

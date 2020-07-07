@@ -370,9 +370,10 @@ class Scorer(nn.Module):
 class DotPScorer(Scorer):
     def __init__(self):
         super(DotPScorer, self).__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(1));
 
     def score(self, x, y):
-        return torch.sum(x * y, dim=1)
+        return torch.sum(x * y, dim=1) + self.bias;
 
     def batchwise_score(self, y, x):
         # REVERSED
@@ -409,9 +410,17 @@ class CosineScorer(Scorer):
         N, n_ex, hidden_size = im.shape;
         if not input_is_normed:
             im = F.normalize(im, p=2, dim=-1);
-        im = im.reshape(N*n_ex, hidden_size);
-        scores = 
-        assert(scores.shape[0]==scores.shape[2]==N and scores.shape[1]==scores.shape[3]==n_ex), "The size of scores should be of size Nx(n_ex)xNx(n_ex)";
+        im_flat = im.reshape(N*n_ex, hidden_size);
+        scores = torch.matmul(im_flat, im_flat.t());
+        # positive pairs are diagonal blocks of n_ex
+        assert(scores.shape[0]==scores.shape[1]==N*n_ex), "The size of scores should be of size (N*n_ex)x(N*n_ex)";
+        scores = scores.reshape(N, n_ex, N*n_ex); 
+        """
+            leads to something like a batch of :
+            1 1 1 | 0 0 0 | 0 0 0
+            0 0 0 | 1 1 1 | 0 0 0
+            0 0 0 | 0 0 0 | 1 1 1 
+        """
         return scores/self.temperature;
 
 class BilinearScorer(DotPScorer):
@@ -465,6 +474,8 @@ class ContrastiveLoss(nn.Module):
     def forward(self, im, s):
         # compute image-sentence score matrix
 
+        loss = 0;
+
         if ("im+lang" in self.pairing):
         # im, s \in R^N*H
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
@@ -472,23 +483,24 @@ class ContrastiveLoss(nn.Module):
 
             # mask over negative pairs
             mask = torch.eye(scores.size(0)) > .5;
-            I = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
+            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
             if torch.cuda.is_available():
-                I = I.cuda()
+                mask = mask.cuda()
 
-            negative_scores_im_lang = scores_im_lang.masked_fill(I, 0);
+            negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0);
+
+            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1); 
 
         if ("im+im" in self.parameters):
-            scores_im_im = self.sim.score_im_im(im);
-            
+            scores_im_im = self.sim.score_im_im(im); # --> (N） x n_ex x (N*n_ex)
+            mask = np.kron(np.eye(im.shape[0]), np.ones((im.shape[1], im.shape[1])))
+
+            raise NotImplementedError;
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;
         
         elif (self.loss_type=="cpc"):
-            loss = -torch.diagonal(F.log_softmax(scores, dim=1), dim1=0, dim2=1); 
-            assert(loss.shape[0]==im.shape[1] and loss.shape[1]==im.shape[0]);
-            loss = loss.mean();
             best_score = torch.argmax(scores, dim=1);
             targets = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
             if torch.cuda.is_available():

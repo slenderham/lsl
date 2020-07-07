@@ -53,8 +53,9 @@ class ImageRep(nn.Module):
     Paper uses 512 hidden dimension.
     """
 
-    def __init__(self, backbone=None, final_feat_dim = 4608, hidden_size=512):
+    def __init__(self, backbone=None, final_feat_dim = 4608, hidden_size=512, tune_backbone=True):
         super(ImageRep, self).__init__()
+        self.tune_backbone = tune_backbone;
         if backbone is None:
             self.backbone = Identity()
             self.backbone.final_feat_dim = final_feat_dim
@@ -69,6 +70,8 @@ class ImageRep(nn.Module):
 
     def forward(self, x):
         x_enc = self.backbone(x)
+        if (not self.tune_backbone):
+            x_enc = x_enc.detach();
         return self.model(x_enc)
 
 class MLP(nn.Module):
@@ -390,7 +393,7 @@ class CosineScorer(Scorer):
         else:
             return torch.mm(x, y.t())/self.temperature;
     
-    def score_with_example(self, im, hint, input_is_normed=False):
+    def score_im_s(self, im, hint, input_is_normed=False):
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
         assert(len(hint.shape)==2), "Hint tensor should be of size (N, hidden_size)";
         N, n_ex, hidden_size = im.shape;
@@ -399,6 +402,16 @@ class CosineScorer(Scorer):
             hint = F.normalize(hint, p=2, dim=-1);
         scores = torch.einsum("ijk,lk->ilj", im, hint); 
         assert(scores.shape[0]==scores.shape[1]==N and scores.shape[2]==n_ex), "The size of scores should be of size NxNx(n_ex)";
+        return scores/self.temperature;
+
+    def score_im_im(self, im, input_is_normed=False):
+        assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
+        N, n_ex, hidden_size = im.shape;
+        if not input_is_normed:
+            im = F.normalize(im, p=2, dim=-1);
+        im = im.reshape(N*n_ex, hidden_size);
+        scores = 
+        assert(scores.shape[0]==scores.shape[2]==N and scores.shape[1]==scores.shape[3]==n_ex), "The size of scores should be of size Nx(n_ex)xNx(n_ex)";
         return scores/self.temperature;
 
 class BilinearScorer(DotPScorer):
@@ -440,27 +453,34 @@ class ContrastiveLoss(nn.Module):
     Compute contrastive loss
     """
 
-    def __init__(self, margin=0, temperature=0.1, max_violation=False, loss_type="cpc"):
+    def __init__(self, margin=0, temperature=0.1, max_violation=False, loss_type="cpc", pairing="im+lang&im+im"):
         super(ContrastiveLoss, self).__init__()
         assert(loss_type in ["cpc", "margin"]), "please select cpc (logit) or margin loss"
         self.loss_type = loss_type;
         self.margin = margin
         self.sim = CosineScorer(temperature);
         self.max_violation = max_violation
+        self.pairing = pairing
 
     def forward(self, im, s):
         # compute image-sentence score matrix
+
+        if ("im+lang" in self.pairing):
         # im, s \in R^N*H
-        scores = self.sim.score_with_example(im, s); #--> N x N x n_ex
-        positive_scores = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
+            scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
+            positive_scores_im_lang = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
 
-        # mask over negative pairs
-        mask = torch.eye(scores.size(0)) > .5;
-        I = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
-        if torch.cuda.is_available():
-            I = I.cuda()
+            # mask over negative pairs
+            mask = torch.eye(scores.size(0)) > .5;
+            I = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
+            if torch.cuda.is_available():
+                I = I.cuda()
 
-        negative_scores = scores.masked_fill(I, 0);
+            negative_scores_im_lang = scores_im_lang.masked_fill(I, 0);
+
+        if ("im+im" in self.parameters):
+            scores_im_im = self.sim.score_im_im(im);
+            
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;

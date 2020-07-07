@@ -38,6 +38,13 @@ if __name__ == "__main__":
                         choices=['cpc', 'margin'],
                         default='cpc',
                         help='Form of loss function')
+    parser.add_argument('--pairing',
+                        choices=["im+lang", "im+im", "im+lang&im+im"],
+                        default="im+lang",
+                        help="Positive pairs between hint and image, between images of the same concept, or both")
+    parser.add_argument('--augment_im',
+                        choices=['none'], #TODO: what augmentations should be here?
+                        default='none')
     parser.add_argument('--comparison',
                         choices=['dotp', 'bilinear', 'cosine'],
                         default='dotp',
@@ -260,7 +267,7 @@ if __name__ == "__main__":
     Loss
     """
     
-    criterion = ContrastiveLoss(loss_type=args.loss_type, temperature=args.temperature);
+    criterion = ContrastiveLoss(loss_type=args.loss_type, temperature=args.temperature, pairing=args.pairing);
 
     """
     Scorer Model

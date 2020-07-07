@@ -21,7 +21,7 @@ from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity
 from models import MultimodalRep
-from models import DotPScorer, BilinearScorer, CosineScorer
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP
 from vision import Conv4NP, ResNet18, Conv4NP
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 
@@ -73,11 +73,14 @@ if __name__ == "__main__":
                         choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
                         default='vgg16_fixed',
                         help='Image model')
+    parser.add_argument('--tune_backbone',
+                        action="store_true",
+                        help="Set to false to get random backbone as baseline to pretrained representation")
     parser.add_argument('--multimodal_concept',
                         action='store_true',
                         help='Concept is a combination of hypothesis + image rep')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'bilinear', 'cosine'],
+                        choices=['dotp', 'bilinear', 'cosine', 'mlp'],
                         default='cosine',
                         help='How to compare support to query reps')
     parser.add_argument('--dropout',
@@ -328,7 +331,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim, hidden_size=256));
+    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim, hidden_size=256, tune_backbone=args.tune_backbone));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -341,6 +344,8 @@ if __name__ == "__main__":
                                       identity_debug=args.debug_bilinear)
     elif args.comparison == 'cosine':
         scorer_model = CosineScorer(temperature=1.0);
+    elif args.comparison == 'mlp':
+        scorer_model = MLP(input_size=256*2, hidden_size=512, output_size=1);
     else:
         raise NotImplementedError
     scorer_model = scorer_model.to(device)

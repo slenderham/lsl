@@ -73,6 +73,10 @@ if __name__ == "__main__":
                         choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
                         default='vgg16_fixed',
                         help='Image model')
+    parser.add_argument('--hidden_size',
+                        type=int,
+                        default=256,
+                        help='Size of hidden representations')
     parser.add_argument('--tune_backbone',
                         action="store_false",
                         help="Set to false to get random backbone as baseline to pretrained representation")

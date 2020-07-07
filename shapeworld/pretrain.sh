@@ -10,5 +10,5 @@ python lsl/pretrain.py --cuda \
     --log_interval 10\
     --backbone conv4\
     --comparison cosine\
-    --data_dir /data/cw9951/easy_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/contrastive

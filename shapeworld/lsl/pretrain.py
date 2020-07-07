@@ -451,6 +451,7 @@ if __name__ == "__main__":
                     n_batch = batch.shape[0]
                     batch = torch.from_numpy(batch).float().to(device);
                     feats = image_model(batch).cpu().numpy();
+                    feats = F.normalize(feats, dim=-1);
                     ex_feats[i:i+args.batch_size, ...] = feats
                 np.savez("{}/shapeworld/{}/examples.feats.npz".format(DATA_DIR, split), ex_feats);
 
@@ -465,6 +466,7 @@ if __name__ == "__main__":
                     batch = torch.from_numpy(batch).float().to(device)
                     feats = image_model(batch).cpu().numpy()
                     feats = feats.reshape((-1, N_FEATS))
+                    feats = F.normalize(feats, dim=-1);
                     inp_feats[i:i+args.batch_size, :] = feats
                 np.savez("{}/shapeworld/{}/inputs.feats.npz".format(DATA_DIR, split), inp_feats)
 
@@ -485,8 +487,6 @@ if __name__ == "__main__":
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
         train_loss, pos_score, neg_score, acc = train(epoch);
-        if args.save_feats:
-            continue;
         train_acc, _, train_avg_prec = test(epoch, 'train')
         val_acc, _, val_avg_prec = test(epoch, 'val')
         # Evaluate tre on validation set

@@ -81,7 +81,7 @@ if __name__ == "__main__":
                         help='Concept is a combination of hypothesis + image rep')
     parser.add_argument('--comparison',
                         choices=['dotp', 'bilinear', 'cosine', 'mlp'],
-                        default='cosine',
+                        default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--dropout',
                         default=0.0,

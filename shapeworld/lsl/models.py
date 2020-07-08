@@ -521,6 +521,6 @@ class ContrastiveLoss(nn.Module):
                 targets_im_im = targets_im_im.cuda();
             acc = torch.as_tensor(best_score==targets, dtype=torch.float).mean();
             return loss, \
-                torch.mean(positive_scores), \
-                torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
+                torch.mean(positive_scores_im_lang), \
+                torch.sum(negative_scores_im_lang)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
                 acc;

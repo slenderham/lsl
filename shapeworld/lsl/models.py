@@ -480,19 +480,19 @@ class ContrastiveLoss(nn.Module):
         if ("im+lang" in self.pairing):
         # im, s \in R^N*H
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            positive_scores_im_lang = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
+            positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
 
             # mask over negative pairs
-            mask = torch.eye(scores.size(0)) > .5;
-            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
+            mask = torch.eye(scores_im_lang.size(0)) > .5;
+            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores_im_lang);
             if torch.cuda.is_available():
                 mask = mask.cuda()
 
             negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0);
 
-            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1); 
+            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean(); 
 
-        if ("im+im" in self.parameters):
+        if ("im+im" in self.pairing):
             scores_im_im = self.sim.score_im_im(im); # --> (N） x n_ex x (N*n_ex)
             mask = np.kron(np.eye(im.shape[0]), np.ones((im.shape[1], im.shape[1])))
 
@@ -502,12 +502,12 @@ class ContrastiveLoss(nn.Module):
             raise NotImplementedError;
         
         elif (self.loss_type=="cpc"):
-            best_score = torch.argmax(scores, dim=1);
+            best_score = torch.argmax(scores_im_lang, dim=1);
             targets = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
             if torch.cuda.is_available():
                 targets = targets.cuda();
             acc = torch.as_tensor(best_score==targets, dtype=torch.float).mean();
             return loss, \
-                torch.mean(positive_scores), \
-                torch.sum(negative_scores)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
+                torch.mean(positive_scores_im_lang), \
+                torch.sum(negative_scores_im_lang)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
                 acc;

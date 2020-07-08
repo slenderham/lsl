@@ -100,9 +100,9 @@ if __name__ == "__main__":
     parser.add_argument('--debug_example', 
                         action="store_true",
                         help="If true, print out example images and hint");
-    parser.add_argument('--save_feats',
+    parser.add_argument('--skip_eval',
                         action="store_true",
-                        help="If true, store precomputed features. Otherwise, directly evaluate using chosen metric.")
+                        help="If true, skip the zero shot evaluation and only save the pretrained features.")
     parser.add_argument('--data_dir',
                         default=None,
                         help='Specify custom data directory (must have shapeworld folder)')
@@ -487,6 +487,8 @@ if __name__ == "__main__":
     total_epoch = 1 if args.debug_example else args.epochs;
     for epoch in range(1, total_epoch + 1):
         train_loss, pos_score, neg_score, acc = train(epoch);
+        if (args.skip_eval):
+            continue;
         train_acc, _, train_avg_prec = test(epoch, 'train')
         val_acc, _, val_avg_prec = test(epoch, 'val')
         # Evaluate tre on validation set
@@ -550,8 +552,7 @@ if __name__ == "__main__":
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
 
-    if (args.save_feats):
-        featurize();
+    featurize();
     else:
         print('====> DONE')
         print('====> BEST EPOCH: {}'.format(best_epoch))

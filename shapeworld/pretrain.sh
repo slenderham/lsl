@@ -3,14 +3,13 @@
 HYPO_LAMBDA=1
 
 python lsl/pretrain.py --cuda \
-    --batch_size 100\
+    --batch_size 32\
     --seed $RANDOM \
     --temperature 0.1\
     --lr 0.001\
-    --save_feats\
     --log_interval 10\
     --backbone conv4\
     --comparison cosine\
-    --data_dir /data/cw9951/hard_sw\
-    --pairing im+lang&im+im\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --pairing im+lang_im+im\
     exp/contrastive

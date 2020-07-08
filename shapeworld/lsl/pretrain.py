@@ -39,7 +39,7 @@ if __name__ == "__main__":
                         default='cpc',
                         help='Form of loss function')
     parser.add_argument('--pairing',
-                        choices=["im+lang", "im+im", "im+lang&im+im"],
+                        choices=["im+lang", "im+im", "im+lang_im+im"],
                         default="im+lang",
                         help="Positive pairs between hint and image, between images of the same concept, or both")
     parser.add_argument('--augment_im',
@@ -553,7 +553,7 @@ if __name__ == "__main__":
                                os.path.join(args.exp_dir, 'metrics.json'))
 
     featurize();
-    else:
+    if (not args.skip_eval):
         print('====> DONE')
         print('====> BEST EPOCH: {}'.format(best_epoch))
         print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(

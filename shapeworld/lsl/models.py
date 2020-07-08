@@ -482,7 +482,7 @@ class ContrastiveLoss(nn.Module):
         if ("im+lang" in self.pairing):
         # im, s \in R^N*H
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
+            positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1).mean(); # --> N X n_ex, positive pairs on the diagonal, for all examples
 
             # mask over negative pairs
             mask = torch.eye(scores_im_lang.size(0)) > .5;
@@ -490,7 +490,8 @@ class ContrastiveLoss(nn.Module):
             if torch.cuda.is_available():
                 mask = mask.cuda()
 
-            negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0);
+            negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0).sum()/(im.shape[0]*(im.shape[0]-1)*im.shape[1]);
+            
 
             loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
 
@@ -501,12 +502,12 @@ class ContrastiveLoss(nn.Module):
             if torch.cuda.is_available():
                 mask = mask.cuda();
             
-            positive_scores_im_im = scores_im_im.masked_fill(mask, 0);
-            negative_scores_im_im = scores_im_im.masked_fill(~mask, 0);
+            positive_scores_im_im = scores_im_im.masked_fill(mask, 0).sum()/(im.shape[0]*im.shape[1]**2);
+            negative_scores_im_im = scores_im_im.masked_fill(~mask, 0).sum()/(im.shape[1]**2*im.shape[0]*(im.shape[0]-1));
 
             normed_scores_im_im = F.log_softmax(scores_im_im, dim=0);
 
-            loss += -torch.masked_select(normed_scores_im_im, positive_scores_im_lang).mean();
+            loss += -torch.masked_select(normed_scores_im_im, mask).mean();
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;
@@ -516,11 +517,14 @@ class ContrastiveLoss(nn.Module):
             best_score_im_im = torch.argmax(scores_im_im, dim=0);
             targets_im_lang = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
             targets_im_im = torch.repeat_interleave(torch.arange(im.shape[0]), im.shape[1]).unsqueeze(0).expand(im.shape[1], im.shape[0]*im.shape[1]);
+            
             if torch.cuda.is_available():
                 targets_im_lang = targets_im_lang.cuda();
                 targets_im_im = targets_im_im.cuda();
-            acc = torch.as_tensor(best_score==targets, dtype=torch.float).mean();
+            acc_im_lang = torch.as_tensor(best_score_im_lang==targets_im_lang, dtype=torch.float).mean();
+            acc_im_im = torch.as_tensor(best_score_im_im==targets_im_im, dtype=torch.float).mean();
+            
             return loss, \
-                torch.mean(positive_scores_im_lang), \
-                torch.sum(negative_scores_im_lang)/(im.shape[0]*(im.shape[0]-1)*im.shape[1]), \
-                acc;
+                (positive_scores_im_lang+positive_scores_im_im)/2, \
+                (negative_scores_im_lang+negative_scores_im_im)/2, \
+                (acc_im_lang+acc_im_im)/2;

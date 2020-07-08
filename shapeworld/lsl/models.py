@@ -403,6 +403,7 @@ class CosineScorer(Scorer):
             hint = F.normalize(hint, p=2, dim=-1);
         scores = torch.einsum("ijk,lk->ilj", im, hint); 
         assert(scores.shape[0]==scores.shape[1]==N and scores.shape[2]==n_ex), "The size of scores should be of size NxNx(n_ex)";
+        assert(torch.all(torch.eq(scores, torch.transpose(scores, dim0=0, dim1=1)))), "The score matrix should be symmetric on each NxN plane";
         return scores/self.temperature;
 
     def score_im_im(self, im, input_is_normed=False):
@@ -415,6 +416,7 @@ class CosineScorer(Scorer):
         scores = torch.matmul(im_flat, im_flat.t());
         # positive pairs are diagonal blocks of n_ex
         assert(scores.shape[0]==scores.shape[1]==N*n_ex), "The size of scores should be of size (N*n_ex)x(N*n_ex)";
+        assert(torch.all(torch.eq(scores, scores.t()))), "The score matrix should be symmetric";
         scores = scores.reshape(N, n_ex, N*n_ex); 
         """
             leads to something like a batch of :
@@ -480,32 +482,43 @@ class ContrastiveLoss(nn.Module):
         if ("im+lang" in self.pairing):
         # im, s \in R^N*H
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            positive_scores_im_lang = torch.diagonal(scores, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
+            positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1); # --> N X n_ex, positive pairs on the diagonal, for all examples
 
             # mask over negative pairs
-            mask = torch.eye(scores.size(0)) > .5;
-            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores);
+            mask = torch.eye(scores_im_lang.size(0)) > .5;
+            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores_im_lang);
             if torch.cuda.is_available():
                 mask = mask.cuda()
 
             negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0);
 
-            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1); 
+            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
 
-        if ("im+im" in self.parameters):
+        if ("im+im" in self.pairing):
             scores_im_im = self.sim.score_im_im(im); # --> (N） x n_ex x (N*n_ex)
             mask = np.kron(np.eye(im.shape[0]), np.ones((im.shape[1], im.shape[1])))
+            mask = torch.as_tensor(mask > .5).reshape(im.shape[0], im.shape[1], im.shape[0]*im.shape[1])
+            if torch.cuda.is_available():
+                mask = mask.cuda();
+            
+            positive_scores_im_im = scores_im_im.masked_fill(mask, 0);
+            negative_scores_im_im = scores_im_im.masked_fill(~mask, 0);
 
-            raise NotImplementedError;
+            normed_scores_im_im = F.log_softmax(scores_im_im, dim=0);
+
+            loss += -torch.masked_select(normed_scores_im_im, positive_scores_im_lang).mean();
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;
         
         elif (self.loss_type=="cpc"):
-            best_score = torch.argmax(scores, dim=1);
-            targets = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
+            best_score_im_lang = torch.argmax(scores_im_lang, dim=0);
+            best_score_im_im = torch.argmax(scores_im_im, dim=0);
+            targets_im_lang = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
+            targets_im_im = torch.repeat_interleave(torch.arange(im.shape[0]), im.shape[1]).unsqueeze(0).expand(im.shape[1], im.shape[0]*im.shape[1]);
             if torch.cuda.is_available():
-                targets = targets.cuda();
+                targets_im_lang = targets_im_lang.cuda();
+                targets_im_im = targets_im_im.cuda();
             acc = torch.as_tensor(best_score==targets, dtype=torch.float).mean();
             return loss, \
                 torch.mean(positive_scores), \

@@ -1,7 +1,5 @@
 #!/bin/bash
 
-HYPO_LAMBDA=1
-
 python lsl/pretrain.py --cuda \
     --batch_size 100\
     --seed $RANDOM \

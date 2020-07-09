@@ -10,6 +10,6 @@ python lsl/pretrain.py --cuda \
     --log_interval 10\
     --backbone conv4\
     --comparison cosine\
-    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --data_dir /data/cw9951/hard_sw\
     --pairing im+lang_im+im\
     exp/contrastive

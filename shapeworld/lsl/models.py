@@ -406,7 +406,6 @@ class CosineScorer(Scorer):
         return scores/self.temperature;
 
     def score_im_im(self, im, input_is_normed=False):
-        raise NotImplementedError;
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
         N, n_ex, hidden_size = im.shape;
         if not input_is_normed:
@@ -416,13 +415,6 @@ class CosineScorer(Scorer):
         # positive pairs are diagonal blocks of n_ex
         assert(scores.shape[0]==scores.shape[1]==N*n_ex), "The size of scores should be of size (N*n_ex)x(N*n_ex)";
         assert(torch.all(torch.eq(scores, scores.t()))), "The score matrix should be symmetric";
-        scores = scores.reshape(N, n_ex, N*n_ex); 
-        """
-            leads to something like a batch of :
-            1 1 1 | 0 0 0 | 0 0 0
-            0 0 0 | 1 1 1 | 0 0 0
-            0 0 0 | 0 0 0 | 1 1 1 
-        """
         return scores/self.temperature;
 
 class BilinearScorer(DotPScorer):
@@ -477,6 +469,8 @@ class ContrastiveLoss(nn.Module):
         # compute image-sentence score matrix
 
         loss = 0;
+        N = im.shape[0];
+        n_ex = im.shape[1];
 
         if ("im+lang" in self.pairing):
         # im, s \in R^N*H
@@ -489,25 +483,35 @@ class ContrastiveLoss(nn.Module):
             if torch.cuda.is_available():
                 mask = mask.cuda()
 
-            negative_scores_im_lang = scores_im_lang.masked_fill(mask, 0).sum()/(im.shape[0]*(im.shape[0]-1)*im.shape[1]);
+            negative_scores_im_lang = scores_im_lang.masked_select(~mask).mean();
             
-
-            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean() # normalize by hint dimension (push away negative hints from image)
-                    -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); # normalize by image dimension (push away negative images from hint)
+            # normalize by hint dimension (push away negative hints from image) and normalize by image dimension (push away negative images from hint)
+            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean() \
+                    -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
+            # each is sum over N*n_ex terms
 
         if ("im+im" in self.pairing):
-            scores_im_im = self.sim.score_im_im(im); # --> (N） x n_ex x (N*n_ex)
-            mask = np.kron(np.eye(im.shape[0]), np.ones((im.shape[1], im.shape[1])))
-            mask = torch.as_tensor(mask > .5).reshape(im.shape[0], im.shape[1], im.shape[0]*im.shape[1])
+            scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
+            mask = np.kron(np.eye(N), np.ones((n_ex, n_ex))) #--> block diagonal of ones
+            # remove the diagonal
+            pos_mask = torch.as_tensor(mask-np.eye(N*n_ex) > .5);
+            neg_mask = torch.as_tensor(mask < .5);
             if torch.cuda.is_available():
-                mask = mask.cuda();
+                pos_mask = pos_mask.cuda();
+                neg_mask = neg_mask.cuda();
             
-            positive_scores_im_im = scores_im_im.masked_fill(mask, 0).sum()/(im.shape[0]*im.shape[1]**2);
-            negative_scores_im_im = scores_im_im.masked_fill(~mask, 0).sum()/(im.shape[1]**2*im.shape[0]*(im.shape[0]-1));
+            positive_scores_im_im = scores_im_im.masked_select(pos_mask); 
+            assert(positive_scores_im_im.shape[0]==N*n_ex*(n_ex-1));
+            negative_scores_im_im = scores_im_im.masked_select(neg_mask);
+            assert(negative_scores_im_im.shape[0]==(N-1)*N*n_ex**2);
 
-            normed_scores_im_im = F.log_softmax(scores_im_im, dim=0);
+            normed_scores_im_im = positive_scores_im_im.mean() \
+                 - (n_ex-1)*torch.logsumexp(negative_scores_im_im.reshape(N*n_ex, (N-1)*n_ex), dim=1).mean();
 
-            loss += -torch.masked_select(normed_scores_im_im, mask).mean()*im.shape[1];
+            positive_scores_im_im = positive_scores_im_im.mean();
+            negative_scores_im_im = negative_scores_im_im.mean();
+
+            loss += -normed_scores_im_im;
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;
@@ -516,8 +520,8 @@ class ContrastiveLoss(nn.Module):
             best_score_im_lang_by_img = torch.argmax(scores_im_lang, dim=0);
             best_score_im_lang_by_lang = torch.argmax(scores_im_lang, dim=1);
             best_score_im_im = torch.argmax(scores_im_im, dim=0);
-            targets_im_lang = torch.arange(im.shape[0]).unsqueeze(-1).expand(im.shape[0], im.shape[1]);
-            targets_im_im = torch.repeat_interleave(torch.arange(im.shape[0]), im.shape[1]).unsqueeze(0).expand(im.shape[1], im.shape[0]*im.shape[1]);
+            targets_im_lang = torch.arange(N).unsqueeze(-1).expand(N, n_ex);
+            targets_im_im = torch.repeat_interleave(torch.arange(N), n_ex).unsqueeze(0).expand(n_ex, N*n_ex);
             
             if torch.cuda.is_available():
                 targets_im_lang = targets_im_lang.cuda();

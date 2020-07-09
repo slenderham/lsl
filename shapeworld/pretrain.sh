@@ -1,7 +1,5 @@
 #!/bin/bash
 
-HYPO_LAMBDA=1
-
 python lsl/pretrain.py --cuda \
     --batch_size 100\
     --seed $RANDOM \
@@ -10,6 +8,6 @@ python lsl/pretrain.py --cuda \
     --log_interval 10\
     --backbone conv4\
     --comparison cosine\
-    --data_dir /data/cw9951/easy_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     --pairing im+im\
     exp/contrastive

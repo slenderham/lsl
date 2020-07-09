@@ -4,6 +4,7 @@ python lsl/train.py --cuda \
     --batch_size 100 \
     --seed $RANDOM \
     --comparison bilinear\
-    --data_dir /Users/wangchong/Downloads/easy_sw\
+    --lr 0.0001\
+    --data_dir /data/cw9951/easy_sw\
     --backbone pretrained\
     exp/meta

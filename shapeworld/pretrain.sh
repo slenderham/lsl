@@ -11,5 +11,6 @@ python lsl/pretrain.py --cuda \
     --backbone conv4\
     --comparison cosine\
     --data_dir /data/cw9951/easy_sw\
+    --skip_eval\
     --pairing im+im\
     exp/contrastive

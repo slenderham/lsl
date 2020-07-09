@@ -378,7 +378,7 @@ class DotPScorer(Scorer):
     def batchwise_score(self, y, x):
         # REVERSED
         bw_scores = torch.einsum('ijk,ik->ij', (x, y))
-        return torch.sum(bw_scores, dim=1)
+        return torch.sum(bw_scores, dim=1) + self.bias
 
 class CosineScorer(Scorer):
     def __init__(self, temperature):
@@ -421,6 +421,7 @@ class BilinearScorer(DotPScorer):
     def __init__(self, hidden_size, dropout=0.0, identity_debug=False):
         super(BilinearScorer, self).__init__()
         self.bilinear = nn.Linear(hidden_size, hidden_size, bias=False)
+        torch.nn.init.eye_(self.bilinear.weight);
         self.dropout_p = dropout
         if self.dropout_p > 0.0:
             self.dropout = nn.Dropout(p=self.dropout_p)
@@ -473,7 +474,6 @@ class ContrastiveLoss(nn.Module):
         n_ex = im.shape[1];
 
         if ("im+lang" in self.pairing):
-        # im, s \in R^N*H
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
             positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1).mean(); # --> N X n_ex, positive pairs on the diagonal, for all examples
 
@@ -489,6 +489,16 @@ class ContrastiveLoss(nn.Module):
             loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean() \
                     -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
             # each is sum over N*n_ex terms
+
+            best_score_im_lang_by_img = torch.argmax(scores_im_lang, dim=0);
+            best_score_im_lang_by_lang = torch.argmax(scores_im_lang, dim=1);
+
+            targets_im_lang = torch.arange(N).unsqueeze(-1).expand(N, n_ex);
+            if torch.cuda.is_available():
+                targets_im_lang = targets_im_lang.cuda();
+
+            acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float)\
+                        +0.5*torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float)).mean();
 
         if ("im+im" in self.pairing):
             scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
@@ -516,21 +526,24 @@ class ContrastiveLoss(nn.Module):
 
             loss += -normed_scores_im_im;
 
+            best_score_im_im = torch.argmax(all_scores_im_im, dim=1);
+
+            acc_im_im = torch.as_tensor(best_score_im_im==0, dtype=torch.float).mean();
+
         if (self.loss_type=="margin"):
             raise NotImplementedError;
         
-        elif (self.loss_type=="cpc"):
-            best_score_im_lang_by_img = torch.argmax(scores_im_lang, dim=0);
-            best_score_im_lang_by_lang = torch.argmax(scores_im_lang, dim=1);
-            best_score_im_im = torch.argmax(all_scores_im_im, dim=0);
-            targets_im_lang = torch.arange(N).unsqueeze(-1).expand(N, n_ex);
-            if torch.cuda.is_available():
-                targets_im_lang = targets_im_lang.cuda();
-            
-            acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float)\
-                          +0.5*torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float)).mean();
-            acc_im_im = torch.as_tensor(best_score_im_im==0, dtype=torch.float).mean();
-            
+        if (self.pairing=="im+im"):
+            return loss, \
+                positive_scores_im_im, \
+                negative_scores_im_im, \
+                acc_im_im;
+        elif (self.pairing=="im+lang"):
+            return loss, \
+                positive_scores_im_lang, \
+                negative_scores_im_lang, \
+                acc_im_lang;
+        else:
             return loss, \
                 (positive_scores_im_lang+positive_scores_im_im)/2, \
                 (negative_scores_im_lang+negative_scores_im_im)/2, \

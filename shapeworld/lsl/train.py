@@ -71,7 +71,7 @@ if __name__ == "__main__":
                                 help='Use hypotheses for prediction')
     parser.add_argument('--backbone',
                         choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
-                        default='vgg16_fixed',
+                        default='pretrained',
                         help='Image model')
     parser.add_argument('--hidden_size',
                         type=int,
@@ -228,7 +228,7 @@ if __name__ == "__main__":
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     precomputed_features= {
-        "vgg16_fixed": 256,
+        "vgg16_fixed": 4608,
         "pretrained": 256,
     }.get(args.backbone, None);
     preprocess = args.backbone == 'resnet18'
@@ -322,6 +322,7 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
+    # dimension of the features
     final_feat_dim = precomputed_features
 
     if args.backbone == 'vgg16_fixed':
@@ -335,7 +336,10 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, final_feat_dim=final_feat_dim, hidden_size=256, tune_backbone=args.tune_backbone));
+    image_model = ExWrapper(ImageRep(backbone_model, \
+                                     final_feat_dim=final_feat_dim, \
+                                     hidden_size=None if args.backbone=="pretrained" else args.hidden_size, \
+                                     tune_backbone=args.tune_backbone));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -343,20 +347,20 @@ if __name__ == "__main__":
         scorer_model = DotPScorer()
     elif args.comparison == 'bilinear':
         # FIXME: This won't work with --poe
-        scorer_model = BilinearScorer(512,
+        scorer_model = BilinearScorer(precomputed_features if args.backbone=="pretrained" else args.hidden_size,
                                       dropout=args.dropout,
                                       identity_debug=args.debug_bilinear)
     elif args.comparison == 'cosine':
         scorer_model = CosineScorer(temperature=1.0);
     elif args.comparison == 'mlp':
-        scorer_model = MLP(input_size=256*2, hidden_size=512, output_size=1);
+        scorer_model = MLP(input_size=args.hidden_size*2, hidden_size=args.hidden_size*2, output_size=1);
     else:
         raise NotImplementedError
     scorer_model = scorer_model.to(device)
     params_to_optimize.extend(scorer_model.parameters())
 
     if args.use_hyp:
-        embedding_model = nn.Embedding(train_vocab_size, 512)
+        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
 
     if args.decode_hyp:
         proposal_model = TextProposal(embedding_model)

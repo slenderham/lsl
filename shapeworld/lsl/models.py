@@ -485,9 +485,14 @@ class ContrastiveLoss(nn.Module):
 
             negative_scores_im_lang = scores_im_lang.masked_select(~mask).mean();
             
-            # normalize by hint dimension (push away negative hints from image) and normalize by image dimension (push away negative images from hint)
-            loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean() \
-                    -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
+            # normalize by hint dimension (push away negative hints from image) and/or normalize by image dimension (push away negative images from hint)
+            if ("_by_lang" in self.pairing):
+                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean();
+            elif ("_by_im" in self.pairing):
+                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
+            elif ("_by_both" in self.pairing):
+                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean()\
+                        -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean();
             # each is sum over N*n_ex terms
 
             best_score_im_lang_by_img = torch.argmax(scores_im_lang, dim=0);
@@ -497,7 +502,12 @@ class ContrastiveLoss(nn.Module):
             if torch.cuda.is_available():
                 targets_im_lang = targets_im_lang.cuda();
 
-            acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float)\
+            if ("_by_lang" in self.pairing):
+                acc_im_lang = torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float).mean();
+            elif ("_by_im" in self.pairing):
+                acc_im_lang = torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float).mean();
+            elif ("_by_both" in self.pairing):
+                acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float)\
                         +0.5*torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float)).mean();
 
         if ("im+im" in self.pairing):
@@ -533,16 +543,16 @@ class ContrastiveLoss(nn.Module):
         if (self.loss_type=="margin"):
             raise NotImplementedError;
         
-        if (self.pairing=="im+im"):
-            return loss, \
-                positive_scores_im_im, \
-                negative_scores_im_im, \
-                acc_im_im;
-        elif (self.pairing=="im+lang"):
+        if (self.pairing=="im+lang_by_lang" or self.pairing=="im+lang_by_im" or self.pairing=="im+lang_by_both"):
             return loss, \
                 positive_scores_im_lang, \
                 negative_scores_im_lang, \
                 acc_im_lang;
+        elif (self.pairing=="im+im"):
+            return loss, \
+                positive_scores_im_im, \
+                negative_scores_im_im, \
+                acc_im_im;
         else:
             return loss, \
                 (positive_scores_im_lang+positive_scores_im_im)/2, \

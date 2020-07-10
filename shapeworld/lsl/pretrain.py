@@ -39,9 +39,10 @@ if __name__ == "__main__":
                         default='cpc',
                         help='Form of loss function')
     parser.add_argument('--pairing',
-                        choices=["im+lang", "im+im", "im+lang_im+im"],
+                        choices=["im+lang_by_im", "im+lang_by_lang", "im+lang_by_both", "im+im", "im+lang_im+im"],
                         default="im+lang",
-                        help="Positive pairs between hint and image, between images of the same concept, or both")
+                        help="Positive pairs between hint and image (sample negative from one or sum of both), \
+                                between images of the same concept, or both")
     parser.add_argument('--augment_im',
                         choices=['none'], #TODO: what augmentations should be here?
                         default='none')

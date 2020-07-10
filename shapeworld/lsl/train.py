@@ -338,7 +338,7 @@ if __name__ == "__main__":
 
     image_model = ExWrapper(ImageRep(backbone_model, \
                                      final_feat_dim=final_feat_dim, \
-                                     hidden_size=None if args.backbone=="pretrained" else args.hidden_size, \
+                                     hidden_size=args.hidden_size, \
                                      tune_backbone=args.tune_backbone));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
@@ -347,7 +347,7 @@ if __name__ == "__main__":
         scorer_model = DotPScorer()
     elif args.comparison == 'bilinear':
         # FIXME: This won't work with --poe
-        scorer_model = BilinearScorer(precomputed_features if args.backbone=="pretrained" else args.hidden_size,
+        scorer_model = BilinearScorer(args.hidden_size,
                                       dropout=args.dropout,
                                       identity_debug=args.debug_bilinear)
     elif args.comparison == 'cosine':

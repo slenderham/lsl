@@ -53,9 +53,11 @@ class ImageRep(nn.Module):
     Paper uses 512 hidden dimension.
     """
 
-    def __init__(self, backbone=None, final_feat_dim = 4608, hidden_size=512, tune_backbone=True):
+    def __init__(self, backbone=None, final_feat_dim = 4608, hidden_size=512, tune_backbone=True, normalize_feats=False):
         super(ImageRep, self).__init__()
         self.tune_backbone = tune_backbone;
+        self.normalize_feats = normalize_feats;
+        assert((not self.normalize_feats) or (self.normalize_feats and backbone is None)), "only normalize features if backbone is None";
         if backbone is None:
             self.backbone = Identity()
             self.backbone.final_feat_dim = final_feat_dim
@@ -70,6 +72,8 @@ class ImageRep(nn.Module):
 
     def forward(self, x):
         x_enc = self.backbone(x)
+        if (self.normalize_feats):
+            x_enc = F.normalize(x_enc, dim=-1);
         if (not self.tune_backbone):
             x_enc = x_enc.detach();
         return self.model(x_enc)

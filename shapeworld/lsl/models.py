@@ -378,7 +378,7 @@ class DotPScorer(Scorer):
     def batchwise_score(self, y, x):
         # REVERSED
         bw_scores = torch.einsum('ijk,ik->ij', (x, y))
-        return torch.sum(bw_scores, dim=1) + self.bias
+        return torch.sum(bw_scores, dim=1) + self.bias;
 
 class CosineScorer(Scorer):
     def __init__(self, temperature):

@@ -73,6 +73,13 @@ if __name__ == "__main__":
                         choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
                         default='pretrained',
                         help='Image model')
+    parser.add_argument('--normalize_feats',
+                        action="store_true",
+                        help="l2 normalize the features before downstream")
+    parser.add_argument('--mlp_on_feats',
+                        action="store_true",
+                        help="If true, add MLP on top of feature for fine tuning.\
+                             Otherwise use saved features for scores directly.")
     parser.add_argument('--hidden_size',
                         type=int,
                         default=256,
@@ -338,8 +345,9 @@ if __name__ == "__main__":
 
     image_model = ExWrapper(ImageRep(backbone_model, \
                                      final_feat_dim=final_feat_dim, \
-                                     hidden_size=None if args.backbone=="pretrained" else args.hidden_size, \
-                                     tune_backbone=args.tune_backbone));
+                                     hidden_size=args.hidden_size if args.mlp_on_feats else None, \
+                                     tune_backbone=args.tune_backbone, \
+                                     normalize_feats=args.normalize_feats));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -347,7 +355,7 @@ if __name__ == "__main__":
         scorer_model = DotPScorer()
     elif args.comparison == 'bilinear':
         # FIXME: This won't work with --poe
-        scorer_model = BilinearScorer(final_feat_dim if args.backbone=="pretrained" else args.hidden_size,
+        scorer_model = BilinearScorer(args.hidden_size if args.mlp_on_feats else final_feat_dim,
                                       dropout=args.dropout,
                                       identity_debug=args.debug_bilinear)
     elif args.comparison == 'cosine':

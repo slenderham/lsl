@@ -487,6 +487,12 @@ if __name__ == "__main__":
     for epoch in range(1, total_epoch + 1):
         train_loss, pos_score, neg_score, acc = train(epoch);
         if (args.skip_eval):
+            metrics['positive_scores'].append(pos_score)
+            metrics['negative_scores'].append(neg_score)
+            metrics['contrastive_train_acc'].append(acc)
+            metrics = dict(metrics)
+            save_defaultdict_to_fs(metrics,
+                               os.path.join(args.exp_dir, 'metrics.json'))
             continue;
         train_acc, _, train_avg_prec = test(epoch, 'train')
         val_acc, _, val_avg_prec = test(epoch, 'val')

@@ -405,8 +405,9 @@ class CosineScorer(Scorer):
         if not input_is_normed:
             im = F.normalize(im, p=2, dim=-1);
             hint = F.normalize(hint, p=2, dim=-1);
-        scores = torch.einsum("ijk,lk->ilj", im, hint); 
-        assert(scores.shape[0]==scores.shape[1]==N and scores.shape[2]==n_ex), "The size of scores should be of size NxNx(n_ex)";
+        im_flat = im.reshape(N*n_ex, hidden_size);
+        scores = torch.matmul(im_flat, hint.t());
+        assert(scores.shape[0]==N*n_ex and scores.shape[1]==N), "The size of scores should be of size NxNx(n_ex)";
         return scores/self.temperature;
 
     def score_im_im(self, im, input_is_normed=False):
@@ -479,40 +480,51 @@ class ContrastiveLoss(nn.Module):
 
         if ("im+lang" in self.pairing):
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            positive_scores_im_lang = torch.diagonal(scores_im_lang, dim1=0, dim2=1).mean(); # --> N X n_ex, positive pairs on the diagonal, for all examples
-
-            # mask over negative pairs
-            mask = torch.eye(N) > .5;
-            mask = torch.as_tensor(mask).unsqueeze(2).expand_as(scores_im_lang);
+            mask = np.kron(np.eye(N), np.ones((n_ex, 1))) #--> block diagonal of ones
+            # remove the diagonal
+            pos_mask = torch.as_tensor(mask > .5);
+            neg_mask = torch.as_tensor(mask < .5);
             if torch.cuda.is_available():
-                mask = mask.cuda()
+                pos_mask = pos_mask.cuda();
+                neg_mask = neg_mask.cuda();
 
-            negative_scores_im_lang = scores_im_lang.masked_select(~mask).mean();
-            
+            positive_scores_im_lang = scores_im_lang.masked_select(pos_mask); # --> N X n_ex, positive pairs 
+            negative_scores_im_lang_by_lang = scores_im_lang.masked_select(neg_mask); # --> (N-1) x N x n_ex, 
+            negative_scores_im_lang_by_im = scores_im_lang.t().masked_select(neg_mask.t());
+            assert(positive_scores_im_lang.shape[0]==N*n_ex);
+            assert(negative_scores_im_lang_by_lang.shape[0]==negative_scores_im_lang_by_im.shape[0]==N*(N-1)*n_ex);
+
+            negative_scores_im_lang_by_im = negative_scores_im_lang_by_im.reshape(N, (N-1)*n_ex).t();
+            negative_scores_im_lang_by_lang = negative_scores_im_lang_by_lang.reshape(N*n_ex, N-1);
+
+            all_scores_im_lang_by_lang = torch.cat([positive_scores_im_lang.unsqueeze(1), negative_scores_im_lang_by_lang], dim=1);
+            all_scores_im_lang_by_im = torch.repeat_interleave(negative_scores_im_lang_by_im, repeats=n_ex, dim=1);
+            all_scores_im_lang_by_im = torch.cat([positive_scores_im_lang.unsqueeze(0), all_scores_im_lang_by_im], dim=0);
+
             # normalize by hint dimension (push away negative hints from image) and/or normalize by image dimension (push away negative images from hint)
             if ("_by_lang" in self.pairing):
-                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean();
+                loss += -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean();
             elif ("_by_im" in self.pairing):
-                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean(); 
+                loss += -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean(); 
             elif ("_by_both" in self.pairing):
-                loss += -torch.diagonal(F.log_softmax(scores_im_lang, dim=0), dim1=0, dim2=1).mean()\
-                        -torch.diagonal(F.log_softmax(scores_im_lang, dim=1), dim1=0, dim2=1).mean();
+                loss += -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
+                        -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
             # each is sum over N*n_ex terms
 
-            best_score_im_lang_by_img = torch.argmax(scores_im_lang, dim=0);
-            best_score_im_lang_by_lang = torch.argmax(scores_im_lang, dim=1);
+            positive_scores_im_lang = positive_scores_im_lang.mean()
+            negative_scores_im_lang = negative_scores_im_lang_by_im.mean();
+            assert(torch.allclose(negative_scores_im_lang_by_im.mean(), negative_scores_im_lang_by_lang.mean()));
 
-            targets_im_lang = torch.arange(N).unsqueeze(-1).expand(N, n_ex);
-            if torch.cuda.is_available():
-                targets_im_lang = targets_im_lang.cuda();
+            best_score_im_lang_by_img = torch.argmax(all_scores_im_lang_by_im, dim=0);
+            best_score_im_lang_by_lang = torch.argmax(all_scores_im_lang_by_lang, dim=1);
 
             if ("_by_lang" in self.pairing):
-                acc_im_lang = torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float).mean();
+                acc_im_lang = torch.as_tensor(best_score_im_lang_by_lang==0, dtype=torch.float).mean();
             elif ("_by_im" in self.pairing):
-                acc_im_lang = torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float).mean();
+                acc_im_lang = torch.as_tensor(best_score_im_lang_by_img==0, dtype=torch.float).mean();
             elif ("_by_both" in self.pairing):
-                acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==targets_im_lang, dtype=torch.float)\
-                        +0.5*torch.as_tensor(best_score_im_lang_by_lang==targets_im_lang, dtype=torch.float)).mean();
+                acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==0, dtype=torch.float)\
+                        +0.5*torch.as_tensor(best_score_im_lang_by_lang==0, dtype=torch.float)).mean();
 
         if ("im+im" in self.pairing):
             scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)

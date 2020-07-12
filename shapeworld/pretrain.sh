@@ -10,5 +10,5 @@ python lsl/pretrain.py --cuda \
     --comparison cosine\
     --data_dir /data/cw9951/easy_sw\
     --skip_eval\
-    --pairing im+lang_by_lang\
+    --pairing im+lang_by_im\
     exp/contrastive

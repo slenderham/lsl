@@ -478,7 +478,7 @@ class ContrastiveLoss(nn.Module):
         N = im.shape[0];
         n_ex = im.shape[1];
 
-        if ("im+lang" in self.pairing):
+        if (self.pairing in ["im+lang_by_im", "im+lang_by_lang", "im+lang_by_both"]):
             scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
             mask = np.kron(np.eye(N), np.ones((n_ex, 1))) #--> block diagonal of ones
             # remove the diagonal
@@ -507,8 +507,8 @@ class ContrastiveLoss(nn.Module):
             elif ("_by_im" in self.pairing):
                 loss += -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean(); 
             elif ("_by_both" in self.pairing):
-                loss += -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
-                        -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
+                loss += -0.5*F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
+                        -0.5*F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
             # each is sum over N*n_ex terms
 
             positive_scores_im_lang = positive_scores_im_lang.mean()
@@ -526,7 +526,7 @@ class ContrastiveLoss(nn.Module):
                 acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==0, dtype=torch.float)\
                         +0.5*torch.as_tensor(best_score_im_lang_by_lang==0, dtype=torch.float)).mean();
 
-        if ("im+im" in self.pairing):
+        elif (self.pairing=="im+im"):
             scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
             mask = np.kron(np.eye(N), np.ones((n_ex, n_ex))) #--> block diagonal of ones
             # remove the diagonal
@@ -556,6 +556,52 @@ class ContrastiveLoss(nn.Module):
 
             acc_im_im = torch.as_tensor(best_score_im_im==0, dtype=torch.float).mean();
 
+        elif (self.pairing=="im+lang_im+im"):
+            scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
+            mask = np.kron(np.eye(N), np.ones((n_ex, 1))) #--> block diagonal of ones
+            # remove the diagonal
+            pos_mask = torch.as_tensor(mask > .5);
+            neg_mask = torch.as_tensor(mask < .5);
+            if torch.cuda.is_available():
+                pos_mask = pos_mask.cuda();
+                neg_mask = neg_mask.cuda();
+
+            positive_scores_im_lang = scores_im_lang.masked_select(pos_mask); # --> N X n_ex, positive pairs 
+            negative_scores_im_lang_by_lang = scores_im_lang.masked_select(neg_mask); # --> (N x n_ex) * N-1, 
+            negative_scores_im_lang_by_lang = negative_scores_im_lang_by_lang.reshape(N*n_ex, N-1);
+
+            scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
+            mask = np.kron(np.eye(N), np.ones((n_ex, n_ex))) #--> block diagonal of ones
+            # remove the diagonal
+            pos_mask = torch.as_tensor(mask-np.eye(N*n_ex) > .5);
+            neg_mask = torch.as_tensor(mask < .5);
+            if torch.cuda.is_available():
+                pos_mask = pos_mask.cuda();
+                neg_mask = neg_mask.cuda();
+            
+            positive_scores_im_im = scores_im_im.masked_select(pos_mask); 
+            assert(positive_scores_im_im.shape[0]==N*n_ex*(n_ex-1)); # --> N x n_ex x n_ex-1
+            negative_scores_im_im = scores_im_im.masked_select(neg_mask);
+            assert(negative_scores_im_im.shape[0]==(N-1)*N*n_ex**2); # --> (N x n_ex) * ((N-1) x n_ex)
+            negative_scores_im_im = negative_scores_im_im.reshape(N*n_ex, (N-1)*n_ex);
+
+            negative_scores_total = torch.cat([negative_scores_im_im, negative_scores_im_lang_by_lang], dim=1);
+            negative_scores_total = torch.repeat_interleave(negative_scores_total, dim=0, repeats=n_ex);
+
+            positive_scores_total = torch.cat([positive_scores_im_lang.reshape(N, n_ex), positive_scores_im_im.reshape(N, n_ex*(n_ex-1))], dim=1);
+            positive_scores_total = positive_scores_total.reshape(N*n_ex*n_ex, 1);
+
+            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);
+
+            loss += -F.log_softmax(all_scores_total)[:,0].mean();
+
+            positive_scores_total = positive_scores_total.mean()
+            negative_scores_total = negative_scores_total.mean()
+            
+            best_score_total = torch.argmax(all_scores_total, dim=1);
+            acc_total = torch.as_tensor(best_score_total==0, dtype=torch.float).mean();
+
+
         if (self.loss_type=="margin"):
             raise NotImplementedError;
         
@@ -571,6 +617,6 @@ class ContrastiveLoss(nn.Module):
                 acc_im_im;
         else:
             return loss, \
-                (positive_scores_im_lang+positive_scores_im_im)/2, \
-                (negative_scores_im_lang+negative_scores_im_im)/2, \
-                (acc_im_lang+acc_im_im)/2;
+                positive_scores_total, \
+                negative_scores_total, \
+                acc_total;

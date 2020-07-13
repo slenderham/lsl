@@ -24,15 +24,15 @@ from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper, MLP, Identity
 from models import MultimodalRep
 from models import DotPScorer, BilinearScorer, ContrastiveLoss, CosineScorer
-from vision import Conv4NP, ResNet18, Conv4NP, Conv4NPPosAware
+from vision import Conv4NP, ResNet18, Conv4NP, Conv4NPPosAware, VGG16
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('exp_dir', type=str, help='Output directory')
     parser.add_argument('--backbone',
-                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'conv4posaware'],
-                        default='conv4',
+                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'conv4posaware', 'vgg16'],
+                        default='vgg16',
                         help='Image model')
     parser.add_argument('--loss_type',
                         choices=['cpc', 'margin'],
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         device = torch.device('cuda' if args.cuda else 'cpu')
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
-    preprocess = args.backbone == 'resnet18'
+    preprocess = args.backbone == 'resnet18' or args.backbone == 'vgg16'
     precomputed_features = None;
     train_dataset = ShapeWorld(
         split='train',
@@ -257,10 +257,12 @@ if __name__ == "__main__":
         backbone_model = Conv4NP()
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
+    elif args.backbone == 'vgg16':
+        backbone_model = VGG16()
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, hidden_size=args.hidden_size));
+    image_model = ExWrapper(ImageRep(backbone_model, hidden_size=None));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -292,9 +294,15 @@ if __name__ == "__main__":
     Projection heads
     """
 
-    # image_projection = ExWrapper(MLP(args.hidden_size, args.hidden_size//2, args.hidden_size)).to(device);
-    # hint_projection = MLP(args.hidden_size, args.hidden_size//2, args.hidden_size).to(device);
-    # params_to_optimize.extend(image_projection.parameters());
+    final_feat_dim= {
+        "vgg16_fixed": 4608,
+        "pretrained": 256,
+        "vgg16": 4608
+    }.get(args.backbone, None);
+
+    image_projection = ExWrapper(MLP(final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
+    # hint_projection = MLP(args.hidden_size, args.hidden_size, args.hidden_size).to(device);
+    params_to_optimize.extend(image_projection.parameters());
     # params_to_optimize.extend(hint_projection.parameters());
 
     """
@@ -315,7 +323,6 @@ if __name__ == "__main__":
 
     optimizer = optfunc(params_to_optimize, lr=args.lr)
     print(sum([torch.numel(p) for p in params_to_optimize]));
-
 
     def train(epoch, n_steps=100):
         image_model.train()
@@ -364,7 +371,7 @@ if __name__ == "__main__":
             # Encode hints, minimize distance between hint and images/examples
             hint_rep = hint_model(hint_seq, hint_length) # N * H
 
-            loss, pos_score, neg_score, acc = criterion(examples_rep, hint_rep);
+            loss, pos_score, neg_score, acc = criterion(image_projection(examples_rep), hint_rep);
 
             loss_total += loss.item()
             pos_score_total += pos_score.item();
@@ -373,7 +380,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, 20.0);
+            # torch.nn.utils.clip_grad_norm_(params_to_optimize, 20.0);
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:

@@ -641,3 +641,10 @@ def ResNet50(flatten=True):
 def ResNet101(flatten=True):
     return ResNet(BottleneckBlock, [3, 4, 23, 3], [256, 512, 1024, 2048],
                   flatten)
+
+def VGG16():
+    model = models.vgg16_bn(pretrained=False).features;
+    model.add_module('avgpool', nn.AvgPool2d(3, 2));
+    model.add_module('flatten', Flatten());
+    model.final_feat_dim = 4608;
+    return model;

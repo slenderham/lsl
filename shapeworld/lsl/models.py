@@ -374,15 +374,14 @@ class Scorer(nn.Module):
 class DotPScorer(Scorer):
     def __init__(self):
         super(DotPScorer, self).__init__()
-        self.bias = torch.nn.Parameter(torch.zeros(1));
 
     def score(self, x, y):
-        return torch.sum(x * y, dim=1) + self.bias;
+        return torch.sum(x * y, dim=1);
 
     def batchwise_score(self, y, x):
         # REVERSED
         bw_scores = torch.einsum('ijk,ik->ij', (x, y))
-        return torch.sum(bw_scores, dim=1) + self.bias;
+        return torch.sum(bw_scores, dim=1);
 
 class CosineScorer(Scorer):
     def __init__(self, temperature):
@@ -455,7 +454,6 @@ class BilinearScorer(DotPScorer):
         wy = self.dropout(wy)
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
-
 
 class ContrastiveLoss(nn.Module):
     """
@@ -591,7 +589,7 @@ class ContrastiveLoss(nn.Module):
             positive_scores_total = torch.cat([positive_scores_im_lang.reshape(N, n_ex), positive_scores_im_im.reshape(N, n_ex*(n_ex-1))], dim=1);
             positive_scores_total = positive_scores_total.reshape(N*n_ex*n_ex, 1);
 
-            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);print(all_scores_total.shape)
+            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);
 
             loss += -F.log_softmax(all_scores_total, dim=1)[:,0].mean();
 
@@ -600,7 +598,6 @@ class ContrastiveLoss(nn.Module):
             
             best_score_total = torch.argmax(all_scores_total, dim=1);
             acc_total = torch.as_tensor(best_score_total==0, dtype=torch.float).mean();
-
 
         if (self.loss_type=="margin"):
             raise NotImplementedError;

@@ -591,7 +591,7 @@ class ContrastiveLoss(nn.Module):
             positive_scores_total = torch.cat([positive_scores_im_lang.reshape(N, n_ex), positive_scores_im_im.reshape(N, n_ex*(n_ex-1))], dim=1);
             positive_scores_total = positive_scores_total.reshape(N*n_ex*n_ex, 1);
 
-            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);print(all_scores_total.shape)
+            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);
 
             loss += -F.log_softmax(all_scores_total, dim=1)[:,0].mean();
 

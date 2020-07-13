@@ -507,8 +507,8 @@ class ContrastiveLoss(nn.Module):
             elif ("_by_im" in self.pairing):
                 loss += -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean(); 
             elif ("_by_both" in self.pairing):
-                loss += -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
-                        -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
+                loss += -0.5*F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
+                        -0.5*F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
             # each is sum over N*n_ex terms
 
             positive_scores_im_lang = positive_scores_im_lang.mean()

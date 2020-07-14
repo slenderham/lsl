@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
-            # torch.nn.utils.clip_grad_norm_(params_to_optimize, 20.0);
+            torch.nn.utils.clip_grad_norm_(params_to_optimize, 25.0);
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
@@ -438,7 +438,7 @@ if __name__ == "__main__":
 
     def featurize():
         image_model.eval()
-        N_FEATS = args.hidden_size
+        N_FEATS = final_feat_dim
         # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
         DATA_DIR = args.data_dir
 
@@ -457,7 +457,7 @@ if __name__ == "__main__":
                         print(i);
                     batch = ex[i:i+args.batch_size, ...]
                     n_batch = batch.shape[0]
-                    batch = torch.from_numpy(batch).float().to(device)
+                    batch = torch.from_numpy(batch).float().to(device); print(batch.shape);
                     feats = image_model(batch).cpu().numpy()
                     ex_feats[i:i+args.batch_size, ...] = feats
                 np.savez("{}/shapeworld/{}/examples.feats.npz".format(DATA_DIR, split), ex_feats);

@@ -62,7 +62,6 @@ class ContrastiveLoss(nn.Module):
 
             positive_scores_im_lang = positive_scores_im_lang.mean()
             negative_scores_im_lang = negative_scores_im_lang_by_im.mean();
-            assert(torch.allclose(negative_scores_im_lang_by_im.mean(), negative_scores_im_lang_by_lang.mean()));
 
             best_score_im_lang_by_img = torch.argmax(all_scores_im_lang_by_im, dim=0);
             best_score_im_lang_by_lang = torch.argmax(all_scores_im_lang_by_lang, dim=1);

@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
+from torchvision import transforms
 
 from matplotlib import pyplot as plt
 
@@ -380,7 +381,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
-            # torch.nn.utils.clip_grad_norm_(params_to_optimize, 20.0);
+            torch.nn.utils.clip_grad_norm_(params_to_optimize, 25.0);
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
@@ -438,7 +439,7 @@ if __name__ == "__main__":
 
     def featurize():
         image_model.eval()
-        N_FEATS = args.hidden_size
+        N_FEATS = final_feat_dim
         # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
         DATA_DIR = args.data_dir
 
@@ -469,9 +470,10 @@ if __name__ == "__main__":
                     if preprocess:
                         batch = batch.reshape(n_batch*n_ex, batch.shape[2], batch.shape[3], batch.shape[4]).cpu();
                         batch = torch.stack([preprocess_transform(b) for b in batch]);
-                        batch = batch.reshape(n_batch, n_ex, batch.shape[2], 224, 224);
-                    batch = torch.from_numpy(batch).float().to(device)
-                    feats = image_model(batch).cpu().numpy()
+                        if torch.cuda.is_available():
+                            batch = batch.cuda();
+                        batch = batch.reshape(n_batch, n_ex, batch.shape[1], 224, 224);
+                    feats = image_model(batch).cpu().numpy();
                     ex_feats[i:i+args.batch_size, ...] = feats
                 np.savez("{}/shapeworld/{}/examples.feats.npz".format(DATA_DIR, split), ex_feats);
 

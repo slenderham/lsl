@@ -212,7 +212,7 @@ class SANet(nn.Module):
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
         x = self.sa(x);
 
-        
+
 
 """
 
@@ -316,4 +316,3 @@ class BilinearScorer(DotPScorer):
         wy = self.dropout(wy)
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
-

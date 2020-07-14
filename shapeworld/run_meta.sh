@@ -6,7 +6,6 @@ python lsl/train.py --cuda \
     --comparison dotp\
     --lr 0.0001\
     --data_dir /data/cw9951/easy_sw\
-    --backbone pretrained\
-    --normalize_feats\
+    --backbone vgg16_fixed\
     --mlp_on_feats\
     exp/meta

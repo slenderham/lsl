@@ -442,6 +442,15 @@ if __name__ == "__main__":
         # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
         DATA_DIR = args.data_dir
 
+        if preprocess:
+            preprocess_transform = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+
         with torch.no_grad():
             for split in ("train", "val", "test", "val_same", "test_same"):
                 print(split);
@@ -458,6 +467,8 @@ if __name__ == "__main__":
                     batch = ex[i:i+args.batch_size, ...]
                     n_batch = batch.shape[0]
                     batch = torch.from_numpy(batch).float().to(device)
+                    if preprocess:
+                        batch = torch.stack([preprocess_transform(b) for b in batch]);
                     feats = image_model(batch).cpu().numpy()
                     ex_feats[i:i+args.batch_size, ...] = feats
                 np.savez("{}/shapeworld/{}/examples.feats.npz".format(DATA_DIR, split), ex_feats);
@@ -471,6 +482,8 @@ if __name__ == "__main__":
                         print(i)
                     batch = inp[i:i+args.batch_size, ...]
                     batch = torch.from_numpy(batch).float().to(device)
+                    if preprocess:
+                        batch = preprocess_transform(batch);
                     feats = image_model(batch).cpu().numpy()
                     feats = feats.reshape((-1, N_FEATS))
                     inp_feats[i:i+args.batch_size, :] = feats

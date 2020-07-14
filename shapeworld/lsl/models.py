@@ -38,11 +38,9 @@ class ExWrapper(nn.Module):
 
         return x_enc
 
-
 class Identity(nn.Module):
     def forward(self, x):
         return x
-
 
 class ImageRep(nn.Module):
     r"""Two fully-connected layers to form a final image
@@ -101,7 +99,6 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.model(x);
 
-
 class TextRep(nn.Module):
     r"""Deterministic Bowman et. al. model to form
     text representation.
@@ -142,214 +139,80 @@ class TextRep(nn.Module):
 
         return hidden
 
+class SlotAttention(nn.Module):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+        super().__init__()
+        self.num_slots = num_slots
+        self.iters = iters
+        self.eps = eps
+        self.scale = dim ** -0.5
 
-class MultimodalDeepRep(nn.Module):
-    def __init__(self):
-        super(MultimodalDeepRep, self).__init__()
-        self.model = nn.Sequential(nn.Linear(512 * 2, 512 * 2), nn.ReLU(),
-                                   nn.Linear(512 * 2, 512), nn.ReLU(),
-                                   nn.Linear(512, 512))
+        self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
+        self.slots_sigma = nn.Parameter(torch.randn(1, 1, dim))
 
-    def forward(self, x, y):
-        xy = torch.cat([x, y], dim=1)
-        return self.model(xy)
+        self.to_q = nn.Linear(dim, dim, bias = False)
+        self.to_k = nn.Linear(dim, dim, bias = False)
+        self.to_v = nn.Linear(dim, dim, bias = False)
 
+        self.gru = nn.GRU(dim, dim)
 
-class MultimodalRep(nn.Module):
-    r"""Concat Image and Text representations."""
+        hidden_dim = max(dim, hidden_dim)
 
-    def __init__(self):
-        super(MultimodalRep, self).__init__()
-        self.model = nn.Sequential(nn.Linear(512 * 2, 512), nn.ReLU(),
-                                   nn.Linear(512, 512))
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+        )
 
-    def forward(self, x, y):
-        xy = torch.cat([x, y], dim=1)
-        return self.model(xy)
+        self.norm_input  = nn.LayerNorm(dim)
+        self.norm_slots  = nn.LayerNorm(dim)
+        self.norm_pre_ff = nn.LayerNorm(dim)
 
+    def forward(self, inputs, num_slots = None):
+        b, n, d = inputs.shape
+        n_s = num_slots if num_slots is not None else self.num_slots
+        
+        mu = self.slots_mu.expand(b, n_s, -1)
+        sigma = self.slots_sigma.expand(b, n_s, -1)
+        slots = torch.normal(mu, sigma)
 
-class MultimodalSumExp(nn.Module):
-    def forward(self, x, y):
-        return x + y
+        inputs = self.norm_input(inputs)        
+        k, v = self.to_k(inputs), self.to_v(inputs)
 
+        for _ in range(self.iters):
+            slots_prev = slots
 
-class MultimodalLinearRep(nn.Module):
-    def __init__(self):
-        super(MultimodalLinearRep, self).__init__()
-        self.model = nn.Linear(512 * 2, 512)
+            slots = self.norm_slots(slots)
+            q = self.to_q(slots)
 
-    def forward(self, x, y):
-        xy = torch.cat([x, y], dim=1)
-        return self.model(xy)
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            attn = dots.softmax(dim=1) + self.eps
+            attn = attn / attn.sum(dim=-1, keepdim=True)
 
+            updates = torch.einsum('bjd,bij->bid', v, attn)
 
-class MultimodalWeightedRep(nn.Module):
-    def __init__(self):
-        super(MultimodalWeightedRep, self).__init__()
-        self.model = nn.Sequential(nn.Linear(512 * 2, 512), nn.ReLU(),
-                                   nn.Linear(512, 1), nn.Sigmoid())
+            slots, _ = self.gru(
+                updates.reshape(1, -1, d),
+                slots_prev.reshape(1, -1, d)
+            )
 
-    def forward(self, x, y):
-        xy = torch.cat([x, y], dim=1)
-        w = self.model(xy)
-        out = w * x + (1. - w) * y
-        return out
+            slots = slots.reshape(b, -1, d)
+            slots = slots + self.mlp(self.norm_pre_ff(slots))
 
+        return slots
 
-class MultimodalSingleWeightRep(nn.Module):
-    def __init__(self):
-        super(MultimodalSingleWeightRep, self).__init__()
-        self.w = nn.Parameter(torch.normal(torch.zeros(1), 1))
-
-    def forward(self, x, y):
-        w = torch.sigmoid(self.w)
-        out = w * x + (1. - w) * y
-        return out
-
-
-class TextProposal(nn.Module):
-    r"""Reverse proposal model, estimating:
-
-        argmax_lambda log q(w_i|x_1, y_1, ..., x_n, y_n; lambda)
-
-    approximation to the distribution of descriptions.
-
-    Because they use only positive labels, it actually simplifies to
-
-        argmax_lambda log q(w_i|x_1, ..., x_4; lambda)
-
-    https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
-    """
-
-    def __init__(self, embedding_module):
-        super(TextProposal, self).__init__()
-        self.embedding = embedding_module
-        self.embedding_dim = embedding_module.embedding_dim
-        self.vocab_size = embedding_module.num_embeddings
-        self.gru = nn.GRU(self.embedding_dim, 512)
-        self.outputs2vocab = nn.Linear(512, self.vocab_size)
-
-    def forward(self, feats, seq, length):
-        # feats is from example images
-        batch_size = seq.size(0)
-
-        if batch_size > 1:
-            # BUGFIX? dont we need to sort feats too?
-            sorted_lengths, sorted_idx = torch.sort(length, descending=True)
-            seq = seq[sorted_idx]
-            feats = feats[sorted_idx]
-
-        feats = feats.unsqueeze(0)
-        # reorder from (B,L,D) to (L,B,D)
-        seq = seq.transpose(0, 1)
-
-        # embed your sequences
-        embed_seq = self.embedding(seq)
-
-        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
-                                                      sorted_lengths)
-
-        # shape = (seq_len, batch, hidden_dim)
-        packed_output, _ = self.gru(packed_input, feats)
-        output = rnn_utils.pad_packed_sequence(packed_output)
-        output = output[0].contiguous()
-
-        # reorder from (L,B,D) to (B,L,D)
-        output = output.transpose(0, 1)
-
-        if batch_size > 1:
-            _, reversed_idx = torch.sort(sorted_idx)
-            output = output[reversed_idx]
-
-        max_length = output.size(1)
-        output_2d = output.view(batch_size * max_length, 512)
-        outputs_2d = self.outputs2vocab(output_2d)
-        outputs = outputs_2d.view(batch_size, max_length, self.vocab_size)
-
-        return outputs
-
-    def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
-        """Generate from image features using greedy search."""
-        with torch.no_grad():
-            batch_size = feats.size(0)
-
-            # initialize hidden states using image features
-            states = feats.unsqueeze(0)
-
-            # first input is SOS token
-            inputs = np.array([sos_index for _ in range(batch_size)])
-            inputs = torch.from_numpy(inputs)
-            inputs = inputs.unsqueeze(1)
-            inputs = inputs.to(feats.device)
-
-            # save SOS as first generated token
-            inputs_npy = inputs.squeeze(1).cpu().numpy()
-            sampled_ids = [[w] for w in inputs_npy]
-
-            # (B,L,D) to (L,B,D)
-            inputs = inputs.transpose(0, 1)
-
-            # compute embeddings
-            inputs = self.embedding(inputs)
-
-            for i in range(20):  # like in jacobs repo
-                outputs, states = self.gru(inputs,
-                                           states)  # outputs: (L=1,B,H)
-                outputs = outputs.squeeze(0)  # outputs: (B,H)
-                outputs = self.outputs2vocab(outputs)  # outputs: (B,V)
-
-                if greedy:
-                    predicted = outputs.max(1)[1]
-                    predicted = predicted.unsqueeze(1)
-                else:
-                    outputs = F.softmax(outputs, dim=1)
-                    predicted = torch.multinomial(outputs, 1)
-
-                predicted_npy = predicted.squeeze(1).cpu().numpy()
-                predicted_lst = predicted_npy.tolist()
-
-                for w, so_far in zip(predicted_lst, sampled_ids):
-                    if so_far[-1] != eos_index:
-                        so_far.append(w)
-
-                inputs = predicted.transpose(0, 1)  # inputs: (L=1,B)
-                inputs = self.embedding(inputs)  # inputs: (L=1,B,E)
-
-            sampled_lengths = [len(text) for text in sampled_ids]
-            sampled_lengths = np.array(sampled_lengths)
-
-            max_length = max(sampled_lengths)
-            padded_ids = np.ones((batch_size, max_length)) * pad_index
-
-            for i in range(batch_size):
-                padded_ids[i, :sampled_lengths[i]] = sampled_ids[i]
-
-            sampled_lengths = torch.from_numpy(sampled_lengths).long()
-            sampled_ids = torch.from_numpy(padded_ids).long()
-
-        return sampled_ids, sampled_lengths
-
-
-class EmbedImageRep(nn.Module):
-    def __init__(self, z_dim):
-        super(EmbedImageRep, self).__init__()
-        self.z_dim = z_dim
-        self.model = nn.Sequential(nn.Linear(self.z_dim, 512), nn.ReLU(),
-                                   nn.Linear(512, 512))
+class SANet(nn.Module):
+    def __init__(self, num_slots, dim, encoder, iters = 3, eps = 1e-8, hidden_dim = 128):
+        self.sa = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
+        self.encoder = encoder;
 
     def forward(self, x):
-        return self.model(x)
+        x = self.encoder(x);
+        n, c, h, w = x.shape;
+        x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
+        x = self.sa(x);
 
-
-class EmbedTextRep(nn.Module):
-    def __init__(self, z_dim):
-        super(EmbedTextRep, self).__init__()
-        self.z_dim = z_dim
-        self.model = nn.Sequential(nn.Linear(self.z_dim, 512), nn.ReLU(),
-                                   nn.Linear(512, 512))
-
-    def forward(self, x):
-        return self.model(x)
+        
 
 """
 
@@ -369,7 +232,6 @@ class Scorer(nn.Module):
 
     def batchwise_score(self, x, y):
         raise NotImplementedError
-
 
 class DotPScorer(Scorer):
     def __init__(self):
@@ -455,165 +317,3 @@ class BilinearScorer(DotPScorer):
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
-class ContrastiveLoss(nn.Module):
-    """
-    Compute contrastive loss
-    """
-
-    def __init__(self, margin=0, temperature=0.1, max_violation=False, loss_type="cpc", pairing="im+lang&im+im"):
-        super(ContrastiveLoss, self).__init__()
-        assert(loss_type in ["cpc", "margin"]), "please select cpc (logit) or margin loss"
-        self.loss_type = loss_type;
-        self.margin = margin
-        self.sim = CosineScorer(temperature);
-        self.max_violation = max_violation
-        self.pairing = pairing
-
-    def forward(self, im, s):
-        # compute image-sentence score matrix
-
-        loss = 0;
-        N = im.shape[0];
-        n_ex = im.shape[1];
-
-        if (self.pairing in ["im+lang_by_im", "im+lang_by_lang", "im+lang_by_both"]):
-            scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            mask = np.kron(np.eye(N), np.ones((n_ex, 1))) #--> block diagonal of ones
-            # remove the diagonal
-            pos_mask = torch.as_tensor(mask > .5);
-            neg_mask = torch.as_tensor(mask < .5);
-            if torch.cuda.is_available():
-                pos_mask = pos_mask.cuda();
-                neg_mask = neg_mask.cuda();
-
-            positive_scores_im_lang = scores_im_lang.masked_select(pos_mask); # --> N X n_ex, positive pairs 
-            negative_scores_im_lang_by_lang = scores_im_lang.masked_select(neg_mask); # --> (N-1) x N x n_ex, 
-            negative_scores_im_lang_by_im = scores_im_lang.t().masked_select(neg_mask.t());
-            assert(positive_scores_im_lang.shape[0]==N*n_ex);
-            assert(negative_scores_im_lang_by_lang.shape[0]==negative_scores_im_lang_by_im.shape[0]==N*(N-1)*n_ex);
-
-            negative_scores_im_lang_by_im = negative_scores_im_lang_by_im.reshape(N, (N-1)*n_ex).t();
-            negative_scores_im_lang_by_lang = negative_scores_im_lang_by_lang.reshape(N*n_ex, N-1);
-
-            all_scores_im_lang_by_lang = torch.cat([positive_scores_im_lang.unsqueeze(1), negative_scores_im_lang_by_lang], dim=1);
-            all_scores_im_lang_by_im = torch.repeat_interleave(negative_scores_im_lang_by_im, repeats=n_ex, dim=1);
-            all_scores_im_lang_by_im = torch.cat([positive_scores_im_lang.unsqueeze(0), all_scores_im_lang_by_im], dim=0);
-
-            # normalize by hint dimension (push away negative hints from image) and/or normalize by image dimension (push away negative images from hint)
-            if ("_by_lang" in self.pairing):
-                loss += -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean();
-            elif ("_by_im" in self.pairing):
-                loss += -F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean(); 
-            elif ("_by_both" in self.pairing):
-                loss += -0.5*F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()\
-                        -0.5*F.log_softmax(all_scores_im_lang_by_im, dim=0)[0,:].mean();
-            # each is sum over N*n_ex terms
-
-            positive_scores_im_lang = positive_scores_im_lang.mean()
-            negative_scores_im_lang = negative_scores_im_lang_by_im.mean();
-            assert(torch.allclose(negative_scores_im_lang_by_im.mean(), negative_scores_im_lang_by_lang.mean()));
-
-            best_score_im_lang_by_img = torch.argmax(all_scores_im_lang_by_im, dim=0);
-            best_score_im_lang_by_lang = torch.argmax(all_scores_im_lang_by_lang, dim=1);
-
-            if ("_by_lang" in self.pairing):
-                acc_im_lang = torch.as_tensor(best_score_im_lang_by_lang==0, dtype=torch.float).mean();
-            elif ("_by_im" in self.pairing):
-                acc_im_lang = torch.as_tensor(best_score_im_lang_by_img==0, dtype=torch.float).mean();
-            elif ("_by_both" in self.pairing):
-                acc_im_lang = (0.5*torch.as_tensor(best_score_im_lang_by_img==0, dtype=torch.float)\
-                        +0.5*torch.as_tensor(best_score_im_lang_by_lang==0, dtype=torch.float)).mean();
-
-        elif (self.pairing=="im+im"):
-            scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
-            mask = np.kron(np.eye(N), np.ones((n_ex, n_ex))) #--> block diagonal of ones
-            # remove the diagonal
-            pos_mask = torch.as_tensor(mask-np.eye(N*n_ex) > .5);
-            neg_mask = torch.as_tensor(mask < .5);
-            if torch.cuda.is_available():
-                pos_mask = pos_mask.cuda();
-                neg_mask = neg_mask.cuda();
-            
-            positive_scores_im_im = scores_im_im.masked_select(pos_mask); 
-            assert(positive_scores_im_im.shape[0]==N*n_ex*(n_ex-1));
-            negative_scores_im_im = scores_im_im.masked_select(neg_mask);
-            assert(negative_scores_im_im.shape[0]==(N-1)*N*n_ex**2);
-
-            negative_scores_im_im = negative_scores_im_im.reshape(N*n_ex, (N-1)*n_ex);
-            all_scores_im_im = torch.repeat_interleave(negative_scores_im_im, repeats=n_ex-1, dim=0);
-            all_scores_im_im = torch.cat([positive_scores_im_im.unsqueeze(1), all_scores_im_im], dim=1);
-
-            normed_scores_im_im = F.log_softmax(all_scores_im_im, dim=1)[:,0].mean();
-
-            positive_scores_im_im = positive_scores_im_im.mean();
-            negative_scores_im_im = negative_scores_im_im.mean();
-
-            loss += -normed_scores_im_im;
-
-            best_score_im_im = torch.argmax(all_scores_im_im, dim=1);
-
-            acc_im_im = torch.as_tensor(best_score_im_im==0, dtype=torch.float).mean();
-
-        elif (self.pairing=="im+lang_im+im"):
-            scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
-            mask = np.kron(np.eye(N), np.ones((n_ex, 1))) #--> block diagonal of ones
-            # remove the diagonal
-            pos_mask = torch.as_tensor(mask > .5);
-            neg_mask = torch.as_tensor(mask < .5);
-            if torch.cuda.is_available():
-                pos_mask = pos_mask.cuda();
-                neg_mask = neg_mask.cuda();
-
-            positive_scores_im_lang = scores_im_lang.masked_select(pos_mask); # --> N X n_ex, positive pairs 
-            negative_scores_im_lang_by_lang = scores_im_lang.masked_select(neg_mask); # --> (N x n_ex) * N-1, 
-            negative_scores_im_lang_by_lang = negative_scores_im_lang_by_lang.reshape(N*n_ex, N-1);
-
-            scores_im_im = self.sim.score_im_im(im); # --> (N*n_ex) x (N*n_ex)
-            mask = np.kron(np.eye(N), np.ones((n_ex, n_ex))) #--> block diagonal of ones
-            # remove the diagonal
-            pos_mask = torch.as_tensor(mask-np.eye(N*n_ex) > .5);
-            neg_mask = torch.as_tensor(mask < .5);
-            if torch.cuda.is_available():
-                pos_mask = pos_mask.cuda();
-                neg_mask = neg_mask.cuda();
-            
-            positive_scores_im_im = scores_im_im.masked_select(pos_mask); 
-            assert(positive_scores_im_im.shape[0]==N*n_ex*(n_ex-1)); # --> N x n_ex x n_ex-1
-            negative_scores_im_im = scores_im_im.masked_select(neg_mask);
-            assert(negative_scores_im_im.shape[0]==(N-1)*N*n_ex**2); # --> (N x n_ex) * ((N-1) x n_ex)
-            negative_scores_im_im = negative_scores_im_im.reshape(N*n_ex, (N-1)*n_ex);
-
-            negative_scores_total = torch.cat([negative_scores_im_im, negative_scores_im_lang_by_lang], dim=1);
-            negative_scores_total = torch.repeat_interleave(negative_scores_total, dim=0, repeats=n_ex);
-
-            positive_scores_total = torch.cat([positive_scores_im_lang.reshape(N, n_ex), positive_scores_im_im.reshape(N, n_ex*(n_ex-1))], dim=1);
-            positive_scores_total = positive_scores_total.reshape(N*n_ex*n_ex, 1);
-
-            all_scores_total = torch.cat([positive_scores_total, negative_scores_total], dim=1);
-
-            loss += -F.log_softmax(all_scores_total, dim=1)[:,0].mean();
-
-            positive_scores_total = positive_scores_total.mean()
-            negative_scores_total = negative_scores_total.mean()
-            
-            best_score_total = torch.argmax(all_scores_total, dim=1);
-            acc_total = torch.as_tensor(best_score_total==0, dtype=torch.float).mean();
-
-        if (self.loss_type=="margin"):
-            raise NotImplementedError;
-        
-        if (self.pairing=="im+lang_by_lang" or self.pairing=="im+lang_by_im" or self.pairing=="im+lang_by_both"):
-            return loss, \
-                positive_scores_im_lang, \
-                negative_scores_im_lang, \
-                acc_im_lang;
-        elif (self.pairing=="im+im"):
-            return loss, \
-                positive_scores_im_im, \
-                negative_scores_im_im, \
-                acc_im_im;
-        else:
-            return loss, \
-                positive_scores_total, \
-                negative_scores_total, \
-                acc_total;

@@ -110,7 +110,7 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size)
+        self.gru = nn.GRU(self.embedding_dim, hidden_size//2, bidirectional=True);
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -131,13 +131,136 @@ class TextRep(nn.Module):
             if batch_size > 1 else length.data.tolist())
 
         _, hidden = self.gru(packed)
-        hidden = hidden[-1, ...]
+        hidden = torch.mean(hidden[1:-1, ...], dim=0);
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[reversed_idx]
 
         return hidden
+
+class TextProposal(nn.Module):
+    r"""Reverse proposal model, estimating:
+
+        argmax_lambda log q(w_i|x_1, y_1, ..., x_n, y_n; lambda)
+
+    approximation to the distribution of descriptions.
+
+    Because they use only positive labels, it actually simplifies to
+
+        argmax_lambda log q(w_i|x_1, ..., x_4; lambda)
+
+    https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
+    """
+
+    def __init__(self, embedding_module):
+        super(TextProposal, self).__init__()
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.vocab_size = embedding_module.num_embeddings
+        self.gru = nn.GRU(self.embedding_dim, 512)
+        self.outputs2vocab = nn.Linear(512, self.vocab_size)
+
+    def forward(self, feats, seq, length):
+        # feats is from example images
+        batch_size = seq.size(0)
+
+        if batch_size > 1:
+            # BUGFIX? dont we need to sort feats too?
+            sorted_lengths, sorted_idx = torch.sort(length, descending=True)
+            seq = seq[sorted_idx]
+            feats = feats[sorted_idx]
+
+        feats = feats.unsqueeze(0)
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
+                                                      sorted_lengths)
+
+        # shape = (seq_len, batch, hidden_dim)
+        packed_output, _ = self.gru(packed_input, feats)
+        output = rnn_utils.pad_packed_sequence(packed_output)
+        output = output[0].contiguous()
+
+        # reorder from (L,B,D) to (B,L,D)
+        output = output.transpose(0, 1)
+
+        if batch_size > 1:
+            _, reversed_idx = torch.sort(sorted_idx)
+            output = output[reversed_idx]
+
+        max_length = output.size(1)
+        output_2d = output.view(batch_size * max_length, 512)
+        outputs_2d = self.outputs2vocab(output_2d)
+        outputs = outputs_2d.view(batch_size, max_length, self.vocab_size)
+
+        return outputs
+
+    def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
+        """Generate from image features using greedy search."""
+        with torch.no_grad():
+            batch_size = feats.size(0)
+
+            # initialize hidden states using image features
+            states = feats.unsqueeze(0)
+
+            # first input is SOS token
+            inputs = np.array([sos_index for _ in range(batch_size)])
+            inputs = torch.from_numpy(inputs)
+            inputs = inputs.unsqueeze(1)
+            inputs = inputs.to(feats.device)
+
+            # save SOS as first generated token
+            inputs_npy = inputs.squeeze(1).cpu().numpy()
+            sampled_ids = [[w] for w in inputs_npy]
+
+            # (B,L,D) to (L,B,D)
+            inputs = inputs.transpose(0, 1)
+
+            # compute embeddings
+            inputs = self.embedding(inputs)
+
+            for i in range(20):  # like in jacobs repo
+                outputs, states = self.gru(inputs,
+                                           states)  # outputs: (L=1,B,H)
+                outputs = outputs.squeeze(0)  # outputs: (B,H)
+                outputs = self.outputs2vocab(outputs)  # outputs: (B,V)
+
+                if greedy:
+                    predicted = outputs.max(1)[1]
+                    predicted = predicted.unsqueeze(1)
+                else:
+                    outputs = F.softmax(outputs, dim=1)
+                    predicted = torch.multinomial(outputs, 1)
+
+                predicted_npy = predicted.squeeze(1).cpu().numpy()
+                predicted_lst = predicted_npy.tolist()
+
+                for w, so_far in zip(predicted_lst, sampled_ids):
+                    if so_far[-1] != eos_index:
+                        so_far.append(w)
+
+                inputs = predicted.transpose(0, 1)  # inputs: (L=1,B)
+                inputs = self.embedding(inputs)  # inputs: (L=1,B,E)
+
+            sampled_lengths = [len(text) for text in sampled_ids]
+            sampled_lengths = np.array(sampled_lengths)
+
+            max_length = max(sampled_lengths)
+            padded_ids = np.ones((batch_size, max_length)) * pad_index
+
+            for i in range(batch_size):
+                padded_ids[i, :sampled_lengths[i]] = sampled_ids[i]
+
+            sampled_lengths = torch.from_numpy(sampled_lengths).long()
+            sampled_ids = torch.from_numpy(padded_ids).long()
+
+        return sampled_ids, sampled_lengths
+
 
 class SlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -202,22 +325,56 @@ class SlotAttention(nn.Module):
         return slots
 
 class SANet(nn.Module):
-    def __init__(self, num_slots, dim, encoder, iters = 3, eps = 1e-8, hidden_dim = 128):
-        self.sa = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
-        self.encoder = encoder;
+    def __init__(self, im_size, num_slots, dim, encoder, iters = 3, eps = 1e-8, hidden_dim = 128):
+        self.slot_attn = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, dim, 3),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(dim, dim, 3),
+            nn.ReLU(inplace=True), 
+            nn.Conv2d(dim, dim, 3),
+            nn.ReLU(inplace=True), 
+            nn.Conv2d(dim, dim, 3),
+            nn.ReLU(inplace=True),
+            PositionEmbedding(im_size-2*4, im_size-2*4, dim)
+        );
+
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim, 1),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, dim, 1)
+        );
 
     def forward(self, x):
         x = self.encoder(x);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
-        x = self.sa(x);
+        x = self.slot_attn(x); # --> N * num slots * feature size
+        x = torch.mean(x, dim=1);
+        return x;
 
+class PositionEmbedding(nn.Module):
+    def __init__(self, height, width, hidden_size):
+        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand_as(1, height, width);
+        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand_as(1, height, width);
+        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand_as(1, height, width);
+        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand_as(1, height, width);
 
+        self.coords = torch.cat([
+            x_coord_pos,
+            x_coord_neg,
+            y_coord_pos,
+            y_coord_neg
+        ], dim=0);
+
+        self.pos_emb = nn.Conv2d(4, hidden_size, 1);
+
+    def forward(self, x):
+        # add positional embedding to the feature vector
+        return x+self.pos_emb(self.coords);
 
 """
-
 Similarity Scores
-
 """
 
 class Scorer(nn.Module):

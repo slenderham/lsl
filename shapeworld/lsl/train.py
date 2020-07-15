@@ -20,7 +20,7 @@ from utils import (
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity
-from models import MultimodalRep
+from models import SANet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP
 from vision import Conv4NP, ResNet18, Conv4NP
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre

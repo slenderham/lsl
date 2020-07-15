@@ -110,7 +110,7 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=True);
+        self.gru = nn.GRU(self.embedding_dim, hidden_size);
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -131,7 +131,7 @@ class TextRep(nn.Module):
             if batch_size > 1 else length.data.tolist())
 
         _, hidden = self.gru(packed)
-        hidden = torch.mean(hidden[1:-1, ...], dim=0);
+        hidden = hidden[-1, ...]
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)

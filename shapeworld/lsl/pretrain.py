@@ -23,7 +23,6 @@ from utils import (
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, ExWrapper, MLP, Identity
-from models import MultimodalRep
 from models import DotPScorer, BilinearScorer, CosineScorer
 from vision import Conv4NP, ResNet18, Conv4NP, Conv4NPPosAware, VGG16
 from loss import ContrastiveLoss

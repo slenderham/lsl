@@ -5,7 +5,7 @@ python lsl/pretrain.py --cuda \
     --seed $RANDOM \
     --temperature 0.1\
     --lr 0.0001\
-    --epochs 0\
+    --epochs 80\
     --log_interval 10\
     --backbone vgg16\
     --comparison cosine\

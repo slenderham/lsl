@@ -341,7 +341,7 @@ if __name__ == "__main__":
     elif args.backbone == "pretrained":
         backbone_model = None;
     elif args.backbone == 'slot_attn':
-        backbone_model = SANet(im_size=64, num_slots=3, dim=64)
+        backbone_model = SANet(im_size=64, num_slots=3, dim=args.hidden_size);
     else:
         raise NotImplementedError(args.backbone)
 
@@ -373,7 +373,7 @@ if __name__ == "__main__":
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
 
     if args.decode_hyp:
-        proposal_model = TextProposal(embedding_model)
+        proposal_model = TextProposal(embedding_model, hidden_size=args.hidden_size)
         proposal_model = proposal_model.to(device)
         params_to_optimize.extend(proposal_model.parameters())
 

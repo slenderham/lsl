@@ -153,13 +153,14 @@ class TextProposal(nn.Module):
     https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
     """
 
-    def __init__(self, embedding_module):
+    def __init__(self, embedding_module, hidden_size):
         super(TextProposal, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.vocab_size = embedding_module.num_embeddings
-        self.gru = nn.GRU(self.embedding_dim, 512)
-        self.outputs2vocab = nn.Linear(512, self.vocab_size)
+        self.gru = nn.GRU(self.embedding_dim, hidden_size)
+        self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size)
+        self.hidden_size = hidden_size
 
     def forward(self, feats, seq, length):
         # feats is from example images
@@ -194,7 +195,7 @@ class TextProposal(nn.Module):
             output = output[reversed_idx]
 
         max_length = output.size(1)
-        output_2d = output.view(batch_size * max_length, 512)
+        output_2d = output.view(batch_size * max_length, self.hidden_size)
         outputs_2d = self.outputs2vocab(output_2d)
         outputs = outputs_2d.view(batch_size, max_length, self.vocab_size)
 
@@ -325,6 +326,7 @@ class SlotAttention(nn.Module):
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+        super(SANet, self).__init__()
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
         self.encoder = nn.Sequential(
             nn.Conv2d(3, dim, 5),
@@ -337,6 +339,7 @@ class SANet(nn.Module):
             nn.ReLU(inplace=True),
             PositionEmbedding(im_size-4*4, im_size-4*4, dim)
         );
+        self.final_feat_dim=dim;
 
     def forward(self, x):
         x = self.encoder(x);
@@ -348,17 +351,18 @@ class SANet(nn.Module):
 
 class PositionEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):
-        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand_as(1, height, width);
-        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand_as(1, height, width);
-        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand_as(1, height, width);
-        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand_as(1, height, width);
+        super(PositionEmbedding, self).__init__();
+        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width);
+        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width);
+        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width);
+        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width);
 
         self.coords = torch.cat([
             x_coord_pos,
             x_coord_neg,
             y_coord_pos,
             y_coord_neg
-        ], dim=0);
+        ], dim=0).unsqueeze(0);
 
         self.pos_emb = nn.Conv2d(4, hidden_size, 1);
 

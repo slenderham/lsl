@@ -376,7 +376,7 @@ if __name__ == "__main__":
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        hint_model = TextRep(embedding_model)
+        hint_model = TextRep(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
 

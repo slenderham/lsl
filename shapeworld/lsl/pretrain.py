@@ -267,11 +267,15 @@ if __name__ == "__main__":
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
+    print(image_model);
+
     """
     Loss
     """
     
     criterion = ContrastiveLoss(loss_type=args.loss_type, temperature=args.temperature, pairing=args.pairing);
+
+    print(criterion);
 
     """
     Scorer Model
@@ -291,6 +295,8 @@ if __name__ == "__main__":
     scorer_model = scorer_model.to(device)
     params_to_optimize.extend(scorer_model.parameters())
 
+    print(scorer_model);
+
     """
     Projection heads
     """
@@ -306,6 +312,8 @@ if __name__ == "__main__":
     params_to_optimize.extend(image_projection.parameters());
     # params_to_optimize.extend(hint_projection.parameters());
 
+    print(image_projection);
+
     """
     Language Model
     """
@@ -315,6 +323,8 @@ if __name__ == "__main__":
     hint_model = hint_model.to(device)
     params_to_optimize.extend(hint_model.parameters())
 
+    print(hint_model);
+
     # optimizer and loss
     optfunc = {
         'adam': optim.Adam,
@@ -323,6 +333,9 @@ if __name__ == "__main__":
     }[args.optimizer]
 
     optimizer = optfunc(params_to_optimize, lr=args.lr)
+
+    print(optimizer);
+
     print(sum([torch.numel(p) for p in params_to_optimize]));
 
     def train(epoch, n_steps=100):
@@ -463,15 +476,14 @@ if __name__ == "__main__":
                 n_ex = ex.shape[1]
                 ex_feats = np.zeros((n_inp, n_ex, N_FEATS))
                 for i in range(0, n_inp, args.batch_size):
-                    if i % 1000 == 0:
+                    if i % 200 == 0:
                         print(i);
                     batch = ex[i:i+args.batch_size, ...]
                     n_batch = batch.shape[0]
+                    batch = torch.from_numpy(batch).float().to(device)
                     if preprocess:
                         batch = batch.reshape(n_batch*n_ex, batch.shape[2], batch.shape[3], batch.shape[4]).cpu();
-                        batch = torch.stack([preprocess_transform(b) for b in batch]);
-                        if torch.cuda.is_available():
-                            batch = batch.cuda();
+                        batch = torch.stack([preprocess_transform(b) for b in batch]).to(device)
                         batch = batch.reshape(n_batch, n_ex, batch.shape[1], 224, 224);
                     feats = image_model(batch).cpu().numpy();
                     ex_feats[i:i+args.batch_size, ...] = feats
@@ -482,12 +494,12 @@ if __name__ == "__main__":
                 n_inp = inp.shape[0]
                 inp_feats = np.zeros((n_inp, N_FEATS))
                 for i in range(0, n_inp, args.batch_size):
-                    if i % 1000 == 0:
+                    if i % 200 == 0:
                         print(i)
                     batch = inp[i:i+args.batch_size, ...]
-                    batch = torch.from_numpy(batch).float().to(device)
+                    batch = torch.from_numpy(batch).float().cpu()
                     if preprocess:
-                        batch = [preprocess_transform(batch) for b in batch];
+                        batch = torch.stack([preprocess_transform(b) for b in batch]).to(device);
                     feats = image_model(batch).cpu().numpy()
                     feats = feats.reshape((-1, N_FEATS))
                     inp_feats[i:i+args.batch_size, :] = feats

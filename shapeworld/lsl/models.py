@@ -110,7 +110,7 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size//2, bidirectional=True);
+        self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=True);
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -261,7 +261,6 @@ class TextProposal(nn.Module):
 
         return sampled_ids, sampled_lengths
 
-
 class SlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
         super().__init__()
@@ -325,24 +324,18 @@ class SlotAttention(nn.Module):
         return slots
 
 class SANet(nn.Module):
-    def __init__(self, im_size, num_slots, dim, encoder, iters = 3, eps = 1e-8, hidden_dim = 128):
+    def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, dim, 3),
+            nn.Conv2d(3, dim, 5),
             nn.ReLU(inplace=True),
-            nn.Conv2d(dim, dim, 3),
+            nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True), 
-            nn.Conv2d(dim, dim, 3),
+            nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True), 
-            nn.Conv2d(dim, dim, 3),
+            nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True),
-            PositionEmbedding(im_size-2*4, im_size-2*4, dim)
-        );
-
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim, 1),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, dim, 1)
+            PositionEmbedding(im_size-4*4, im_size-4*4, dim)
         );
 
     def forward(self, x):

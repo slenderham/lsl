@@ -70,7 +70,7 @@ if __name__ == "__main__":
                                 action='store_true',
                                 help='Use hypotheses for prediction')
     parser.add_argument('--backbone',
-                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained'],
+                        choices=['vgg16_fixed', 'conv4', 'resnet18', 'pretrained', 'slot_attn'],
                         default='pretrained',
                         help='Image model')
     parser.add_argument('--normalize_feats',
@@ -340,6 +340,8 @@ if __name__ == "__main__":
         backbone_model = ResNet18()
     elif args.backbone == "pretrained":
         backbone_model = None;
+    elif args.backbone == 'slot_attn':
+        backbone_model = SANet(im_size=64, num_slots=3, dim=64)
     else:
         raise NotImplementedError(args.backbone)
 

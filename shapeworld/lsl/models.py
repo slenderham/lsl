@@ -364,6 +364,9 @@ class PositionEmbedding(nn.Module):
             y_coord_neg
         ], dim=0).unsqueeze(0);
 
+        if torch.cuda.is_available():
+            self.coords = self.coords.cuda();
+
         self.pos_emb = nn.Conv2d(4, hidden_size, 1);
 
     def forward(self, x):

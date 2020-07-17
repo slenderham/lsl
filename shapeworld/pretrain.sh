@@ -5,11 +5,11 @@ python lsl/pretrain.py --cuda \
     --seed $RANDOM \
     --temperature 0.1\
     --lr 0.0001\
-    --epochs 80\
+    --epochs 100\
     --log_interval 10\
     --backbone vgg16\
     --comparison cosine\
-    --data_dir /data/cw9951/easy_sw\
+    --data_dir /data/cw9951/hard_sw\
     --skip_eval\
     --pairing im+lang_by_lang\
     exp/contrastive

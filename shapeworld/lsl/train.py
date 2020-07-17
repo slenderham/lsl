@@ -341,7 +341,7 @@ if __name__ == "__main__":
     elif args.backbone == "pretrained":
         backbone_model = None;
     elif args.backbone == 'slot_attn':
-        backbone_model = SANet(im_size=64, num_slots=3, dim=args.hidden_size);
+        backbone_model = SANet(im_size=64, num_slots=3, dim=64);
     else:
         raise NotImplementedError(args.backbone)
 
@@ -398,6 +398,7 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
+    scheduler = 
 
     def train(epoch, n_steps=100):
         image_model.train()

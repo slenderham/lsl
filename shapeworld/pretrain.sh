@@ -9,7 +9,8 @@ python lsl/pretrain.py --cuda \
     --log_interval 10\
     --backbone vgg16\
     --comparison cosine\
-    --data_dir /data/cw9951/easy_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     --skip_eval\
+    --debug_example\
     --pairing im+lang_by_lang\
     exp/contrastive

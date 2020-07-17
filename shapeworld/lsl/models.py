@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import torch.nn.utils.rnn as rnn_utils
+from matplotlib import pyplot as plt
 
 
 class ExWrapper(nn.Module):
@@ -110,9 +111,9 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size);
+        self.gru = nn.GRU(self.embedding_dim, hidden_size//2, bidirectional=True);
 
-    def forward(self, seq, length):
+    def forward(self, seq, length, return_whole_sequence):
         batch_size = seq.size(0)
 
         if batch_size > 1:
@@ -130,12 +131,19 @@ class TextRep(nn.Module):
             sorted_lengths.data.tolist()
             if batch_size > 1 else length.data.tolist())
 
-        _, hidden = self.gru(packed)
-        hidden = hidden[-1, ...]
+        if return_whole_sequence:
+            hidden, _ = self.gru(packed);
+            hidden = hidden[1:-1, ...];
+        else:
+            _, hidden = self.gru(packed)
+            hidden = hidden[-1, ...];
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
-            hidden = hidden[reversed_idx]
+            if (return_whole_sequence):
+                hidden = hidden[:, reversed_idx]
+            else:
+                hidden = hidden[reversed_idx]
 
         return hidden
 
@@ -302,6 +310,8 @@ class SlotAttention(nn.Module):
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs)
 
+        attns = [];
+
         for _ in range(self.iters):
             slots_prev = slots
 
@@ -310,6 +320,7 @@ class SlotAttention(nn.Module):
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
             attn = dots.softmax(dim=1) + self.eps
+            attns.append(attn);
             attn = attn / attn.sum(dim=-1, keepdim=True)
 
             updates = torch.einsum('bjd,bij->bid', v, attn)
@@ -322,7 +333,16 @@ class SlotAttention(nn.Module):
             slots = slots.reshape(b, -1, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
-        return slots
+        return slots, attns;
+
+    # def _visualize_attns(self, img, attns):
+    #     N, C, H, W = img.shape;
+    #     N, dim_q, dim_k = attns[0].shape;
+    #     fig, axes = plt.subplots(self.iters);
+    #     example_idx = torch.randint(0, N);
+    #     for i in range(self.iters):
+    #         for j in range()
+    #             axes.imshow(F.interpolate(attens[]));
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -345,9 +365,8 @@ class SANet(nn.Module):
         x = self.encoder(x);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
-        x = self.slot_attn(x); # --> N * num slots * feature size
-        x = torch.mean(x, dim=1);
-        return x;
+        x, attns = self.slot_attn(x); # --> N * num slots * feature size
+        return x, attns;
 
 class PositionEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):
@@ -470,3 +489,42 @@ class BilinearScorer(DotPScorer):
         wy = self.dropout(wy)
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
+
+class TransformerScorer(Scorer):
+    def __init__(self, hidden_size, scorer, modalities):
+        # transformer layer for contextualized embedding of objects
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
+        
+        # aggregation of all objects after embedded
+        self.x_agg_gate = nn.Linear(hidden_size, hidden_size);
+        self.x_agg = nn.Linear(hidden_size, hidden_size);
+        self.y_agg_gate = nn.Linear(hidden_size, hidden_size);
+        self.y_agg = nn.Linear(hidden_size, hidden_size);
+
+        # final scorer on aggregations
+        self.scorer = {
+            'cosine': CosineScorer(temperature=scorer['temp']),
+            'dotp': DotPScorer(),
+        }[scorer['name']];
+
+        assert(modalities in ["im+im", "im+lang"]), "Please select the correct modalities";
+        self.modalities = modalities
+
+    def score(self, x, y):
+        N, n_ex, num_obj_x, _ = x.shape;
+        ex = ex.reshape(N, n_ex*num_obj_x, -1);
+
+        total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N_x*N_y x hidden size
+
+        x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N_x*N_y x hidden size
+        x_enc = ex_inp_enc[:n_ex*num_obj_x];
+        y_enc = ex_inp_enc[n_ex*num_obj_x:];
+
+        x_agged = torch.mean(torch.sigmoid(self.x_agg_gate(x_enc))*self.x_agg(x_enc), dim=0); # --> N_x*N_y x hidden size
+        y_agged = torch.mean(torch.sigmoid(self.y_agg_gate(y_enc))*self.y_agg(y_enc), dim=0); # --> N_x*N_y x hidden size
+
+        return self.score.score(x_agged, y_agged).reshape(N_x, N_y);
+
+    def _cartesian_product(self, x, y):
+        return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in len(x) for j in len(y)]);

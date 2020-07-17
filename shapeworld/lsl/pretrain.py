@@ -363,9 +363,9 @@ if __name__ == "__main__":
                 print(examples[rand_idx][0].shape)
                 fig, axes = plt.subplots(5);
                 for i in range(4):
-                    axes[i].imshow(examples[rand_idx][i].transpose(0, 2)); # plot examples, transpose to put channel in the last dim
+                    axes[i].imshow(examples[rand_idx][i].permute(1, 2, 0)); # plot examples, transpose to put channel in the last dim
                     axes[i].axis('off');
-                axes[4].imshow(image[rand_idx].transpose(0, 2));
+                axes[4].imshow(image[rand_idx].permute(1, 2, 0));
                 axes[4].axis('off')
                 plt.show();
                 return 0;

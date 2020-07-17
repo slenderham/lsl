@@ -341,7 +341,7 @@ if __name__ == "__main__":
     elif args.backbone == "pretrained":
         backbone_model = None;
     elif args.backbone == 'slot_attn':
-        backbone_model = SANet(im_size=64, num_slots=3, dim=64);
+        backbone_model = SANet(im_size=64, num_slots=6, dim=64);
     else:
         raise NotImplementedError(args.backbone)
 
@@ -504,6 +504,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(params_to_optimize, 10.0)
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:

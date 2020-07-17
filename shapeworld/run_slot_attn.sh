@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HYPO_LAMBDA=20
+HYPO_LAMBDA=5
 
 python lsl/train.py --cuda \
     --predict_concept_hyp \
@@ -10,7 +10,7 @@ python lsl/train.py --cuda \
     --backbone slot_attn\
     --mlp_on_feats\
     --comparison dotp\
-    --hidden_size 64\
-    --lr 0.0001\
-    --data_dir /Users/wangchong/Downloads/easy_sw\
-    exp/lsl
+    --hidden_size 512\
+    --lr 0.001\
+    --data_dir /data/cw9951/hard_sw\
+    exp/slot_attn

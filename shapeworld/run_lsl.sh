@@ -12,5 +12,6 @@ python lsl/train.py --cuda \
     --comparison dotp\
     --hidden_size 512\
     --lr 0.0001\
-    --data_dir /data/cw9951/easy_sw\
+    --epochs 80\
+    --data_dir /data/cw9951/hard_sw\
     exp/lsl

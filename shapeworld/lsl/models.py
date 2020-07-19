@@ -35,7 +35,7 @@ class ExWrapper(nn.Module):
         x_enc = self.model(x_flat)
 
         if len(x.shape) == 5:
-            x_enc = x_enc.reshape(batch_size, n_ex, -1)
+            x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
 
         return x_enc
 
@@ -75,7 +75,7 @@ class ImageRep(nn.Module):
             x_enc = F.normalize(x_enc, dim=-1);
         if (not self.tune_backbone):
             x_enc = x_enc.detach();
-        return self.model(x_enc)
+        return self.model(x_enc);
 
 class MLP(nn.Module):
     r"""
@@ -111,9 +111,9 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size//2, bidirectional=True);
+        self.gru = nn.GRU(self.embedding_dim, hidden_size);
 
-    def forward(self, seq, length, return_whole_sequence):
+    def forward(self, seq, length):
         batch_size = seq.size(0)
 
         if batch_size > 1:
@@ -131,12 +131,8 @@ class TextRep(nn.Module):
             sorted_lengths.data.tolist()
             if batch_size > 1 else length.data.tolist())
 
-        if return_whole_sequence:
-            hidden, _ = self.gru(packed);
-            hidden = hidden[1:-1, ...];
-        else:
-            _, hidden = self.gru(packed)
-            hidden = hidden[-1, ...];
+        _, hidden = self.gru(packed)
+        hidden = hidden[-1, ...];
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
@@ -146,6 +142,47 @@ class TextRep(nn.Module):
                 hidden = hidden[reversed_idx]
 
         return hidden
+
+
+class TextRepTransformer(nn.Module):
+    def __init__(self, embedding_module, hidden_size):
+        super(TextRepTransformer, self).__init__()
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.1, max_len=64);
+
+    def forward(self, seq, padding_mask):
+        batch_size = seq.size(0)
+
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+        embed_seq = self.pe(embed_seq)
+        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask);
+        hidden = hidden[1:-1, ...];
+
+        return hidden
+
+class TextPositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.0, max_len=5000):
+        super(TextPositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
 
 class TextProposal(nn.Module):
     r"""Reverse proposal model, estimating:
@@ -186,9 +223,6 @@ class TextProposal(nn.Module):
 
         # embed your sequences
         embed_seq = self.embedding(seq)
-
-        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
-                                                      sorted_lengths)
 
         # shape = (seq_len, batch, hidden_dim)
         packed_output, _ = self.gru(packed_input, feats)
@@ -333,7 +367,7 @@ class SlotAttention(nn.Module):
             slots = slots.reshape(b, -1, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
-        return slots, attns;
+        return slots;
 
     # def _visualize_attns(self, img, attns):
     #     N, C, H, W = img.shape;
@@ -357,7 +391,7 @@ class SANet(nn.Module):
             nn.ReLU(inplace=True), 
             nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True),
-            PositionEmbedding(im_size-4*4, im_size-4*4, dim)
+            ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
         );
         self.final_feat_dim=dim;
 
@@ -365,12 +399,12 @@ class SANet(nn.Module):
         x = self.encoder(x);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
-        x, attns = self.slot_attn(x); # --> N * num slots * feature size
-        return x, attns;
+        x = self.slot_attn(x); # --> N * num slots * feature size
+        return x;
 
-class PositionEmbedding(nn.Module):
+class ImagePositionalEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):
-        super(PositionEmbedding, self).__init__();
+        super(ImagePositionalEmbedding, self).__init__();
         x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width);
         x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width);
         y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width);
@@ -494,8 +528,9 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class TransformerScorer(Scorer):
-    def __init__(self, hidden_size, scorer, modalities):
+    def __init__(self, hidden_size, scorer, get_diag):
         # transformer layer for contextualized embedding of objects
+        super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
         
@@ -511,23 +546,28 @@ class TransformerScorer(Scorer):
             'dotp': DotPScorer(),
         }[scorer['name']];
 
-        assert(modalities in ["im+im", "im+lang"]), "Please select the correct modalities";
-        self.modalities = modalities
+        self.get_diag = get_diag
 
     def score(self, x, y):
         N, n_ex, num_obj_x, _ = x.shape;
-        ex = ex.reshape(N, n_ex*num_obj_x, -1);
+        x = x.reshape(N, n_ex*num_obj_x, -1);
 
-        total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N_x*N_y x hidden size
+        if (self.get_diag):
+            total_input = torch.cat([x, y], dim=1).transpose(0, 1);
+        else:
+            total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N_x*N_y x hidden size
 
         x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N_x*N_y x hidden size
-        x_enc = ex_inp_enc[:n_ex*num_obj_x];
-        y_enc = ex_inp_enc[n_ex*num_obj_x:];
+        x_enc = x_y_enc[:n_ex*num_obj_x];
+        y_enc = x_y_enc[n_ex*num_obj_x:];
 
         x_agged = torch.mean(torch.sigmoid(self.x_agg_gate(x_enc))*self.x_agg(x_enc), dim=0); # --> N_x*N_y x hidden size
         y_agged = torch.mean(torch.sigmoid(self.y_agg_gate(y_enc))*self.y_agg(y_enc), dim=0); # --> N_x*N_y x hidden size
 
-        return self.score.score(x_agged, y_agged).reshape(N_x, N_y);
+        if (not self.get_diag):
+            return self.scorer.score(x_agged, y_agged).reshape(N, -1);
+        else:
+            return self.scorer.score(x_agged, y_agged);
 
     def _cartesian_product(self, x, y):
-        return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in len(x) for j in len(y)]);
+        return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);

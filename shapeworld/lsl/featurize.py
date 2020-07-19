@@ -35,7 +35,6 @@ if preprocess:
 with torch.no_grad():
     for split in ("train", "val", "test", "val_same", "test_same"):
         print(split);
-        data_loader = data_loader_dict[split]
 
         ex = np.load("{}/shapeworld/{}/examples.npz".format(DATA_DIR, split))['arr_0']
         ex = np.transpose(ex, (0, 1, 4, 2, 3))

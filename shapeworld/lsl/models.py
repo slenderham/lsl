@@ -163,7 +163,6 @@ class TextRepTransformer(nn.Module):
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
         hidden = self.model(embed_seq, src_key_padding_mask=padding_mask);
-        hidden = hidden[1:-1, ...];
 
         return hidden
 
@@ -553,9 +552,9 @@ class TransformerScorer(Scorer):
         x = x.reshape(N, n_ex*num_obj_x, hidden_size);
         assert(y.shape[0]==N and y.shape[2]==hidden_size)
 
-        x_mask = torch.ones(N, n_ex*num_obj_x)>0.5; # --> N x n_ex*num_obj_x
+        x_mask = torch.ones(N, n_ex*num_obj_x)<0.5; # --> N x n_ex*num_obj_x
         if y_mask==None:
-            y_mask = torch.ones(y.shape[0], y.shape[1])>0.5 # --> N x num_obj_y
+            y_mask = torch.ones(y.shape[0], y.shape[1])<0.5 # --> N x num_obj_y
 
         if torch.cuda.is_available():
             x_mask = x_mask.cuda()

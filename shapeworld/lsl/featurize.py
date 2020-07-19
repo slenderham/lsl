@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 import math
+import numpy as np
 import torch.nn.functional as F
 from torch.nn.utils.weight_norm import WeightNorm
-import torchvision.models as models
+from torchvision import  models, transforms
 from vision import Flatten
-from models import ExWrapper
+from models import ExWrapper, ImageRep
 
 def VGG16():
     model = models.vgg16_bn(pretrained=True).features;
@@ -22,7 +23,12 @@ DATA_DIR = '/data/cw9951/hard_sw'
 
 preprocess = True;
 batch_size = 16;
+if (torch.cuda.is_available()):
+    device = torch.device('cuda');
+else:
+    device = torch.device('cpu');
 
+image_model.to(device);
 if preprocess:
     preprocess_transform = transforms.Compose([
         transforms.ToPILImage(),

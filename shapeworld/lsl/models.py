@@ -549,8 +549,9 @@ class TransformerScorer(Scorer):
         self.get_diag = get_diag
 
     def score(self, x, y):
-        N, n_ex, num_obj_x, _ = x.shape;
-        x = x.reshape(N, n_ex*num_obj_x, -1);
+        N, n_ex, num_obj_x, hidden_size = x.shape;
+        x = x.reshape(N, n_ex*num_obj_x, hidden_size);
+        assert(y.shape[0]==N, y.shape[2]==hidden_size)
 
         if (self.get_diag):
             total_input = torch.cat([x, y], dim=1).transpose(0, 1);

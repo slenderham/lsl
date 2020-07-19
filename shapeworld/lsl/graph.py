@@ -219,7 +219,7 @@ if __name__ == "__main__":
     }
 
     # vision
-    backbone_model = SANet(im_size=64, num_slots=6, dim=32);
+    backbone_model = SANet(im_size=64, num_slots=6, dim=64);
     image_model = ExWrapper(ImageRep(backbone_model, \
                                      hidden_size=args.hidden_size, \
                                      tune_backbone=True, \
@@ -287,14 +287,14 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             hint_mask = hint_seq==pad_index;
-            hint_rep = hint_model(hint_seq, hint_mask);
+            hint_rep = hint_model(hint_seq, hint_mask).transpose(0, 1); # --> N x seq_len x C
 
             # Learn representations of images and examples
-            image_rep = image_model(image);
-            examples_rep = image_model(examples);
+            image_rep = image_model(image); # --> N x n_ex x n_slot x C
+            examples_rep = image_model(examples); # --> N x n_slot x C
 
             score = im_im_scorer_model.score(examples_rep, image_rep);
-            pred_loss = F.binary_cross_entropy_with_logits(score, label.float())
+            pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
             score = im_lang_scorer_model.score(examples_rep, hint_rep);
             align_loss = torch.diag(F.log_softmax(score, dim=1)).mean();

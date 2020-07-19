@@ -151,7 +151,7 @@ class TextRepTransformer(nn.Module):
         self.embedding_dim = embedding_module.embedding_dim
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.1, max_len=64);
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=64);
 
     def forward(self, seq, padding_mask):
         batch_size = seq.size(0)
@@ -460,7 +460,7 @@ class CosineScorer(Scorer):
         super(CosineScorer, self).__init__()
         self.temperature = temperature
 
-    def score(self, x, y, input_is_normed=False, get_diag=False):
+    def score(self, x, y, input_is_normed=False, get_diag=True):
         if not input_is_normed:
             x = F.normalize(x, p=2, dim=1);
             y = F.normalize(y, p=2, dim=1);

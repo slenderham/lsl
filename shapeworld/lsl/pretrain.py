@@ -307,9 +307,9 @@ if __name__ == "__main__":
         "vgg16": 4608
     }.get(args.backbone, None);
 
-    image_projection = ExWrapper(MLP(final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
+    # image_projection = ExWrapper(MLP(final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
     # hint_projection = MLP(args.hidden_size, args.hidden_size, args.hidden_size).to(device);
-    params_to_optimize.extend(image_projection.parameters());
+    # params_to_optimize.extend(image_projection.parameters());
     # params_to_optimize.extend(hint_projection.parameters());
 
     print(image_projection);

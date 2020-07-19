@@ -398,7 +398,6 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
-    scheduler = 
 
     def train(epoch, n_steps=100):
         image_model.train()

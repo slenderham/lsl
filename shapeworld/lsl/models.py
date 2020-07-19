@@ -460,7 +460,7 @@ class CosineScorer(Scorer):
         super(CosineScorer, self).__init__()
         self.temperature = temperature
 
-    def score(self, x, y, input_is_normed=False, get_diag=False):
+    def score(self, x, y, input_is_normed=False, get_diag=True):
         if not input_is_normed:
             x = F.normalize(x, p=2, dim=1);
             y = F.normalize(y, p=2, dim=1);
@@ -561,10 +561,8 @@ class TransformerScorer(Scorer):
         x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
         x_enc = x_y_enc[:n_ex*num_obj_x];
         y_enc = x_y_enc[n_ex*num_obj_x:];
-
         x_agged = torch.mean(torch.sigmoid(self.x_agg_gate(x_enc))*self.x_agg(x_enc), dim=0); # --> N*N x hidden size
         y_agged = torch.mean(torch.sigmoid(self.y_agg_gate(y_enc))*self.y_agg(y_enc), dim=0); # --> N*N x hidden size
-
         if (not self.get_diag):
             return self.scorer.score(x_agged, y_agged).reshape(N, N);
         else:

@@ -553,14 +553,20 @@ class TransformerScorer(Scorer):
         x = x.reshape(N, n_ex*num_obj_x, hidden_size);
         assert(y.shape[0]==N and y.shape[2]==hidden_size)
 
-        x_mask = torch.ones(N, n_ex*num_obj_x);
+        x_mask = torch.ones(N, n_ex*num_obj_x)>0.5;
+        if y_mask==None:
+            y_mask = torch.ones(y.shape[0], y.shape[1])>0.5
+
+        if torch.cuda.is_available():
+            x_mask = x_mask.cuda()
+            y_mask = y_mask.cuda()
 
         if (self.get_diag):
             total_input = torch.cat([x, y], dim=1).transpose(0, 1);
-            total_mask = torch.cat([x_mask, hint_mask], dim=1);
+            total_mask = torch.cat([x_mask, y_mask], dim=1);
         else:
             total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
-            total_mask = self._cartesian_product(x_mask, hint_mask);
+            total_mask = self._cartesian_product(x_mask, y_mask);
 
         x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
         x_enc = x_y_enc[:n_ex*num_obj_x];

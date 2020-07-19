@@ -297,7 +297,7 @@ if __name__ == "__main__":
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
             score = im_lang_scorer_model.score(examples_rep, hint_rep);
-            align_loss = torch.diag(F.log_softmax(score, dim=1)).mean();
+            align_loss = -torch.diag(F.log_softmax(score, dim=1)).mean();
 
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*align_loss

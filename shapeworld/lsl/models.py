@@ -567,12 +567,13 @@ class TransformerScorer(Scorer):
         else:
             total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
             total_mask = self._cartesian_product(x_mask, y_mask); # --> N*N x (num_obj_x*n_ex+num_obj_y)
+            y_mask = y_mask.repeat(N, 1)
 
         x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
         x_enc = x_y_enc[:n_ex*num_obj_x];
         y_enc = x_y_enc[n_ex*num_obj_x:];
-
-        y_mask = y_mask.transpose(0, 1).float();
+        print(y_mask.shape, y_enc.shape, y_mask);
+        y_mask = y_mask.transpose(0, 1).float().unsqueeze(-1);
         y_enc = y_enc*y_mask;
 
         x_agged = torch.mean(torch.sigmoid(self.x_agg_gate(x_enc))*self.x_agg(x_enc), dim=0); # --> N*N x hidden size

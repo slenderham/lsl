@@ -24,6 +24,7 @@ from models import SANet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
+from utils import GradualWarmupScheduler
 
 if __name__ == "__main__":
     import argparse

@@ -311,7 +311,7 @@ if __name__ == "__main__":
             loss_total += loss.item()
             pred_loss_total += pred_loss.item()
             align_loss_total += align_loss.item()
-            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size)).float());
+            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size).to(device)).float());
 
             optimizer.zero_grad()
             loss.backward()
@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: \{:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: {:.4f}'.format(
             '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total

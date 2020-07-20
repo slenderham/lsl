@@ -151,7 +151,7 @@ class TextRepTransformer(nn.Module):
         self.embedding_dim = embedding_module.embedding_dim
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=64);
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32);
 
     def forward(self, seq, padding_mask):
         batch_size = seq.size(0)
@@ -384,12 +384,16 @@ class SANet(nn.Module):
         self.encoder = nn.Sequential(
             nn.Conv2d(3, dim, 5),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(dim),
             nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True), 
+            nn.BatchNorm2d(dim),
             nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True), 
+            nn.BatchNorm2d(dim),
             nn.Conv2d(dim, dim, 5),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(dim),
             ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
         );
         self.final_feat_dim=dim;
@@ -534,10 +538,8 @@ class TransformerScorer(Scorer):
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
         
         # aggregation of all objects after embedded
-        self.x_agg_gate = nn.Linear(hidden_size, hidden_size);
-        self.x_agg = nn.Linear(hidden_size, hidden_size);
-        self.y_agg_gate = nn.Linear(hidden_size, hidden_size);
-        self.y_agg = nn.Linear(hidden_size, hidden_size);
+        self.agg_gate = nn.Linear(hidden_size, hidden_size);
+        self.agg = nn.Linear(hidden_size, hidden_size);
 
         # final scorer on aggregations
         self.scorer = {
@@ -569,14 +571,14 @@ class TransformerScorer(Scorer):
             y_mask = y_mask.repeat(N, 1)
 
         x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
+        x_y_enc = torch.sigmoid(self.agg_gate(x_y_enc))*self.agg(x_y_enc);
         x_enc = x_y_enc[:n_ex*num_obj_x];
         y_enc = x_y_enc[n_ex*num_obj_x:];
-        print(y_mask.shape, y_enc.shape, y_mask);
-        y_mask = y_mask.transpose(0, 1).float().unsqueeze(-1);
+        y_mask = (~y_mask).transpose(0, 1).unsqueeze(-1).float();
         y_enc = y_enc*y_mask;
 
-        x_agged = torch.mean(torch.sigmoid(self.x_agg_gate(x_enc))*self.x_agg(x_enc), dim=0); # --> N*N x hidden size
-        y_agged = torch.sum(torch.sigmoid(self.y_agg_gate(y_enc))*self.y_agg(y_enc), dim=0)/y_mask.sum(dim=0); # --> N*N x hidden size
+        x_agged = torch.mean(x_enc, dim=0); # --> N*N x hidden size
+        y_agged = torch.sum(y_enc, dim=0)/y_mask.sum(dim=0); # --> N*N x hidden size
         if (not self.get_diag):
             return self.scorer.score(x_agged, y_agged).reshape(N, N);
         else:

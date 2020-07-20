@@ -580,7 +580,6 @@ class TransformerScorer(Scorer):
         x_y_enc = torch.sigmoid(self.agg_gate(x_y_enc))*self.agg(x_y_enc);
         x_enc = x_y_enc[:n_ex*num_obj_x];
         y_enc = x_y_enc[n_ex*num_obj_x:];
-
         y_mask = (~y_mask).transpose(0, 1).unsqueeze(-1).float();
         y_enc = y_enc*y_mask;
 

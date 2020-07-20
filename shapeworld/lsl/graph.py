@@ -257,6 +257,8 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
+    after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
+    scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
 
@@ -292,7 +294,6 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_rep = image_model(image); # --> N x n_ex x n_slot x C
             examples_rep = image_model(examples); # --> N x n_slot x C
-
             score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=None);
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
@@ -308,6 +309,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
             optimizer.step()
+            scheduler.step()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f}'.format(
@@ -339,7 +341,7 @@ if __name__ == "__main__":
                 image_rep = image_model(image);
                 examples_rep = image_model(examples);
            
-                score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=(hint_seq==pad_index))
+                score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=None)
 
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()

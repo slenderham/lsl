@@ -306,7 +306,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, 10.0)
+            torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
@@ -339,7 +339,7 @@ if __name__ == "__main__":
                 image_rep = image_model(image);
                 examples_rep = image_model(examples);
            
-                score = im_im_scorer_model.score(examples_rep, image_rep)
+                score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=(hint_seq==pad_index))
 
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()

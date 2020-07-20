@@ -126,6 +126,9 @@ class TextRep(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
 
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
+                                                      sorted_lengths)
+
         packed = rnn_utils.pack_padded_sequence(
             embed_seq,
             sorted_lengths.data.tolist()
@@ -330,7 +333,7 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None, visualize_attns=True):
+    def forward(self, inputs, num_slots = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
@@ -364,23 +367,7 @@ class SlotAttention(nn.Module):
             slots = slots.reshape(b, -1, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
-        if (visualize_attns):
-            self._visualize_attns(inputs, attns);
-
-        return slots;
-
-    def _visualize_attns(self, img, attns):
-        N, HtimesW, C = img.shape;
-        H = W = math.isqrt(HtimesW);
-        N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
-        H_k = W_k = math.isqrt(dim_k);
-        rand_idx = torch.randint(0, N, size=(1,)).item();
-        plt.imshow(img[rand_idx].reshape(H, W, C).detach().cpu());
-        fig, axes = plt.subplots(self.iters, self.num_slots);
-        for i in range(self.iters):
-            for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, H_k, W_k), size=(H, W)).detach().cpu());
-        plt.show();
+        return slots, attns;
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -403,12 +390,27 @@ class SANet(nn.Module):
         );
         self.final_feat_dim=dim;
 
-    def forward(self, x):
-        x = self.encoder(x);
+    def forward(self, img, visualize_attns=True):
+        x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
-        x = self.slot_attn(x); # --> N * num slots * feature size
+        x, attns = self.slot_attn(x); # --> N * num slots * feature size
+        if visualize_attns:
+            self._visualize_attns(img, attns);
         return x;
+
+    def _visualize_attns(self, img, attns):
+        N, HtimesW, C = img.shape;
+        H = W = math.isqrt(HtimesW);
+        N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
+        H_k = W_k = math.isqrt(dim_k);
+        rand_idx = torch.randint(0, N, size=(1,)).item();
+        plt.imshow(img[rand_idx].reshape(H, W, C).detach().cpu());
+        fig, axes = plt.subplots(self.iters, self.num_slots);
+        for i in range(self.iters):
+            for j in range(self.num_slots):
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, H_k, W_k), size=(H, W)).detach().cpu());
+        plt.show();
 
 class ImagePositionalEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):

@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: \{:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: {:.4f}'.format(
             '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total

@@ -261,6 +261,7 @@ if __name__ == "__main__":
     scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
+    models_to_save = [image_model, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer, scheduler];
 
     def train(epoch, n_steps=100):
         image_model.train()
@@ -269,6 +270,9 @@ if __name__ == "__main__":
         hint_model.train()
 
         loss_total = 0
+        pred_loss_total = 0;
+        align_loss_total = 0;
+        align_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -304,6 +308,9 @@ if __name__ == "__main__":
             loss = pred_loss + args.hypo_lambda*align_loss
 
             loss_total += loss.item()
+            pred_loss_total += pred_loss.item()
+            align_loss_total += align_loss.item()
+            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size)).float());
 
             optimizer.zero_grad()
             loss.backward()
@@ -318,8 +325,8 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}'.format(
-            '(train)', epoch, loss_total))
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: \{:.4f}'.format(
+            '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total
 
@@ -374,9 +381,6 @@ if __name__ == "__main__":
         train_loss = train(epoch);
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
-        # Evaluate tre on validation set
-        #  val_tre, val_tre_std = eval_tre(epoch, 'val')
-        val_tre, val_tre_std = 0.0, 0.0
 
         test_acc, test_raw_scores = test(epoch, 'test')
         if has_same:
@@ -399,24 +403,17 @@ if __name__ == "__main__":
             best_epoch_acc = epoch_acc
             best_val_acc = val_acc
             best_val_same_acc = val_same_acc
-            best_val_tre = val_tre
-            best_val_tre_std = val_tre_std
+
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
             best_test_acc_ci = test_acc_ci
 
-        if val_tre < lowest_val_tre:
-            lowest_val_tre = val_tre
-            lowest_val_tre_std = val_tre_std
-
         if args.save_checkpoint:
-            raise NotImplementedError
+            torch.save([m.state_dict() for m in models_to_save], os.path.join(args.exp_dir, 'checkpoint'));
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)
         metrics['val_same_acc'].append(val_same_acc)
-        metrics['val_tre'].append(val_tre)
-        metrics['val_tre_std'].append(val_tre_std)
         metrics['test_acc'].append(test_acc)
         metrics['test_same_acc'].append(test_same_acc)
         metrics['test_acc_ci'].append(test_acc_ci)
@@ -426,13 +423,9 @@ if __name__ == "__main__":
         metrics['best_epoch'] = best_epoch
         metrics['best_val_acc'] = best_val_acc
         metrics['best_val_same_acc'] = best_val_same_acc
-        metrics['best_val_tre'] = best_val_tre
-        metrics['best_val_tre_std'] = best_val_tre_std
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_same_acc'] = best_test_same_acc
         metrics['best_test_acc_ci'] = best_test_acc_ci
-        metrics['lowest_val_tre'] = lowest_val_tre
-        metrics['lowest_val_tre_std'] = lowest_val_tre_std
         metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))

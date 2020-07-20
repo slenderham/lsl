@@ -332,7 +332,7 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None):
+    def forward(self, inputs, num_slots = None, visualize_attns=False):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
@@ -366,16 +366,22 @@ class SlotAttention(nn.Module):
             slots = slots.reshape(b, -1, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
+        if (visualize_attns):
+            self._visualize_attns(inputs, attns);
+
         return slots;
 
-    # def _visualize_attns(self, img, attns):
-    #     N, C, H, W = img.shape;
-    #     N, dim_q, dim_k = attns[0].shape;
-    #     fig, axes = plt.subplots(self.iters);
-    #     example_idx = torch.randint(0, N);
-    #     for i in range(self.iters):
-    #         for j in range()
-    #             axes.imshow(F.interpolate(attens[]));
+    def _visualize_attns(self, img, attns):
+        N, HtimesW, C = img.shape;
+        H = W = math.isqrt(HtimesW);
+        N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
+        H_k = W_k = math.isqrt(dim_k);
+        fig, axes = plt.subplots(self.iters, self.num_slots);
+        rand_idx = torch.randint(0, N);
+        for i in range(self.iters):
+            for j in range(self.num_slots):
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(H_k, W_k), size=(H, W)));
+        plt.show();
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -534,8 +540,8 @@ class TransformerScorer(Scorer):
     def __init__(self, hidden_size, scorer, get_diag):
         # transformer layer for contextualized embedding of objects
         super(TransformerScorer, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
         
         # aggregation of all objects after embedded
         self.agg_gate = nn.Linear(hidden_size, hidden_size);

@@ -136,10 +136,7 @@ class TextRep(nn.Module):
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
-            if (return_whole_sequence):
-                hidden = hidden[:, reversed_idx]
-            else:
-                hidden = hidden[reversed_idx]
+            hidden = hidden[reversed_idx]
 
         return hidden
 
@@ -222,7 +219,8 @@ class TextProposal(nn.Module):
 
         # embed your sequences
         embed_seq = self.embedding(seq)
-
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
+                                                      sorted_lengths)
         # shape = (seq_len, batch, hidden_dim)
         packed_output, _ = self.gru(packed_input, feats)
         output = rnn_utils.pad_packed_sequence(packed_output)
@@ -332,7 +330,7 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None, visualize_attns=False):
+    def forward(self, inputs, num_slots = None, visualize_attns=True):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
@@ -376,11 +374,12 @@ class SlotAttention(nn.Module):
         H = W = math.isqrt(HtimesW);
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
+        rand_idx = torch.randint(0, N, size=(1,)).item();
+        plt.imshow(img[rand_idx].reshape(H, W, C).detach().cpu());
         fig, axes = plt.subplots(self.iters, self.num_slots);
-        rand_idx = torch.randint(0, N);
         for i in range(self.iters):
             for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(H_k, W_k), size=(H, W)));
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, H_k, W_k), size=(H, W)).detach().cpu());
         plt.show();
 
 class SANet(nn.Module):

@@ -311,7 +311,7 @@ if __name__ == "__main__":
             loss_total += loss.item()
             pred_loss_total += pred_loss.item()
             align_loss_total += align_loss.item()
-            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size)).float());
+            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size).to(device)).float());
 
             optimizer.zero_grad()
             loss.backward()

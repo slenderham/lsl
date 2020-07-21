@@ -139,10 +139,7 @@ class TextRep(nn.Module):
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
-            if (return_whole_sequence):
-                hidden = hidden[:, reversed_idx]
-            else:
-                hidden = hidden[reversed_idx]
+            hidden = hidden[reversed_idx]
 
         return hidden
 
@@ -225,7 +222,8 @@ class TextProposal(nn.Module):
 
         # embed your sequences
         embed_seq = self.embedding(seq)
-
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
+                                                      sorted_lengths)
         # shape = (seq_len, batch, hidden_dim)
         packed_output, _ = self.gru(packed_input, feats)
         output = rnn_utils.pad_packed_sequence(packed_output)
@@ -399,7 +397,7 @@ class SANet(nn.Module):
 
         self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]
 
-    def forward(self, img, visualize_attns=True):
+    def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -552,7 +550,7 @@ class TransformerScorer(Scorer):
         # transformer layer for contextualized embedding of objects
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         
         # aggregation of all objects after embedded
         self.agg_gate = nn.Linear(hidden_size, hidden_size);

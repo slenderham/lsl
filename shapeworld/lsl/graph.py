@@ -234,9 +234,12 @@ if __name__ == "__main__":
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
 
-    im_lang_scorer_model = ContrastiveLoss(temperature=args.temperature)
+    im_lang_scorer_model = CosineScorer(temperature=args.temperature)
     im_lang_scorer_model = im_lang_scorer_model.to(device)
     params_to_optimize.extend(im_lang_scorer_model.parameters())
+
+    # projection
+    image_projection = MLP(64, args.hidden_size, args.hidden_size);
 
     # language
     embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
@@ -295,7 +298,7 @@ if __name__ == "__main__":
             score = im_im_scorer_model.score(examples_rep, image_rep);
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
-            score = im_lang_scorer_model.score(examples_rep, hint_rep);
+            score = im_lang_scorer_model.score(image_projection(examples_rep), hint_rep, get_diag=False);
             align_loss = -torch.diag(F.log_softmax(score, dim=1)).mean();
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*align_loss

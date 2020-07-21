@@ -392,7 +392,7 @@ class SANet(nn.Module):
         self.num_slots = num_slots;
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=2, dim_feedforward=4*dim, dropout=0.0);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=4, dim_feedforward=4*dim, dropout=0.0);
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2);
 
         self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]

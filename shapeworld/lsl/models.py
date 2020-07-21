@@ -389,8 +389,10 @@ class SANet(nn.Module):
             ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
         );
         self.final_feat_dim=dim;
+        self.iters = iters;
+        self.num_slots = num_slots;
 
-    def forward(self, img, visualize_attns=True):
+    def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -400,8 +402,7 @@ class SANet(nn.Module):
         return x;
 
     def _visualize_attns(self, img, attns):
-        N, HtimesW, C = img.shape;
-        H = W = math.isqrt(HtimesW);
+        N, C, H, W = img.shape;
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
         rand_idx = torch.randint(0, N, size=(1,)).item();
@@ -409,7 +410,7 @@ class SANet(nn.Module):
         fig, axes = plt.subplots(self.iters, self.num_slots);
         for i in range(self.iters):
             for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, H_k, W_k), size=(H, W)).detach().cpu());
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W)).detach().squeeze().cpu());
         plt.show();
 
 class ImagePositionalEmbedding(nn.Module):
@@ -475,7 +476,7 @@ class CosineScorer(Scorer):
             x = F.normalize(x, p=2, dim=1);
             y = F.normalize(y, p=2, dim=1);
         if get_diag:
-            return torch.sum(x * y, dim=1);
+            return torch.sum(x * y, dim=1)/self.temperature;
         else:
             return torch.mm(x, y.t())/self.temperature;
     
@@ -542,7 +543,7 @@ class TransformerScorer(Scorer):
         # transformer layer for contextualized embedding of objects
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         
         # aggregation of all objects after embedded
         self.agg_gate = nn.Linear(hidden_size, hidden_size);

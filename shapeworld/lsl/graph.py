@@ -16,6 +16,7 @@ from torch import optim
 from utils import (
     AverageMeter,
     save_defaultdict_to_fs,
+    save_checkpoint,
 )
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
@@ -222,26 +223,18 @@ if __name__ == "__main__":
     # vision
     backbone_model = SANet(im_size=64, num_slots=6, dim=64);
     image_model = ExWrapper(ImageRep(backbone_model, \
-                                     hidden_size=args.hidden_size, \
+                                     hidden_size=None, \
                                      tune_backbone=True, \
                                      normalize_feats=False));
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
     # scorer
-    scorer_type = {
-        'dotp': {'name': 'dotp', 'temp': 1},
-        'cosine': {'name': 'cosine', 'temp': args.temperature}
-    }[args.comparison]
-    im_im_scorer_model = TransformerScorer(hidden_size=args.hidden_size, 
-                                            scorer=scorer_type, 
-                                            get_diag=True)
+    im_im_scorer_model = DotPScorer()
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
 
-    im_lang_scorer_model = TransformerScorer(hidden_size=args.hidden_size, 
-                                                scorer={'name': 'cosine', 'temp': args.temperature}, 
-                                                get_diag=False)
+    im_lang_scorer_model = ContrastiveLoss(temperature=args.temperature)
     im_lang_scorer_model = im_lang_scorer_model.to(device)
     params_to_optimize.extend(im_lang_scorer_model.parameters())
 
@@ -294,17 +287,16 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             hint_mask = hint_seq==pad_index;
-            hint_rep = hint_model(hint_seq, hint_mask).transpose(0, 1); # --> N x seq_len x C
+            hint_rep = hint_model(hint_seq, hint_mask); # --> N x C
 
             # Learn representations of images and examples
-            image_rep = image_model(image); # --> N x n_ex x n_slot x C
-            examples_rep = image_model(examples); # --> N x n_slot x C
-            score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=None);
+            image_rep = image_model(image); # --> N x n_slot x C
+            examples_rep = image_model(examples).mean(dim=1); # --> N x n_slot x C
+            score = im_im_scorer_model.score(examples_rep, image_rep);
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
-            score = im_lang_scorer_model.score(examples_rep, hint_rep, y_mask=hint_mask);
+            score = im_lang_scorer_model.score(examples_rep, hint_rep);
             align_loss = -torch.diag(F.log_softmax(score, dim=1)).mean();
-
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*align_loss
 
@@ -326,7 +318,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tAlignment Loss: {:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\Contrastive Loss: {:.4f}\tContrastive Acc: {:.4f}'.format(
             '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total
@@ -347,9 +339,9 @@ if __name__ == "__main__":
                 batch_size = len(image)
 
                 image_rep = image_model(image);
-                examples_rep = image_model(examples);
+                examples_rep = image_model(examples).mean(dim=1);
            
-                score = im_im_scorer_model.score(examples_rep, image_rep, y_mask=None)
+                score = im_im_scorer_model.score(examples_rep, image_rep)
 
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
@@ -410,7 +402,7 @@ if __name__ == "__main__":
             best_test_acc_ci = test_acc_ci
 
         if args.save_checkpoint:
-            torch.save([m.state_dict() for m in models_to_save], os.path.join(args.exp_dir, 'checkpoint'));
+            save_checkpoint([m.state_dict() for m in models_to_save], is_best=is_best_epoch, folder=args.exp_dir);
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

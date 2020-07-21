@@ -165,7 +165,7 @@ class TextRepTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask);
+        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask)[0,...];
 
         return hidden
 
@@ -372,9 +372,8 @@ class SlotAttention(nn.Module):
         return slots, attns;
 
 class SANet(nn.Module):
-    def __init__(self, im_size, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8):
         super(SANet, self).__init__()
-        self.slot_attn = SlotAttention(num_slots, dim, iters, eps, hidden_dim);
         self.encoder = nn.Sequential(
             nn.Conv2d(3, dim, 5),
             nn.ReLU(inplace=True),
@@ -391,6 +390,14 @@ class SANet(nn.Module):
             ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
         );
         self.final_feat_dim=dim;
+        self.iters = iters;
+        self.num_slots = num_slots;
+
+        self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=2, dim_feedforward=4*dim, dropout=0.0);
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2);
+
+        self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]
 
     def forward(self, img, visualize_attns=True):
         x = self.encoder(img);
@@ -399,19 +406,20 @@ class SANet(nn.Module):
         x, attns = self.slot_attn(x); # --> N * num slots * feature size
         if visualize_attns:
             self._visualize_attns(img, attns);
+        x = torch.cat([self.seed.expand(1, n, -1), x.transpose(0, 1)]);
+        x = self.transformer(x)[0,...];
         return x;
 
     def _visualize_attns(self, img, attns):
-        N, HtimesW, C = img.shape;
-        H = W = math.isqrt(HtimesW);
+        N, C, H, W = img.shape;
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
         rand_idx = torch.randint(0, N, size=(1,)).item();
-        plt.imshow(img[rand_idx].reshape(H, W, C).detach().cpu());
+        plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
         fig, axes = plt.subplots(self.iters, self.num_slots);
         for i in range(self.iters):
             for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, H_k, W_k), size=(H, W)).detach().cpu());
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').squeeze().detach().cpu());
         plt.show();
 
 class ImagePositionalEmbedding(nn.Module):
@@ -477,7 +485,7 @@ class CosineScorer(Scorer):
             x = F.normalize(x, p=2, dim=1);
             y = F.normalize(y, p=2, dim=1);
         if get_diag:
-            return torch.sum(x * y, dim=1);
+            return torch.sum(x * y, dim=1)/self.temperature;
         else:
             return torch.mm(x, y.t())/self.temperature;
     
@@ -595,3 +603,5 @@ class TransformerScorer(Scorer):
 
     def _cartesian_product(self, x, y):
         return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
+
+# class SinkhornScorer(Scorer):

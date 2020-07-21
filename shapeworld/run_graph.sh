@@ -10,5 +10,6 @@ python lsl/graph.py --cuda \
     --comparison dotp\
     --hidden_size 256\
     --lr 0.0001\
-    --data_dir /data/cw9951/hard_sw\
+    --save_checkpoint\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/graph

@@ -603,3 +603,4 @@ class TransformerScorer(Scorer):
         return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
 
 # class SinkhornScorer(Scorer):
+

@@ -239,7 +239,8 @@ if __name__ == "__main__":
     params_to_optimize.extend(im_lang_scorer_model.parameters())
 
     # projection
-    image_projection = MLP(64, args.hidden_size, args.hidden_size);
+    image_projection = MLP(64, args.hidden_size, args.hidden_size).to(device);
+    params_to_optimize.extend(image_projection.parameters());
 
     # language
     embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
@@ -258,7 +259,7 @@ if __name__ == "__main__":
     scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_model, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer, scheduler];
+    models_to_save = [image_model, image_projection, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer, scheduler];
 
     def train(epoch, n_steps=100):
         image_model.train()
@@ -321,7 +322,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\Contrastive Loss: {:.4f}\tContrastive Acc: {:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tContrastive Loss: {:.4f}\tContrastive Acc: {:.4f}'.format(
             '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total

@@ -397,7 +397,7 @@ class SANet(nn.Module):
 
         self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]
 
-    def forward(self, img, visualize_attns=True):
+    def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);

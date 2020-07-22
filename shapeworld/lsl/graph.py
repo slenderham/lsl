@@ -262,7 +262,7 @@ if __name__ == "__main__":
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_model, image_projection, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer, scheduler];
+    models_to_save = [image_model, image_projection, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer];
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'model_best.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'model_best.pth.tar');
@@ -323,7 +323,6 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
             optimizer.step()
-            scheduler.step()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f}'.format(

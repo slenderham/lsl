@@ -110,6 +110,9 @@ if __name__ == "__main__":
     parser.add_argument('--save_checkpoint',
                         action='store_true',
                         help='Save model')
+    parser.add_argument('--load_checkpoint',
+                        action='store_true',
+                        help='Load model')
     parser.add_argument('--cuda',
                         action='store_true',
                         help='Enables CUDA training')
@@ -255,11 +258,18 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
-    after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
-    scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
+    # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
     models_to_save = [image_model, image_projection, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer, scheduler];
+
+    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'model_best.pth.tar')):
+        ckpt_path = os.path.join(args.exp_dir, 'model_best.pth.tar');
+        sds = torch.load(ckpt_path, map_location=torch.device('cpu'));
+        for m, sd in zip(models_to_save, sds):
+            m.load_state_dict(sd);
+        print("loaded checkpoint");
 
     def train(epoch, n_steps=100):
         image_model.train()
@@ -322,7 +332,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}\tPrediction Loss: {:.4f}\tContrastive Loss: {:.4f}\tContrastive Acc: {:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f} Prediction Loss: {:.4f} Contrastive Loss: {:.4f} Contrastive Acc: {:.4f}'.format(
             '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
 
         return loss_total

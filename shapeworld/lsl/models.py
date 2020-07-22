@@ -373,19 +373,19 @@ class SANet(nn.Module):
     def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8):
         super(SANet, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, dim, 5),
+            nn.Conv2d(3, dim, 3),
             nn.ReLU(inplace=True),
             nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 5),
+            nn.Conv2d(dim, dim, 3),
             nn.ReLU(inplace=True), 
             nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 5),
+            nn.Conv2d(dim, dim, 3),
             nn.ReLU(inplace=True), 
             nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 5),
+            nn.Conv2d(dim, dim, 3),
             nn.ReLU(inplace=True),
             nn.BatchNorm2d(dim),
-            ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
+            ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
         );
         self.final_feat_dim=dim;
         self.iters = iters;
@@ -397,7 +397,7 @@ class SANet(nn.Module):
 
         self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]
 
-    def forward(self, img, visualize_attns=False):
+    def forward(self, img, visualize_attns=True):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -417,7 +417,7 @@ class SANet(nn.Module):
         fig, axes = plt.subplots(self.iters, self.num_slots);
         for i in range(self.iters):
             for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').squeeze().detach().cpu());
+                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='nearest').squeeze().detach().cpu());
         plt.show();
 
 class ImagePositionalEmbedding(nn.Module):

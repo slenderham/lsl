@@ -4,3 +4,5 @@
 .Ruserdata
 
 sync_results.sh
+shapeworld/exp/graph/checkpoint.pth.tar
+shapeworld/exp/graph/model_best.pth.tar

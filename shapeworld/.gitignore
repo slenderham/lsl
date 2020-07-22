@@ -148,3 +148,4 @@ vignettes/*.pdf
 *.nb.html
 notebooks/
 
+exp/*

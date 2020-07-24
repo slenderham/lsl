@@ -302,7 +302,7 @@ if __name__ == "__main__":
         loss_total = 0
         pred_loss_total = 0;
         cls_loss_total = 0;
-        # align_acc = 0;
+        align_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -382,8 +382,8 @@ if __name__ == "__main__":
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
 
-                image_rep = image_model(image);
-                examples_rep = image_model(examples).mean(dim=1);
+                image_rep = image_part_model(image).mean(dim=1);
+                examples_rep = image_part_model(examples).mean(dim=[1,2]);
            
                 score = im_im_scorer_model.score(examples_rep, image_rep)
 

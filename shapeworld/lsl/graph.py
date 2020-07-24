@@ -340,7 +340,7 @@ if __name__ == "__main__":
             slot_cls_score = F.log_softmax(image_part_projection(examples_slot.flatten(0, 1)), dim=-1);
 
             indices = hungarian(slot_cls_score, [o for o in objs for i in range(n_ex)]);
-            cls_loss = torch.as_tensor([slot_cls_score[i][indices[i][0][j]][indices[i][1][j]] for i in range(batch_size*n_ex) for j in range(len(indices[i][0]))]).mean();
+            cls_loss = -torch.as_tensor([slot_cls_score[i][indices[i][0][j]][indices[i][1][j]] for i in range(batch_size*n_ex) for j in range(len(indices[i][0]))]).mean();
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*cls_loss
 

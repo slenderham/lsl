@@ -18,14 +18,14 @@ from utils import (
     save_defaultdict_to_fs,
     save_checkpoint,
 )
-from datasets import ShapeWorld, extract_features
-from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
-from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity, TextRepTransformer
+from datasets import ShapeWorld, extract_features, extract_objects
+from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
+from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer, SinkhornScorer
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
-from utils import GradualWarmupScheduler
+from utils import GradualWarmupScheduler, hungarian
 
 if __name__ == "__main__":
     import argparse
@@ -223,31 +223,54 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
+    labels_to_idx = {}
+    i = 0
+    for col in COLORS:
+        for shp in SHAPES:
+            labels_to_idx[col+' '+shp] = i;
+            i += 1;
+    for col in COLORS:
+        labels_to_idx[col+' shape'] = i;
+        i += 1;
+    for shp in SHAPES:
+        labels_to_idx[shp] = i;
+        i += 1;
+
     # vision
     backbone_model = SANet(im_size=64, num_slots=6, dim=64);
-    image_model = ExWrapper(ImageRep(backbone_model, \
+    image_part_model = ExWrapper(ImageRep(backbone_model, \
                                      hidden_size=None, \
                                      tune_backbone=True, \
                                      normalize_feats=False));
-    image_model = image_model.to(device)
-    params_to_optimize = list(image_model.parameters())
+    image_part_model = image_part_model.to(device)
+    
+    # image_whole_model = ExWrapper(MultilayerTransformer(64, 2, 2));
+    # image_whole_model = image_whole_model.to(device);
+
+    params_to_optimize = list(image_part_model.parameters())
+    # params_to_optimize = list(image_whole_model.parameters())
 
     # scorer
     im_im_scorer_model = DotPScorer()
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
 
-    im_lang_scorer_model = CosineScorer(temperature=args.temperature)
-    im_lang_scorer_model = im_lang_scorer_model.to(device)
-    params_to_optimize.extend(im_lang_scorer_model.parameters())
+    # base_scorer_model = CosineScorer(temperature=args.temperature)
+    # im_lang_part_scorer_model = SinkhornScorer(base_scorer, iters=20);
+    # im_lang_part_scorer_model = im_lang_part_scorer_model.to(device)
+    # params_to_optimize.extend(im_lang_part_scorer_model.parameters())
+
+    # im_lang_whole_scorer_model = SinkhornScorer(base_scorer, iters=20);
+    # im_lang_whole_scorer_model = im_lang_whole_scorer_model.to(device)
+    # params_to_optimize.extend(im_lang_whole_scorer_model.parameters())
 
     # projection
-    image_projection = MLP(64, args.hidden_size, args.hidden_size).to(device);
-    params_to_optimize.extend(image_projection.parameters());
+    image_part_projection = MLP(64, args.hidden_size, len(labels_to_idx)).to(device);
+    params_to_optimize.extend(image_part_projection.parameters());
 
     # language
     embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-    hint_model = TextRepTransformer(embedding_model, hidden_size=args.hidden_size)
+    hint_model = TextRep(embedding_model, hidden_size=args.hidden_size)
     hint_model = hint_model.to(device)
     params_to_optimize.extend(hint_model.parameters())
 
@@ -262,7 +285,7 @@ if __name__ == "__main__":
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_model, image_projection, hint_model, im_im_scorer_model, im_lang_scorer_model, optimizer];
+    models_to_save = [image_part_model, image_part_projection, im_im_scorer_model, hint_model, optimizer];
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'model_best.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'model_best.pth.tar');
@@ -272,15 +295,14 @@ if __name__ == "__main__":
         print("loaded checkpoint");
 
     def train(epoch, n_steps=100):
-        image_model.train()
-        im_im_scorer_model.train()
-        im_lang_scorer_model.train()
-        hint_model.train()
+        for m in models_to_save:
+            if (isinstance(m, nn.Module)):
+                m.train();
 
         loss_total = 0
         pred_loss_total = 0;
-        align_loss_total = 0;
-        align_acc = 0;
+        cls_loss_total = 0;
+        # align_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -300,24 +322,32 @@ if __name__ == "__main__":
             if max_hint_length != hint_seq.shape[1]:
                 hint_seq = hint_seq[:, :max_hint_length]
 
-            hint_mask = hint_seq==pad_index;
-            hint_rep = hint_model(hint_seq, hint_mask); # --> N x C
+            hint_rep = hint_model(hint_seq, hint_length); # --> N x C
 
             # Learn representations of images and examples
-            image_rep = image_model(image); # --> N x n_slot x C
-            examples_rep = image_model(examples).mean(dim=1); # --> N x n_slot x C
-            score = im_im_scorer_model.score(examples_rep, image_rep);
+            image_slot = image_part_model(image); # --> N x n_slot x C
+            # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
+
+            examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
+            # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+
+            score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
-            score = im_lang_scorer_model.score(image_projection(examples_rep), hint_rep, get_diag=False);
-            align_loss = -torch.diag(F.log_softmax(score, dim=1)).mean();
+            objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
+            objs = [torch.as_tensor([labels_to_idx[o] for o in obj], dtype=torch.int) for obj in objs];
+
+            slot_cls_score = F.log_softmax(image_part_projection(examples_slot.flatten(0, 1)), dim=-1);
+
+            indices = hungarian(slot_cls_score, [o for o in objs for i in range(n_ex)]);
+            cls_loss = torch.as_tensor([slot_cls_score[i][indices[i][0][j]][indices[i][1][j]] for i in range(batch_size*n_ex) for j in range(len(indices[i][0]))]).mean();
             # Hypothesis loss
-            loss = pred_loss + args.hypo_lambda*align_loss
+            loss = pred_loss + args.hypo_lambda*cls_loss
 
             loss_total += loss.item()
             pred_loss_total += pred_loss.item()
-            align_loss_total += align_loss.item()
-            align_acc += torch.mean((torch.argmax(score, dim=1)==torch.arange(args.batch_size).to(device)).float());
+            cls_loss_total += cls_loss.item()
+            # cls_acc += (torch.argmax(slot_cls_score, dim=-1)[]==).float().mean();
 
             optimizer.zero_grad()
             loss.backward()
@@ -332,13 +362,14 @@ if __name__ == "__main__":
             pbar.update()
         pbar.close()
         print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f} Prediction Loss: {:.4f} Contrastive Loss: {:.4f} Contrastive Acc: {:.4f}'.format(
-            '(train)', epoch, loss_total, pred_loss_total, align_loss_total, align_acc));
+            '(train)', epoch, loss_total, pred_loss_total, cls_loss_total, align_acc));
 
         return loss_total
 
     def test(epoch, split='train'):
-        image_model.eval()
-        im_im_scorer_model.eval()
+        for m in models_to_save:
+            if (isinstance(m, nn.Module)):
+                m.eval();
 
         accuracy_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]

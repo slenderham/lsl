@@ -98,6 +98,7 @@ def idx2word(idx, i2w):
 
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from scipy.optimize import linear_sum_assignment
 
 class GradualWarmupScheduler(_LRScheduler):
     """ Gradually warm-up(increasing) learning rate in optimizer.
@@ -160,25 +161,33 @@ class GradualWarmupScheduler(_LRScheduler):
         else:
             self.step_ReduceLROnPlateau(metrics, epoch)
 
-def sinkhorn(a, b, M, reg, stopThr=1e-3, numItermax=100):
-    r'taken from https://github.com/yhenon/pytorch-superglue/blob/master/superglue/sinkhorn.py'
-    # init data
-    dim_a = a.shape[1]
-    dim_b = b.shape[1]
 
-    batch_size = b.shape[0]
 
-    u = torch.ones((batch_size, dim_a), requires_grad=False).cuda() / dim_a
-    v = torch.ones((batch_size, dim_b), requires_grad=False).cuda() / dim_b
-    K = torch.exp(-M / reg)
+@ torch.no_grad()
+def hungarian(output, target):
+    """ 
+    adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
+     Performs the matching
+        Params:
+            outputs: Tensor of dim [batch_size, num_slots, num_classes] with the classification logits
+            targets: This is a list of targets (len(targets) = batch_size), where each target is a
+                         Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
+                           objects in the target) containing the class labels
+        Returns:
+            A list of size batch_size, containing tuples of (index_i, index_j) where:
+                - index_i is the indices of the selected predictions (in order)
+                - index_j is the indices of the corresponding selected targets (in order)
+            For each batch element, it holds:
+                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+    """
+    n, num_slots, num_classes = output.shape;
+    sizes = [len(t) for t in target];
 
-    Kp = (1 / a).unsqueeze(2) * K
-    cpt = 0
-    err = 1
+    output = output.flatten(0, 1).softmax(-1); # flatten 
+    target = torch.cat([t for t in target]).long();
 
-    while err > stopThr and cpt < numItermax:
-        KtransposeU = (K * u.unsqueeze(2)).sum(dim=1) # has shape K.shape[1]
-        v = b / KtransposeU
-        u = 1. / (Kp*v.unsqueeze(1)).sum(dim=2)
-        cpt = cpt + 1
-    return u.unsqueeze(2) * K * v.unsqueeze(1)
+    cost = -output[:, target]; # get the probability of each class
+    cost = cost.reshape(n, num_slots, -1).cpu();
+
+    indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
+    return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]

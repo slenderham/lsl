@@ -703,3 +703,36 @@ def extract_features(hints):
                         feats.append('{}:shape:{}'.format(name, feat))
         all_feats.append(feats)
     return all_feats
+
+def extract_objects(hints):
+    """
+    Extract shape descriptions from hints
+    """
+    all_feats = []
+    for hint in hints:
+        feats = []
+        for maybe_rel in ['above', 'below', 'left', 'right']:
+            if maybe_rel in hint:
+                rel = maybe_rel
+                rel_idx = hint.index(rel)
+                break
+        else:
+            raise RuntimeError("Didn't find relation: {}".format(hint))
+        # Add relation
+        # feats.append('rel:{}'.format(rel))
+        fst, snd = hint[:rel_idx], hint[rel_idx:]
+        # fst: [<sos>, a, ..., is]
+        fst_shape = fst[2:fst.index('is')]
+        # snd: [..., a, ..., ., <eos>]
+        try:
+            snd_shape = snd[snd.index('a') + 1:-2]
+        except ValueError:
+            # Use "an"
+            snd_shape = snd[snd.index('an') + 1:-2]
+        
+        if (fst_shape!=['shape']):
+            feats.append(" ".join(fst_shape));
+        if (snd_shape!=['shape']):
+            feats.append(" ".join(snd_shape));
+        all_feats.append(feats)
+    return all_feats

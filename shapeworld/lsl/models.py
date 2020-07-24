@@ -10,6 +10,8 @@ from torch.nn import functional as F
 import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
 
+def _cartesian_product(x, y):
+    return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
 
 class ExWrapper(nn.Module):
     """
@@ -143,14 +145,12 @@ class TextRep(nn.Module):
 
         return hidden
 
-
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
+        self.model = MultilayerTransformer(hidden_size, 4, 4);
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32);
 
     def forward(self, seq, padding_mask):
@@ -392,10 +392,6 @@ class SANet(nn.Module):
         self.num_slots = num_slots;
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=4, dim_feedforward=4*dim, dropout=0.0);
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2);
-
-        self.seed = nn.Parameter(torch.randn(1, 1, dim)); # seed node for aggregation, similar to [CLS]
 
     def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
@@ -404,8 +400,6 @@ class SANet(nn.Module):
         x, attns = self.slot_attn(x); # --> N * num slots * feature size
         if visualize_attns:
             self._visualize_attns(img, attns);
-        x = torch.cat([self.seed.expand(1, n, -1), x.transpose(0, 1)]);
-        x = self.transformer(x)[0,...];
         return x;
 
     def _visualize_attns(self, img, attns):
@@ -444,6 +438,14 @@ class ImagePositionalEmbedding(nn.Module):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords);
 
+class MultilayerTransformer(nn.Module):
+    def __init__(self, dim, nhead, num_layers):
+        super(MultilayerTransformer, self).__init__();
+        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=nhead, dim_feedforward=4*dim, dropout=0.0);
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers);
+
+    def forward(self, x):
+        return self.transformer(x.transpose(0, 1)).transpose(0, 1);
 """
 Similarity Scores
 """
@@ -486,6 +488,11 @@ class CosineScorer(Scorer):
             return torch.sum(x * y, dim=1)/self.temperature;
         else:
             return torch.mm(x, y.t())/self.temperature;
+
+    def score_sequence(self, x, y, input_is_normed=False):
+         if not input_is_normed:
+            x = F.normalize(x, p=2, dim=1);
+            y = F.normalize(y, p=2, dim=1);
     
     def score_im_s(self, im, hint, input_is_normed=False):
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
@@ -599,8 +606,51 @@ class TransformerScorer(Scorer):
         else:
             return self.scorer.score(x_agged, y_agged);
 
-    def _cartesian_product(self, x, y):
-        return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
+class SinkhornScorer(Scorer):
+    def __init__(self, base_scorer, iters=20):
+        super(SinkhornScorer, self).__init__();
+        self.base_scorer = base_scorer;
+        assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
+        self.dustbin_weights = nn.Parameter(torch.ones(1))
+        self.iters = iters
 
-# class SinkhornScorer(Scorer):
+    def score(self, x, y):
+        n = x.shape[0]; # x.shape = n, num_obj, h; y.shape = n, num_obj_y, h
+        assert(y.shape[0]==n)
+        x_expand = torch.repeat_interleave(x, repeats=n, dim=0);
+        y_expand = torch.repeat(y, repeats=n, dim=0);
+        scores = self.base_scorer(x, y);
+        scores = self.log_optimal_transport(scores, self.dustbin_weights, self.iters);
+        return scores;
+    
+    def log_optimal_transport(self, scores, alpha, iters: int):
+        """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
+            Perform Differentiable Optimal Transport in Log-space for stability"""
+        b, m, n = scores.shape
+        one = scores.new_tensor(1)
+        ms, ns = (m*one).to(scores), (n*one).to(scores)
+
+        bins0 = alpha.expand(b, m, 1)
+        bins1 = alpha.expand(b, 1, n)
+        alpha = alpha.expand(b, 1, 1)
+
+        couplings = torch.cat([torch.cat([scores, bins0], -1),
+                            torch.cat([bins1, alpha], -1)], 1)
+
+        norm = - (ms + ns).log()
+        log_mu = torch.cat([norm.expand(m), ns.log()[None] + norm])
+        log_nu = torch.cat([norm.expand(n), ms.log()[None] + norm])
+        log_mu, log_nu = log_mu[None].expand(b, -1), log_nu[None].expand(b, -1)
+
+        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
+        Z = Z - norm  # multiply probabilities by M+N
+        return Z
+
+    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
+        """ Perform Sinkhorn Normalization in Log-space for stability"""
+        u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
+        for _ in range(iters):
+            u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
+            v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
+        return Z + u.unsqueeze(2) + v.unsqueeze(1)
 

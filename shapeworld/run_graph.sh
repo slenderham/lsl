@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HYPO_LAMBDA=50
+HYPO_LAMBDA=1
 
 python lsl/graph.py --cuda \
     --hypo_lambda $HYPO_LAMBDA \

@@ -22,10 +22,10 @@ from datasets import ShapeWorld, extract_features, extract_objects
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer, SinkhornScorer
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer, SinkhornScorer, SetCriterion
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
-from utils import GradualWarmupScheduler, hungarian
+from utils import GradualWarmupScheduler
 
 if __name__ == "__main__":
     import argparse
@@ -274,6 +274,9 @@ if __name__ == "__main__":
     hint_model = hint_model.to(device)
     params_to_optimize.extend(hint_model.parameters())
 
+    # loss
+    set_loss = SetCriterion();
+
     # optimizer
     optfunc = {
         'adam': optim.Adam,
@@ -336,11 +339,12 @@ if __name__ == "__main__":
 
             objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
             objs = [torch.as_tensor([labels_to_idx[o] for o in obj], dtype=torch.int) for obj in objs];
+            objs = [o for o in objs for _ in range(n_ex)];
 
-            slot_cls_score = F.log_softmax(image_part_projection(examples_slot.flatten(0, 1)), dim=-1);
+            slot_cls_score = image_part_projection(examples_slot);
 
-            indices = hungarian(slot_cls_score, [o for o in objs for i in range(n_ex)]);
-            cls_loss = -torch.as_tensor([slot_cls_score[i][indices[i][0][j]][indices[i][1][j]] for i in range(batch_size*n_ex) for j in range(len(indices[i][0]))]).mean();
+            cls_loss = set_loss(slot_cls_score, objs);
+
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*cls_loss
 

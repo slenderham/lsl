@@ -160,34 +160,3 @@ class GradualWarmupScheduler(_LRScheduler):
                 return super(GradualWarmupScheduler, self).step(epoch)
         else:
             self.step_ReduceLROnPlateau(metrics, epoch)
-
-
-
-@ torch.no_grad()
-def hungarian(output, target):
-    """ 
-    adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
-     Performs the matching
-        Params:
-            outputs: Tensor of dim [batch_size, num_slots, num_classes] with the classification logits
-            targets: This is a list of targets (len(targets) = batch_size), where each target is a
-                         Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
-                           objects in the target) containing the class labels
-        Returns:
-            A list of size batch_size, containing tuples of (index_i, index_j) where:
-                - index_i is the indices of the selected predictions (in order)
-                - index_j is the indices of the corresponding selected targets (in order)
-            For each batch element, it holds:
-                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
-    """
-    n, num_slots, num_classes = output.shape;
-    sizes = [len(t) for t in target];
-
-    output = output.flatten(0, 1).softmax(-1); # flatten 
-    target = torch.cat([t for t in target]).long();
-
-    cost = -output[:, target]; # get the probability of each class
-    cost = cost.reshape(n, num_slots, -1).cpu();
-
-    indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
-    return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]

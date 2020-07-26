@@ -9,6 +9,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
+from matplotlib import colors
+
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
@@ -403,6 +405,10 @@ class SANet(nn.Module):
         return x;
 
     def _visualize_attns(self, img, attns):
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'gray'])
+        bounds = [0, 1, 2, 3, 4, 5, 6]  # values for each color
+        norm = colors.BoundaryNorm(bounds, cmap.N)
+
         N, C, H, W = img.shape;
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
@@ -411,7 +417,16 @@ class SANet(nn.Module):
         fig, axes = plt.subplots(self.iters, self.num_slots);
         for i in range(self.iters):
             for j in range(self.num_slots):
-                axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='nearest').squeeze().detach().cpu());
+                im = axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='nearest').squeeze().detach().cpu());
+
+        fig, axes = plt.subplots(1, self.iters);
+        for i in range(self.iters):
+            masked_img = torch.zeros(H_k, W_k);
+            for h in range(H_k):
+                for w in range(W_k):
+                    masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w]);
+            axes[i].imshow(masked_img, cmap=cmap, norm=norm);
+
         plt.show();
 
 class ImagePositionalEmbedding(nn.Module):
@@ -654,3 +669,72 @@ class SinkhornScorer(Scorer):
             v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
         return Z + u.unsqueeze(2) + v.unsqueeze(1)
 
+class SetCriterion(nn.Module):
+        """
+            Taken from DETR, simplified by removing object detection losses
+        """
+    def __init__(self):
+        """ Create the criterion."""
+        super().__init__()
+        self.matcher = self.hungarian
+
+    def loss_labels(self, outputs, targets, indices, num_boxes):
+        """Classification loss (NLL)"""
+        idx = self._get_src_permutation_idx(indices)
+        target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets, indices)])
+        loss_ce = F.cross_entropy(outputs[idx], target_classes_o)
+        return loss_ce
+
+    def _get_src_permutation_idx(self, indices):
+        # permute predictions following indices 
+        # index of sample in batch, repeated by the number of objects in that image
+        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
+        # the index of selected slot in that batch
+        src_idx = torch.cat([src for (src, _) in indices]) 
+        return batch_idx, src_idx
+
+    def forward(self, outputs, targets):
+        """ This performs the loss computation.
+        Parameters:
+             outputs: tensor batch_size x num_slot x num_class
+             targets: list of tensor, such that len(targets) == batch_size. Each tensor holds the 
+        """
+        # Retrieve the matching between the outputs of the last layer and the targets
+        indices = self.matcher(outputs, targets)
+
+        # Compute the average number of target boxes accross all nodes, for normalization purposes
+        num_classes = sum(len(t) for t in targets)
+        num_classes = torch.as_tensor([num_classes], dtype=torch.float, device=outputs.device)
+
+        # Compute all the requested losses
+        loss = self.loss_labels(outputs, targets, indices, num_classes)
+        return losses
+
+    @ torch.no_grad()
+    def hungarian(self, output, target):
+        """ 
+        adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
+        Performs the matching
+            Params:
+                outputs: Tensor of dim [batch_size, num_slots, num_classes] with the classification logits
+                targets: This is a list of targets (len(targets) = batch_size), where each target is a
+                            Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
+                            objects in the target) containing the class labels
+            Returns:
+                A list of size batch_size, containing tuples of (index_i, index_j) where:
+                    - index_i is the indices of the selected predictions (in order)
+                    - index_j is the indices of the corresponding selected targets (in order)
+                For each batch element, it holds:
+                    len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+        """
+        n, num_slots, num_classes = output.shape;
+        sizes = [len(t) for t in target];
+
+        output = output.flatten(0, 1).softmax(-1); # flatten 
+        target = torch.cat([t for t in target]).long();
+
+        cost = -output[:, target]; # get the probability of each class
+        cost = cost.reshape(n, num_slots, -1).cpu();
+
+        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
+        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]

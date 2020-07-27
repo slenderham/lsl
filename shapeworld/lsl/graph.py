@@ -338,12 +338,12 @@ if __name__ == "__main__":
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
 
             objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
-            objs = [torch.as_tensor([labels_to_idx[o] for o in obj], dtype=torch.int) for obj in objs];
+            objs = [torch.as_tensor([labels_to_idx[o] for o in obj], dtype=torch.long) for obj in objs];
             objs = [o for o in objs for _ in range(n_ex)];
 
             slot_cls_score = image_part_projection(examples_slot);
 
-            cls_loss = set_loss(slot_cls_score, objs);
+            cls_loss = set_loss(slot_cls_score.flatten(0, 1), objs);
 
             # Hypothesis loss
             loss = pred_loss + args.hypo_lambda*cls_loss

@@ -10,7 +10,7 @@ from torch.nn import functional as F
 import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
 from matplotlib import colors
-
+from scipy.optimize import linear_sum_assignment
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
@@ -670,9 +670,9 @@ class SinkhornScorer(Scorer):
         return Z + u.unsqueeze(2) + v.unsqueeze(1)
 
 class SetCriterion(nn.Module):
-        """
+    """
             Taken from DETR, simplified by removing object detection losses
-        """
+    """
     def __init__(self):
         """ Create the criterion."""
         super().__init__()
@@ -681,7 +681,7 @@ class SetCriterion(nn.Module):
     def loss_labels(self, outputs, targets, indices, num_boxes):
         """Classification loss (NLL)"""
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets, indices)])
+        target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets, indices)]).to(outputs.device)
         loss_ce = F.cross_entropy(outputs[idx], target_classes_o)
         return loss_ce
 
@@ -708,7 +708,7 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         loss = self.loss_labels(outputs, targets, indices, num_classes)
-        return losses
+        return loss
 
     @ torch.no_grad()
     def hungarian(self, output, target):

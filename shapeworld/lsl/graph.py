@@ -17,8 +17,9 @@ from utils import (
     AverageMeter,
     save_defaultdict_to_fs,
     save_checkpoint,
+    featurize
 )
-from datasets import ShapeWorld, extract_features, extract_objects
+from datasets import ShapeWorld, extract_features, extract_objects, extract_objects_and_positions
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
 from models import SANet
@@ -43,6 +44,9 @@ if __name__ == "__main__":
                         type=int,
                         default=None,
                         help='Max number of training examples')
+    parser.add_argument('--oracle_world_config',
+                        action='store_true',
+                        help='If true, let slots predict all objects and positions. Else use those from language.')
     parser.add_argument('--noise',
                         type=float,
                         default=0.0,
@@ -107,6 +111,13 @@ if __name__ == "__main__":
                         type=float,
                         default=10.0,
                         help='Weight on hypothesis hypothesis')
+    parser.add_argument('--concept_lambda',
+                        type=float,
+                        default=1.0)
+    parser.add_argument('--pos_weight',
+                        type=float,
+                        default=5.0,
+                        help="Weight on the object position loss")
     parser.add_argument('--save_checkpoint',
                         action='store_true',
                         help='Save model')
@@ -156,6 +167,9 @@ if __name__ == "__main__":
     pad_index = train_w2i[PAD_TOKEN]
     sos_index = train_w2i[SOS_TOKEN]
     eos_index = train_w2i[EOS_TOKEN]
+
+    labels_to_idx = train_dataset.label2idx;
+
     test_class_noise_weight = 0.0
     if args.noise_at_test:
         test_noise = args.noise
@@ -223,19 +237,6 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
-    labels_to_idx = {}
-    i = 0
-    for col in COLORS:
-        for shp in SHAPES:
-            labels_to_idx[col+' '+shp] = i;
-            i += 1;
-    for col in COLORS:
-        labels_to_idx[col+' shape'] = i;
-        i += 1;
-    for shp in SHAPES:
-        labels_to_idx[shp] = i;
-        i += 1;
-
     # vision
     backbone_model = SANet(im_size=64, num_slots=6, dim=64);
     image_part_model = ExWrapper(ImageRep(backbone_model, \
@@ -265,8 +266,11 @@ if __name__ == "__main__":
     # params_to_optimize.extend(im_lang_whole_scorer_model.parameters())
 
     # projection
-    image_part_projection = MLP(64, args.hidden_size, len(labels_to_idx)).to(device);
-    params_to_optimize.extend(image_part_projection.parameters());
+    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx)+1).to(device); # add one for no object
+    params_to_optimize.extend(image_cls_projection.parameters());
+
+    image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
+    params_to_optimize.extend(image_pos_projection.parameters());
 
     # language
     embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
@@ -275,7 +279,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion();
+    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1);
 
     # optimizer
     optfunc = {
@@ -288,7 +292,7 @@ if __name__ == "__main__":
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_part_model, image_part_projection, im_im_scorer_model, hint_model, optimizer];
+    models_to_save = [image_part_model, image_cls_projection, image_pos_projection, im_im_scorer_model, hint_model, optimizer];
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'model_best.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'model_best.pth.tar');
@@ -302,10 +306,10 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.train();
 
-        loss_total = 0
         pred_loss_total = 0;
         cls_loss_total = 0;
-        align_acc = 0;
+        pos_loss_total = 0;
+        cls_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -336,21 +340,23 @@ if __name__ == "__main__":
 
             score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
+            pred_loss_total += pred_loss
 
-            objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
-            objs = [torch.as_tensor([labels_to_idx[o] for o in obj], dtype=torch.long) for obj in objs];
-            objs = [o for o in objs for _ in range(n_ex)];
+            world = rest[-1]; # this should be a list of lists
+            objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
-            slot_cls_score = image_part_projection(examples_slot);
-
-            cls_loss = set_loss(slot_cls_score.flatten(0, 1), objs);
+            slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1));
+            slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1));
+            
+            losses, acc = set_loss({'predict_logits': slot_cls_score, 'predict_poses': slot_pos_pred},
+                                {'labels': objs, 'poses': poses});
 
             # Hypothesis loss
-            loss = pred_loss + args.hypo_lambda*cls_loss
+            loss = args.concept_lambda*pred_loss + args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
 
-            loss_total += loss.item()
-            pred_loss_total += pred_loss.item()
-            cls_loss_total += cls_loss.item()
+            cls_loss_total += losses['class'].item()
+            pos_loss_total += losses['position'].item()
+            cls_acc += acc;
             # cls_acc += (torch.argmax(slot_cls_score, dim=-1)[]==).float().mean();
 
             optimizer.zero_grad()
@@ -365,8 +371,8 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f} Prediction Loss: {:.4f} Contrastive Loss: {:.4f} Contrastive Acc: {:.4f}'.format(
-            '(train)', epoch, loss_total, pred_loss_total, cls_loss_total, align_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Classification Loss: {:.4f} Position Loss: {:.4f} Classification Acc: {:.4f}'.format(
+            '(train)', epoch, pred_loss_total, cls_loss_total, pos_loss_total, cls_acc));
 
         return loss_total
 
@@ -422,7 +428,6 @@ if __name__ == "__main__":
         train_loss = train(epoch);
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
-
         test_acc, test_raw_scores = test(epoch, 'test')
         if has_same:
             val_same_acc, _ = test(epoch, 'val_same')
@@ -487,3 +492,4 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_avg)', best_epoch,
         (best_test_acc + best_test_same_acc) / 2))
+

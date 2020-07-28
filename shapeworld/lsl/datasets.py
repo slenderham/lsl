@@ -222,6 +222,13 @@ class ShapeWorld(data.Dataset):
         with open(os.path.join(split_dir, 'hints.json')) as fp:
             hints = json.load(fp)
 
+        try:
+            with open(os.path.join(split_dir, 'worlds.json')) as fp:
+                worlds = json.load(fp)
+            self.create_labels(worlds);
+        except FileNotFoundError:
+            worlds = None;
+
         test_hints = os.path.join(split_dir, 'test_hints.json')
         if self.fixed_noise_colors is not None:
             assert os.path.exists(test_hints)
@@ -255,6 +262,7 @@ class ShapeWorld(data.Dataset):
         self.in_features = in_features
         self.ex_features = ex_features
         self.hints = hints
+        self.worlds = worlds
 
         if self.vocab is None:
             self.create_vocab(hints, test_hints)
@@ -340,8 +348,12 @@ class ShapeWorld(data.Dataset):
             else:
                 th = hints[test_hint_i]
                 thl = hint_lengths[test_hint_i]
+            if self.worlds!=None:
+                world = worlds[i];
+            else:
+                world = None;
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
-                      hint_lengths[hint_i], th, thl)
+                      hint_lengths[hint_i], th, thl, world)
             data.append(data_i)
 
         self.data = data
@@ -376,6 +388,16 @@ class ShapeWorld(data.Dataset):
 
         logging.info('Created vocab with %d words.' % len(w2c))
 
+    def create_labels(self, worlds):
+        labelset = set();
+        if worlds is not None:
+            for concept in worlds:
+                for inst in concept:
+                    for shape in inst:
+                        labelset.add(shape[0]);
+        label2idx = dict(zip(labelset, range(len(labelset))))
+        self.label2idx = label2idx
+
     def __len__(self):
         return len(self.data)
 
@@ -387,13 +409,14 @@ class ShapeWorld(data.Dataset):
         batch_label = []
         batch_hint = []
         batch_hint_length = []
+        batch_worlds = [];
         if self.test_hints is not None:
             batch_test_hint = []
             batch_test_hint_length = []
 
         for _ in range(n_batch):
             index = random.randint(n_train)
-            examples, image, label, hint, hint_length, test_hint, test_hint_length = \
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = \
                 self.__getitem__(index)
 
             batch_examples.append(examples)
@@ -401,6 +424,7 @@ class ShapeWorld(data.Dataset):
             batch_label.append(label)
             batch_hint.append(hint)
             batch_hint_length.append(hint_length)
+            batch_worlds.append(world)
             if self.test_hints is not None:
                 batch_test_hint.append(test_hint)
                 batch_test_hint_length.append(test_hint_length)
@@ -421,7 +445,7 @@ class ShapeWorld(data.Dataset):
 
         return (
             batch_examples, batch_image, batch_label, batch_hint,
-            batch_hint_length, batch_test_hint, batch_test_hint_length
+            batch_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds
         )
 
     def add_fixed_noise_colors(self,
@@ -525,7 +549,7 @@ class ShapeWorld(data.Dataset):
 
     def __getitem__(self, index):
         if self.split == 'train' and self.augment:
-            examples, image, label, hint, hint_length, test_hint, test_hint_length = self.data[
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = self.data[
                 index]
 
             # tie a language to a concept; convert to pytorch.
@@ -541,7 +565,7 @@ class ShapeWorld(data.Dataset):
                 # return a tuple (example_z, hint_z, 1) or...
                 # return a tuple (example_z, hint_other_z, 0).
                 # Sample a new test hint as well.
-                examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2 = self.data[
+                examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2, world2 = self.data[
                     random.randint(n_train)]
 
                 # pick either an example or an image.
@@ -551,11 +575,13 @@ class ShapeWorld(data.Dataset):
                     # Use the QUERY hint of the new example
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
+                    world[-1] = world2[-1]
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
                     test_hint = support_hint2
                     test_hint_length = support_hint_length2
+                    world[-1] = world2[swap]
 
                 test_hint = torch.from_numpy(test_hint).long()
 
@@ -581,7 +607,7 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 0, hint, hint_length, test_hint, test_hint_length
+                return examples, feats, 0, hint, hint_length, test_hint, test_hint_length, world
             else:  # sample_label == 1
                 swap = random.randint((N_EX + 1 if label == 1 else N_EX))
                 # pick either an example or an image.
@@ -621,10 +647,10 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 1, hint, hint_length, test_hint, test_hint_length
+                return examples, feats, 1, hint, hint_length, test_hint, test_hint_length, world
 
         else:  # val, val_same, test, test_same
-            examples, image, label, hint, hint_length, test_hint, test_hint_length = self.data[
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = self.data[
                 index]
 
             # no fancy stuff. just return image.
@@ -650,7 +676,7 @@ class ShapeWorld(data.Dataset):
             if self.preprocess is not None:
                 image = self.preprocess(image)
                 examples = torch.stack([self.preprocess(e) for e in examples])
-            return examples, image, label, hint, hint_length, test_hint, test_hint_length
+            return examples, image, label, hint, hint_length, test_hint, test_hint_length, world
 
     def to_text(self, hints):
         texts = []
@@ -736,3 +762,11 @@ def extract_objects(hints):
             feats.append(" ".join(snd_shape));
         all_feats.append(feats)
     return all_feats
+
+def extract_objects_and_positions(world, labels_to_idx):
+    objects = []
+    positions = [];
+    for concept in world:
+        for inst in concept:
+            objects.append(torch.tensor([labels_to_idx[shape[0]] for shape in inst]))
+            positions.append(torch.tensor([shape[1] for shape in inst]));

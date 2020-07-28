@@ -395,7 +395,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False):
+    def forward(self, img, visualize_attns=True):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -673,17 +673,42 @@ class SetCriterion(nn.Module):
     """
             Taken from DETR, simplified by removing object detection losses
     """
-    def __init__(self):
-        """ Create the criterion."""
+    def __init__(self, num_classes, eos_coef=0.1, pos_cost_weight=5.0):
+        """ Create the criterion.
+        Parameters:
+            num_classes: number of object categories, omitting the special no-object category
+            eos_coef: relative classification weight applied to the no-object category
+            pos_cost_weight: relative weight of the position loss
+        """
         super().__init__()
         self.matcher = self.hungarian
+        self.eos_coef = eos_coef
+        self.pos_cost_weight = pos_cost_weight
+        empty_weight = torch.ones(self.num_classes + 1)
+        empty_weight[-1] = self.eos_coef
+        self.register_buffer('empty_weight', empty_weight)
 
     def loss_labels(self, outputs, targets, indices, num_boxes):
         """Classification loss (NLL)"""
+        src_logits = outputs['pred_logits']
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets, indices)]).to(outputs.device)
-        loss_ce = F.cross_entropy(outputs[idx], target_classes_o)
-        return loss_ce
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes = torch.full(src_logits.shape[:2], self.num_classes,
+                                    dtype=torch.int64, device=src_logits.device)
+        target_classes[idx] = target_classes_o
+
+        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+        acc = (torch.argmax(src_logits[idx], dim=-1)==target_classes_o).float().mean()
+
+        return loss_ce, acc
+
+    def loss_position(self, outputs, targets, indices, num_boxes):
+        """Huber Loss"""
+        idx = self._get_src_permutation_idx(indices)
+        src_pos = outputs['pred_poses'];
+        target_poses = torch.cat([t['poses'][J] for t, (_, J) in zip(targets, indices)]).to(outputs.device)
+        loss_l1 = F.smooth_l1_loss(src_pos[idx], target_poses);
+        return loss_l1
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices 
@@ -697,9 +722,13 @@ class SetCriterion(nn.Module):
         """ This performs the loss computation.
         Parameters:
              outputs: tensor batch_size x num_slot x num_class
-             targets: list of tensor, such that len(targets) == batch_size. Each tensor holds the 
+             targets: list of tensor, such that len(targets) == batch_size. 
         """
         # Retrieve the matching between the outputs of the last layer and the targets
+
+        assert("pred_logits" in outputs.keys() and "pred_poses" in outputs.keys())
+        assert("labels" in targets.keys() and "poses" in targets.keys());
+
         indices = self.matcher(outputs, targets)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
@@ -707,33 +736,45 @@ class SetCriterion(nn.Module):
         num_classes = torch.as_tensor([num_classes], dtype=torch.float, device=outputs.device)
 
         # Compute all the requested losses
-        loss = self.loss_labels(outputs, targets, indices, num_classes)
-        return loss
+        losses = {};
+        loss_cls, acc = self.loss_labels(outputs, targets, indices, num_classes);
+        losses['class'] = loss_cls;
+        losses['position'] = self.loss_position(outputs, targets, indices, num_classes);
+        return losses, acc
 
     @ torch.no_grad()
     def hungarian(self, output, target):
         """ 
         adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
         Performs the matching
-            Params:
-                outputs: Tensor of dim [batch_size, num_slots, num_classes] with the classification logits
-                targets: This is a list of targets (len(targets) = batch_size), where each target is a
-                            Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
-                            objects in the target) containing the class labels
-            Returns:
-                A list of size batch_size, containing tuples of (index_i, index_j) where:
-                    - index_i is the indices of the selected predictions (in order)
-                    - index_j is the indices of the corresponding selected targets (in order)
-                For each batch element, it holds:
-                    len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+        Params:
+            outputs: This is a dict that contains at least these entries:
+                 "pred_logits": Tensor of dim [batch_size, num_queries, num_classes] with the classification logits
+                 "pred_poses": Tensor of dim [batch_size, num_queries, 2] with the predicted position
+            targets: This is a list of targets (len(targets) = batch_size), where each target is a dict containing:
+                 "labels": Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
+                           objects in the target) containing the class labels
+                 "poses": Tensor of dim [num_target_boxes, 2] containing the target position
+        Returns:
+            A list of size batch_size, containing tuples of (index_i, index_j) where:
+                - index_i is the indices of the selected predictions (in order)
+                - index_j is the indices of the corresponding selected targets (in order)
+            For each batch element, it holds:
+                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
         n, num_slots, num_classes = output.shape;
         sizes = [len(t) for t in target];
 
-        output = output.flatten(0, 1).softmax(-1); # flatten 
-        target = torch.cat([t for t in target]).long();
+        out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)
+        out_pos = outputs["pred_poses"].flatten(0, 1)
 
-        cost = -output[:, target]; # get the probability of each class
+        tgt_ids = torch.cat([v["labels"] for v in targets]).long()
+        tgt_pos = torch.cat([v["poses"] for v in targets])
+
+        cost_class = -output[:, tgt_ids]; # get the probability of each class
+        cost_pos = F.smooth_l1_loss(out_pos, tgt_pos);
+
+        cost = cost_class + self.pos_cost_weight*cost_pos;
         cost = cost.reshape(n, num_slots, -1).cpu();
 
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];

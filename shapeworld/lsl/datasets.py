@@ -771,4 +771,3 @@ def extract_objects_and_positions(world, labels_to_idx):
             objects.append(torch.tensor([labels_to_idx[shape[0]] for shape in inst]))
             positions.append(torch.tensor([shape[1] for shape in inst]));
     return objects, positions
-    

@@ -345,9 +345,9 @@ if __name__ == "__main__":
             world = rest[-1]; # this should be a list of lists
             objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
-            slot_cls_score = image_cls_projection(torch.cat([examples_slot.flatten(0, 1), image_slot], dim=0));
-            slot_pos_pred = image_pos_projection(torch.cat([examples_slot.flatten(0, 1), image_slot], dim=0));
-            
+            slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+            slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+ 
             losses, acc = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                 {'labels': objs, 'poses': poses});
 

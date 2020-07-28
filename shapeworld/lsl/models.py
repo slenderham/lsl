@@ -683,6 +683,7 @@ class SetCriterion(nn.Module):
         super().__init__()
         self.matcher = self.hungarian
         self.eos_coef = eos_coef
+        self.num_classes = num_classes
         self.pos_cost_weight = pos_cost_weight
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
@@ -762,14 +763,14 @@ class SetCriterion(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        n, num_slots, num_classes = output.shape;
-        sizes = [len(t) for t in target];
+        n, num_slots, num_classes = output["pred_logits"].shape;
+        sizes = [len(t) for t in target['labels']];
 
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)
         out_pos = outputs["pred_poses"].flatten(0, 1)
 
-        tgt_ids = torch.cat([v["labels"] for v in targets]).long()
-        tgt_pos = torch.cat([v["poses"] for v in targets])
+        tgt_ids = torch.cat([v for v in targets['labels']]).long()
+        tgt_pos = torch.cat([v for v in targets['labels']])
 
         cost_class = -output[:, tgt_ids]; # get the probability of each class
         cost_pos = F.smooth_l1_loss(out_pos, tgt_pos);

@@ -743,7 +743,7 @@ class SetCriterion(nn.Module):
         return losses, acc
 
     @ torch.no_grad()
-    def hungarian(self, output, target):
+    def hungarian(self, outputs, targets):
         """ 
         adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
         Performs the matching

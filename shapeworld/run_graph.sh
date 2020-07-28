@@ -10,9 +10,9 @@ python lsl/graph.py --cuda \
     --hypo_lambda 1.0\
     --concept_lambda 0.0\
     --comparison dotp\
-    --hidden_size 256\
+    --hidden_size 64\
     --lr 0.0004\
     --save_checkpoint\
     --oracle_world_config\
-    --data_dir /Users/wangchong/Downloads/easy_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/graph

@@ -395,7 +395,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=True):
+    def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -693,7 +693,7 @@ class SetCriterion(nn.Module):
         """Classification loss (NLL)"""
         src_logits = outputs['pred_logits']
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(outputs['pred_logits'].device);
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
@@ -707,7 +707,7 @@ class SetCriterion(nn.Module):
         """Huber Loss"""
         idx = self._get_src_permutation_idx(indices)
         src_pos = outputs['pred_poses'];
-        target_poses = torch.cat([t['poses'][J] for t, (_, J) in zip(targets, indices)]).to(outputs.device)
+        target_poses = torch.cat([t[J] for t, (_, J) in zip(targets["poses"], indices)]).to(outputs['pred_poses'].device)
         loss_l1 = F.smooth_l1_loss(src_pos[idx], target_poses);
         return loss_l1
 
@@ -733,14 +733,14 @@ class SetCriterion(nn.Module):
         indices = self.matcher(outputs, targets)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_classes = sum(len(t) for t in targets)
-        num_classes = torch.as_tensor([num_classes], dtype=torch.float, device=outputs.device)
+        num_objs = sum(len(t) for t in targets["labels"])
+        num_objs = torch.as_tensor([num_objs], dtype=torch.float, device=outputs["pred_logits"].device)
 
         # Compute all the requested losses
         losses = {};
-        loss_cls, acc = self.loss_labels(outputs, targets, indices, num_classes);
+        loss_cls, acc = self.loss_labels(outputs, targets, indices, num_objs);
         losses['class'] = loss_cls;
-        losses['position'] = self.loss_position(outputs, targets, indices, num_classes);
+        losses['position'] = self.loss_position(outputs, targets, indices, num_objs);
         return losses, acc
 
     @ torch.no_grad()
@@ -763,17 +763,17 @@ class SetCriterion(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        n, num_slots, num_classes = output["pred_logits"].shape;
-        sizes = [len(t) for t in target['labels']];
+        n, num_slots, num_classes = outputs["pred_logits"].shape;
+        sizes = [len(t) for t in targets['labels']];
 
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)
         out_pos = outputs["pred_poses"].flatten(0, 1)
 
-        tgt_ids = torch.cat([v for v in targets['labels']]).long()
-        tgt_pos = torch.cat([v for v in targets['poses']])
+        tgt_ids = torch.cat([v for v in targets['labels']]).long().to(out_prob.device)
+        tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device)
 
         cost_class = -out_prob[:, tgt_ids]; # get the probability of each class
-        cost_pos = F.smooth_l1_loss(out_pos, tgt_pos);
+        cost_pos = torch.cdist(out_pos, tgt_pos, p=1);
 
         cost = cost_class + self.pos_cost_weight*cost_pos;
         cost = cost.reshape(n, num_slots, -1).cpu();

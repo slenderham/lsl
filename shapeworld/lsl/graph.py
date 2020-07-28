@@ -116,7 +116,7 @@ if __name__ == "__main__":
                         default=1.0)
     parser.add_argument('--pos_weight',
                         type=float,
-                        default=5.0,
+                        default=1.0,
                         help="Weight on the object position loss")
     parser.add_argument('--save_checkpoint',
                         action='store_true',
@@ -279,7 +279,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1);
+    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1).to(device);
 
     # optimizer
     optfunc = {
@@ -371,10 +371,9 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Classification Loss: {:.4f} Position Loss: {:.4f} Classification Acc: {:.4f}'.format(
-            '(train)', epoch, pred_loss_total, cls_loss_total, pos_loss_total, cls_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Classification Loss: {:.4f} Position Loss: {:.4f} Classification Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, cls_loss_total, pos_loss_total, cls_acc));
 
-        return loss_total
+        return args.concept_lambda*pred_loss_total + args.hypo_lambda*(cls_loss_total + args.pos_weight*pos_loss_total)
 
     def test(epoch, split='train'):
         for m in models_to_save:

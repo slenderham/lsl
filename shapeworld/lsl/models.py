@@ -770,9 +770,9 @@ class SetCriterion(nn.Module):
         out_pos = outputs["pred_poses"].flatten(0, 1)
 
         tgt_ids = torch.cat([v for v in targets['labels']]).long()
-        tgt_pos = torch.cat([v for v in targets['labels']])
+        tgt_pos = torch.cat([v for v in targets['poses']])
 
-        cost_class = -output[:, tgt_ids]; # get the probability of each class
+        cost_class = -out_prob[:, tgt_ids]; # get the probability of each class
         cost_pos = F.smooth_l1_loss(out_pos, tgt_pos);
 
         cost = cost_class + self.pos_cost_weight*cost_pos;

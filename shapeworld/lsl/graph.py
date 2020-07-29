@@ -245,7 +245,7 @@ if __name__ == "__main__":
     }
 
     # vision
-    backbone_model = SANet(im_size=64, num_slots=6, dim=64);
+    backbone_model = SANet(im_size=64, num_slots=3, dim=64);
     image_part_model = ExWrapper(ImageRep(backbone_model, \
                                      hidden_size=None, \
                                      tune_backbone=True, \

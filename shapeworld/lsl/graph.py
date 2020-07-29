@@ -324,7 +324,7 @@ if __name__ == "__main__":
             world = rest[-1]; # this should be a list of lists
             objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
-            if True:
+            if False:
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
                 print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
                 print(label[rand_idx])

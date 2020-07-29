@@ -14,5 +14,5 @@ python lsl/graph.py --cuda \
     --lr 0.0004\
     --save_checkpoint\
     --oracle_world_config\
-    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/graph

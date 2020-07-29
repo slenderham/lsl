@@ -81,6 +81,12 @@ if __name__ == "__main__":
                         default=100,
                         help='Train batch size')
     parser.add_argument('--epochs', type=int, default=50, help='Train epochs')
+    parser.add_argument('--debug_example', 
+                        action="store_true",
+                        help="If true, print out example images and hint");
+    parser.add_argument('--skip_eval',
+                        action="store_true",
+                        help="If true, skip the zero shot evaluation and only save the pretrained features.")
     parser.add_argument('--data_dir',
                         default=None,
                         help='Specify custom data directory (must have shapeworld folder)')
@@ -324,7 +330,7 @@ if __name__ == "__main__":
             world = rest[-1]; # this should be a list of lists
             objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
-            if False:
+            if args.debug_example:
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
                 print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
                 print(label[rand_idx])
@@ -443,6 +449,8 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch);
+        if args.skip_eval:
+            continue
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

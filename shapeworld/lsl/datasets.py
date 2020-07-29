@@ -614,13 +614,16 @@ class ShapeWorld(data.Dataset):
                 if swap == N_EX:
                     feats = image
                 else:
-                    feats = examples[swap, ...]
+                    feats = examples[swap, ...].copy()
                     if label == 1:
                         examples[swap, ...] = image
+                        world[swap], world[-1] = world[-1], world[swap]
                     else:
-                        examples[swap, ...] = examples[random.randint(N_EX
-                                                                      ), ...]
-
+                        swap_from = random.randint(N_EX)
+                        examples[swap, ...] = examples[swap_from, ...]
+                        world[-1] = world[swap]
+                        world[swap] = world[swap_from]
+                    
                 # This is a positive example, so whatever example we've chosen,
                 # assume the query hint matches the support hint.
                 test_hint = hint

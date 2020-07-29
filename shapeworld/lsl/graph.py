@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import accuracy_score
+from matplotlib import pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -279,7 +280,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1).to(device);
+    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1, pos_cost_weight=args.pos_weight).to(device);
 
     # optimizer
     optfunc = {
@@ -320,6 +321,26 @@ if __name__ == "__main__":
             label = label.to(device)
             batch_size = len(image)
             n_ex = examples.shape[1]
+            world = rest[-1]; # this should be a list of lists
+            objs, poses = extract_objects_and_positions(world, labels_to_idx);
+
+            if True:
+                rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
+                print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
+                print(label[rand_idx])
+                for w in world[rand_idx]:
+                    print(w); 
+                print(objs[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
+                print(poses[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
+                print(examples[rand_idx][0].shape)
+                fig, axes = plt.subplots(5);
+                for i in range(4):
+                    axes[i].imshow(examples[rand_idx][i].permute(1, 2, 0)); # plot examples, transpose to put channel in the last dim
+                    axes[i].axis('off');
+                axes[4].imshow(image[rand_idx].permute(1, 2, 0));
+                axes[4].axis('off')
+                plt.show();
+                return 0;
 
             # Load hint
             hint_seq = hint_seq.to(device)
@@ -341,9 +362,6 @@ if __name__ == "__main__":
             score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
-
-            world = rest[-1]; # this should be a list of lists
-            objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
             slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
             slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);

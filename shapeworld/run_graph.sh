@@ -11,7 +11,7 @@ python lsl/set_pred.py --cuda \
     --concept_lambda 0.0\
     --comparison dotp\
     --hidden_size 64\
-    --lr 0.001\
+    --lr 0.0004\
     --skip_eval\
     --save_checkpoint\
     --debug_example\

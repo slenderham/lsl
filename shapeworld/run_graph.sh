@@ -10,8 +10,9 @@ python lsl/set_pred.py --cuda \
     --hypo_lambda 1.0\
     --concept_lambda 0.0\
     --comparison dotp\
-    --hidden_size 64\
-    --lr 0.001\
+    --hidden_size 128\
+    --lr 0.0004\
+    --num_slots 3\
     --skip_eval\
     --save_checkpoint\
     --oracle_world_config\

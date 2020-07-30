@@ -11,10 +11,9 @@ python lsl/set_pred.py --cuda \
     --concept_lambda 0.0\
     --comparison dotp\
     --hidden_size 64\
-    --lr 0.0004\
+    --lr 0.001\
     --skip_eval\
     --save_checkpoint\
-    --debug_example\
     --oracle_world_config\
-    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/graph

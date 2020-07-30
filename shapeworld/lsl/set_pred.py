@@ -37,6 +37,10 @@ if __name__ == "__main__":
                         type=int,
                         default=256,
                         help='Size of hidden representations')
+    parser.add_argument('--num_slots', 
+                        type=int,
+                        default=6,
+                        help='Number of slots')
     parser.add_argument('--comparison',
                         choices=['dotp', 'cosine'],
                         default='dotp',
@@ -175,8 +179,6 @@ if __name__ == "__main__":
     sos_index = train_w2i[SOS_TOKEN]
     eos_index = train_w2i[EOS_TOKEN]
 
-    labels_to_idx = train_dataset.label2idx;
-
     test_class_noise_weight = 0.0
     if args.noise_at_test:
         test_noise = args.noise
@@ -244,8 +246,10 @@ if __name__ == "__main__":
         'test_same': test_same_loader if has_same else None,
     }
 
+    labels_to_idx = train_dataset.label2idx
+
     # vision
-    backbone_model = SANet(im_size=64, num_slots=6, dim=64);
+    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64);
     image_part_model = ExWrapper(ImageRep(backbone_model, \
                                      hidden_size=None, \
                                      tune_backbone=True, \
@@ -273,7 +277,7 @@ if __name__ == "__main__":
     # params_to_optimize.extend(im_lang_whole_scorer_model.parameters())
 
     # projection
-    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx)+1).to(device); # add one for no object
+    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])+1).to(device); # add one for no object
     params_to_optimize.extend(image_cls_projection.parameters());
 
     image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
@@ -286,7 +290,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion(num_classes=len(labels_to_idx), eos_coef=0.1, pos_cost_weight=args.pos_weight).to(device);
+    set_loss = SetCriterion(num_classes=len(labels_to_idx), pos_cost_weight=args.pos_weight).to(device);
 
     # optimizer
     optfunc = {
@@ -449,6 +453,8 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch);
+        if args.save_checkpoint:
+            save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:
             continue
         train_acc, _ = test(epoch, 'train')
@@ -478,9 +484,6 @@ if __name__ == "__main__":
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
             best_test_acc_ci = test_acc_ci
-
-        if args.save_checkpoint:
-            save_checkpoint([m.state_dict() for m in models_to_save], is_best=is_best_epoch, folder=args.exp_dir);
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

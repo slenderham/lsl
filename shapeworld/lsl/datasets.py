@@ -389,14 +389,20 @@ class ShapeWorld(data.Dataset):
         logging.info('Created vocab with %d words.' % len(w2c))
 
     def create_labels(self, worlds):
-        labelset = set();
+        colorset = set();
+        shapeset = set();
         if worlds is not None:
             for concept in worlds:
                 for inst in concept:
-                    for shape in inst:
-                        labelset.add(shape[0]);
-        label2idx = dict(zip(labelset, range(len(labelset))))
-        self.label2idx = label2idx
+                    for col_n_shape_n_pos in inst:
+                        colorset.add(col_n_shape_n_pos['color']);
+                        shapeset.add(col_n_shape_n_pos['shape']);
+        color2idx = dict(zip(colorset, range(len(colorset))));
+        shape2idx = dict(zip(shapeset, range(len(shapeset))));
+        self.label2idx = {
+            'color': color2idx,
+            'shape': shape2idx
+        }
 
     def __len__(self):
         return len(self.data)
@@ -771,6 +777,21 @@ def extract_objects_and_positions(world, labels_to_idx):
     positions = [];
     for concept in world:
         for inst in concept:
-            objects.append(torch.tensor([labels_to_idx[shape[0]] for shape in inst]))
-            positions.append(torch.tensor([shape[1] for shape in inst]));
+            objects.append(one_hot(inst, labels_to_idx))
+            positions.append(torch.tensor([shape['pos'] for shape in inst]));
     return objects, positions
+
+def one_hot(inst, labels_to_idx):
+    color_len = len(labels_to_idx['color'])
+    shape_len = len(labels_to_idx['shape'])
+    n_obj = len(inst)
+
+    color_onehot = torch.zeros(n_obj, color_len);
+    shape_onehot = torch.zeros(n_obj, shape_len);
+
+    color_onehot[range(n_obj), [labels_to_idx['color'][c['color']] for c in inst]] = 1
+    shape_onehot[range(n_obj), [labels_to_idx['shape'][s['shape']] for s in inst]] = 1
+
+    total = torch.cat([torch.ones(n_obj, 1), color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
+
+    return total

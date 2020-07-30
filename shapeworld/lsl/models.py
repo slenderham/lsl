@@ -673,33 +673,30 @@ class SetCriterion(nn.Module):
     """
             Taken from DETR, simplified by removing object detection losses
     """
-    def __init__(self, num_classes, eos_coef=0.1, pos_cost_weight=5.0):
+    def __init__(self, num_classes, pos_cost_weight=1.0):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
-            eos_coef: relative classification weight applied to the no-object category
             pos_cost_weight: relative weight of the position loss
         """
         super().__init__()
         self.matcher = self.hungarian
-        self.eos_coef = eos_coef
         self.num_classes = num_classes
         self.pos_cost_weight = pos_cost_weight
-        empty_weight = torch.ones(self.num_classes + 1)
-        empty_weight[-1] = self.eos_coef
-        self.register_buffer('empty_weight', empty_weight)
 
     def loss_labels(self, outputs, targets, indices, num_boxes):
         """Classification loss (NLL)"""
         src_logits = outputs['pred_logits']
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(outputs['pred_logits'].device);
-        target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
+        target_classes = torch.zeros(src_logits.shape, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
-        acc = (torch.argmax(src_logits[idx], dim=-1)==target_classes_o).float().mean()
+        loss_ce = F.binary_cross_entropy_with_logits(src_logits, target_classes)
+
+        # loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+
+        acc = ((src_logits>0).float()==target_classes).float().mean()
 
         return loss_ce, acc
 
@@ -750,12 +747,11 @@ class SetCriterion(nn.Module):
         Performs the matching
         Params:
             outputs: This is a dict that contains at least these entries:
-                 "pred_logits": Tensor of dim [batch_size, num_queries, num_classes] with the classification logits
-                 "pred_poses": Tensor of dim [batch_size, num_queries, 2] with the predicted position
+                 "pred_logits": Tensor of dim [batch_size, num_slots, num_classes] with the classification logits
+                 "pred_poses": Tensor of dim [batch_size, num_slots, 2] with the predicted position
             targets: This is a list of targets (len(targets) = batch_size), where each target is a dict containing:
-                 "labels": Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
-                           objects in the target) containing the class labels
-                 "poses": Tensor of dim [num_target_boxes, 2] containing the target position
+                 "labels": Tensor of dim [num_objects, num_classes] containing the binary indicator of attributes
+                 "poses": Tensor of dim [num_objects, 2] containing the target position
         Returns:
             A list of size batch_size, containing tuples of (index_i, index_j) where:
                 - index_i is the indices of the selected predictions (in order)
@@ -764,15 +760,16 @@ class SetCriterion(nn.Module):
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
         n, num_slots, num_classes = outputs["pred_logits"].shape;
-        sizes = [len(t) for t in targets['labels']];
+        sizes = [len(t) for t in targets['poses']];
 
-        out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)
+        out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
         out_pos = outputs["pred_poses"].flatten(0, 1)
 
-        tgt_ids = torch.cat([v for v in targets['labels']]).long().to(out_prob.device)
-        tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device)
+        tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
+        tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device) # [sum_i num_obj_i] x 2
+        assert(tgt_ids.shape[0]==tgt_pos.shape[0])
 
-        cost_class = -out_prob[:, tgt_ids]; # get the probability of each class
+        cost_class = torch.cdist(out_prob, tgt_ids, p=1);
         cost_pos = torch.cdist(out_pos, tgt_pos, p=1);
 
         cost = cost_class + self.pos_cost_weight*cost_pos;

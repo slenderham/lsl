@@ -2,7 +2,7 @@
 
 HYPO_LAMBDA=1
 
-python lsl/graph.py --cuda \
+python lsl/set_pred.py --cuda \
     --hypo_lambda $HYPO_LAMBDA \
     --batch_size 32\
     --seed $RANDOM \
@@ -14,6 +14,7 @@ python lsl/graph.py --cuda \
     --lr 0.001\
     --skip_eval\
     --save_checkpoint\
+    --debug_example\
     --oracle_world_config\
-    --data_dir /data/cw9951/hard_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/graph

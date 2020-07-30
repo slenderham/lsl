@@ -30,7 +30,7 @@ N_EX = 4  # number of examples per task
 
 random = next_random()
 COLORS = {
-    'black', 'red', 'green', 'blue', 'yellow', 'magenta', 'cyan', 'white'
+    'black', 'red', 'green', 'blue', 'yellow', 'magenta', 'cyan', 'white', 'gray'
 }
 SHAPES = {
     'square', 'rectangle', 'triangle', 'pentagon', 'cross', 'circle',

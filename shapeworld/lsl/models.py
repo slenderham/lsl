@@ -321,7 +321,7 @@ class SlotAttention(nn.Module):
         self.to_k = nn.Linear(dim, dim, bias = False)
         self.to_v = nn.Linear(dim, dim, bias = False)
 
-        self.gru = nn.GRU(dim, dim)
+        self.gru = nn.GRUCell(dim, dim)
 
         hidden_dim = max(dim, hidden_dim)
 
@@ -361,9 +361,9 @@ class SlotAttention(nn.Module):
 
             updates = torch.einsum('bjd,bij->bid', v, attn)
 
-            slots, _ = self.gru(
-                updates.reshape(1, -1, d),
-                slots_prev.reshape(1, -1, d)
+            slots = self.gru(
+                updates.reshape(-1, d),
+                slots_prev.reshape(-1, d)
             )
 
             slots = slots.reshape(b, -1, d)
@@ -395,7 +395,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False):
+    def forward(self, img, visualize_attns=True):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);

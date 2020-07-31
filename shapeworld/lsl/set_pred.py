@@ -321,7 +321,6 @@ if __name__ == "__main__":
         cls_loss_total = 0;
         pos_loss_total = 0;
         cls_acc = 0;
-        meters = [AverageMeter(raw=True) for _ in range(4)];
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \

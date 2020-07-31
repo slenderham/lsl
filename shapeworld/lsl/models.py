@@ -404,7 +404,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=True):
+    def forward(self, img, visualize_attns=False):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -707,8 +707,7 @@ class SetCriterion(nn.Module):
         # loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
 
         acc = (target_classes.long()==(src_logits>0).long()).float().mean()
-        print(target_classes.long().cpu().numpy(), (src_logits>0).long().cpu().numpy());
-        f1 = f1_score(target_classes.long().cpu().numpy(), (src_logits>0).long().cpu().numpy())
+        f1 = f1_score(target_classes.long().cpu().numpy().ravel(), (src_logits>0).long().cpu().numpy().ravel())
 
         return loss_ce, (acc, f1)
 

@@ -363,11 +363,11 @@ class SlotAttention(nn.Module):
             updates = torch.einsum('bjd,bij->bid', v, attn)
 
             slots = self.gru(
-                updates.reshape(b*n, d),
-                slots_prev.reshape(b*n, d)
+                updates.reshape(b*n_s, d),
+                slots_prev.reshape(b*n_s, d)
             )
 
-            slots = slots.reshape(b, n, d)
+            slots = slots.reshape(b, n_s, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
         return slots, attns;
@@ -707,6 +707,7 @@ class SetCriterion(nn.Module):
         # loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
 
         acc = (target_classes.long()==(src_logits>0).long()).float().mean()
+        print(target_classes.long().cpu().numpy(), (src_logits>0).long().cpu().numpy());
         f1 = f1_score(target_classes.long().cpu().numpy(), (src_logits>0).long().cpu().numpy())
 
         return loss_ce, (acc, f1)
@@ -746,10 +747,10 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {};
-        loss_cls, acc = self.loss_labels(outputs, targets, indices, num_objs);
+        loss_cls, metrics = self.loss_labels(outputs, targets, indices, num_objs);
         losses['class'] = loss_cls;
         losses['position'] = self.loss_position(outputs, targets, indices, num_objs);
-        return losses, acc, indices
+        return losses, metrics
 
     @ torch.no_grad()
     def hungarian(self, outputs, targets):

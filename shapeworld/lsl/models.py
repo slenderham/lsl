@@ -11,6 +11,7 @@ import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
+from sklearn.metrics import f1_score
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
@@ -362,11 +363,11 @@ class SlotAttention(nn.Module):
             updates = torch.einsum('bjd,bij->bid', v, attn)
 
             slots = self.gru(
-                updates.reshape(-1, d),
-                slots_prev.reshape(-1, d)
+                updates.reshape(b*n, d),
+                slots_prev.reshape(b*n, d)
             )
 
-            slots = slots.reshape(b, -1, d)
+            slots = slots.reshape(b, n, d)
             slots = slots + self.mlp(self.norm_pre_ff(slots))
 
         return slots, attns;
@@ -389,6 +390,14 @@ class SANet(nn.Module):
             nn.BatchNorm2d(dim),
             ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
         );
+
+        self.post_mlp = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim)
+        )
+
         self.final_feat_dim=dim;
         self.iters = iters;
         self.num_slots = num_slots;
@@ -399,14 +408,15 @@ class SANet(nn.Module):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
+        x = self.post_mlp(x);
         x, attns = self.slot_attn(x); # --> N * num slots * feature size
         if visualize_attns:
             self._visualize_attns(img, attns);
         return x;
 
     def _visualize_attns(self, img, attns):
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'gray'])
-        bounds = [0, 1, 2, 3, 4, 5, 6]  # values for each color
+        cmap = plt.get_cmap(name='Set3');
+        bounds = list(range(12))  # values for each color
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         N, C, H, W = img.shape;
@@ -696,9 +706,10 @@ class SetCriterion(nn.Module):
 
         # loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
 
-        acc = ((src_logits>0).float()==target_classes).float().mean()
+        acc = (target_classes.long()==(src_logits>0).long()).float().mean()
+        f1 = f1_score(target_classes.long().cpu().numpy(), (src_logits>0).long().cpu().numpy())
 
-        return loss_ce, acc
+        return loss_ce, (acc, f1)
 
     def loss_position(self, outputs, targets, indices, num_boxes):
         """Huber Loss"""
@@ -738,7 +749,7 @@ class SetCriterion(nn.Module):
         loss_cls, acc = self.loss_labels(outputs, targets, indices, num_objs);
         losses['class'] = loss_cls;
         losses['position'] = self.loss_position(outputs, targets, indices, num_objs);
-        return losses, acc
+        return losses, acc, indices
 
     @ torch.no_grad()
     def hungarian(self, outputs, targets):

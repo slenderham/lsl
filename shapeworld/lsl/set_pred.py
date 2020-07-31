@@ -321,6 +321,7 @@ if __name__ == "__main__":
         cls_loss_total = 0;
         pos_loss_total = 0;
         cls_acc = 0;
+        meters = [AverageMeter(raw=True) for _ in range(4)];
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -376,8 +377,10 @@ if __name__ == "__main__":
             slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
             slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
  
-            losses, acc = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+            losses, (acc, f1) = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                 {'labels': objs, 'poses': poses});
+
+            return 0;
 
             # Hypothesis loss
             loss = args.concept_lambda*pred_loss + args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
@@ -393,8 +396,8 @@ if __name__ == "__main__":
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
-                pbar.set_description('Epoch {} Loss: {:.6f}'.format(
-                    epoch, loss.item()))
+                pbar.set_description('Epoch {} Loss: {:.6f} F1: {:.6f}'.format(
+                    epoch, loss.item(), f1))
                 pbar.refresh()
 
             pbar.update()

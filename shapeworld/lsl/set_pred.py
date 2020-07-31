@@ -379,7 +379,6 @@ if __name__ == "__main__":
             losses, (acc, f1) = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                 {'labels': objs, 'poses': poses});
 
-            return 0;
 
             # Hypothesis loss
             loss = args.concept_lambda*pred_loss + args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])

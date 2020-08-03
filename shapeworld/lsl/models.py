@@ -27,7 +27,7 @@ class ExWrapper(nn.Module):
         super(ExWrapper, self).__init__()
         self.model = model
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         batch_size = x.shape[0]
         if len(x.shape) == 5:
             n_ex = x.shape[1]
@@ -37,7 +37,7 @@ class ExWrapper(nn.Module):
         else:
             x_flat = x
 
-        x_enc = self.model(x_flat)
+        x_enc = self.model(x_flat, **kwargs)
 
         if len(x.shape) == 5:
             x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
@@ -336,9 +336,10 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None):
+    def forward(self, inputs, num_slots = None, num_iters = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
+        n_it = num_iters if num_iters is not None else self.iters
         
         mu = self.slots_mu.expand(b, n_s, -1)
         sigma = self.slots_sigma.expand(b, n_s, -1)
@@ -349,7 +350,7 @@ class SlotAttention(nn.Module):
 
         attns = [];
 
-        for _ in range(self.iters):
+        for _ in range(n_it):
             slots_prev = slots
 
             slots = self.norm_slots(slots)
@@ -404,12 +405,12 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False):
+    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
         x = self.post_mlp(x);
-        x, attns = self.slot_attn(x); # --> N * num slots * feature size
+        x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots); # --> N * num slots * feature size
         if visualize_attns:
             self._visualize_attns(img, attns);
         return x;

@@ -305,8 +305,8 @@ if __name__ == "__main__":
     print(sum([p.numel() for p in params_to_optimize]));
     models_to_save = [image_part_model, image_cls_projection, image_pos_projection, im_im_scorer_model, hint_model, optimizer];
 
-    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'model_best.pth.tar')):
-        ckpt_path = os.path.join(args.exp_dir, 'model_best.pth.tar');
+    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
+        ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=torch.device('cpu'));
         for m, sd in zip(models_to_save, sds):
             m.load_state_dict(sd);
@@ -369,9 +369,9 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
-            score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
-            pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
-            pred_loss_total += pred_loss
+            # score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
+            # pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
+            # pred_loss_total += pred_loss
 
             slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
             slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
@@ -408,7 +408,7 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.eval();
 
-        accuracy_meter = AverageMeter(raw=True)
+        accuracy_meter = AverageMeter(raw=False)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -419,23 +419,28 @@ if __name__ == "__main__":
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
 
-                image_rep = image_part_model(image).mean(dim=1);
-                examples_rep = image_part_model(examples).mean(dim=[1,2]);
-           
-                score = im_im_scorer_model.score(examples_rep, image_rep)
+                # Learn representations of images and examples
+                image_slot = image_part_model(image); # --> N x n_slot x C
+                # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
 
-                label_hat = score > 0
-                label_hat = label_hat.cpu().numpy()
+                examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
+                # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+
+                slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+                slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+    
+                _, (acc, _) = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+                                    {'labels': objs, 'poses': poses});
 
                 accuracy = accuracy_score(label_np, label_hat)
-                accuracy_meter.update(accuracy,
+                accuracy_meter.update(acc,
                                       batch_size,
-                                      raw_scores=(label_hat == label_np))
+                                      raw_scores=None)
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, accuracy_meter.avg))
 
-        return accuracy_meter.avg, accuracy_meter.raw_scores
+        return accuracy_meter.avg
 
     best_epoch = 0
     best_epoch_acc = 0
@@ -457,21 +462,17 @@ if __name__ == "__main__":
             save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:
             continue
-        train_acc, _ = test(epoch, 'train')
-        val_acc, _ = test(epoch, 'val')
-        test_acc, test_raw_scores = test(epoch, 'test')
+        train_acc = test(epoch, 'train')
+        val_acc = test(epoch, 'val')
+        test_acc = test(epoch, 'test')
         if has_same:
-            val_same_acc, _ = test(epoch, 'val_same')
-            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
-            all_test_raw_scores = test_raw_scores + test_same_raw_scores
+            val_same_acc = test(epoch, 'val_same')
+            test_same_acc = test(epoch, 'test_same')
         else:
             val_same_acc = val_acc
             test_same_acc = test_acc
-            all_test_raw_scores = test_raw_scores
 
         # Compute confidence intervals
-        n_test = len(all_test_raw_scores)
-        test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
 
         epoch_acc = (val_acc + val_same_acc) / 2
         is_best_epoch = epoch_acc > best_epoch_acc

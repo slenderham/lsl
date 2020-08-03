@@ -13,10 +13,8 @@ python lsl/set_pred.py --cuda \
     --comparison dotp\
     --hidden_size 64\
     --lr 0.0001\
-    --num_slots 3\
-    --skip_eval\
+    --num_slots 6\
     --save_checkpoint\
-    --load_checkpoint\
     --oracle_world_config\
-    --data_dir /Users/wangchong/Downloads/hard_sw\
+    --data_dir /data/cw9951/hard_sw\
     exp/graph

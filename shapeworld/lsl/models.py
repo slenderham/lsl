@@ -405,17 +405,17 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
+    def forward(self, img, visualize_attns=True, num_iters=6, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
         x = self.post_mlp(x);
         x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots); # --> N * num slots * feature size
         if visualize_attns:
-            self._visualize_attns(img, attns);
+            self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots));
         return x;
 
-    def _visualize_attns(self, img, attns):
+    def _visualize_attns(self, img, attns, num_iters, num_slots):
         cmap = plt.get_cmap(name='Set3');
         bounds = list(range(12))  # values for each color
         norm = colors.BoundaryNorm(bounds, cmap.N)
@@ -425,13 +425,13 @@ class SANet(nn.Module):
         H_k = W_k = math.isqrt(dim_k);
         rand_idx = torch.randint(0, N, size=(1,)).item();
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
-        fig, axes = plt.subplots(self.iters, self.num_slots);
-        for i in range(self.iters):
-            for j in range(self.num_slots):
+        fig, axes = plt.subplots(num_iters, num_slots);
+        for i in range(num_iters):
+            for j in range(num_slots):
                 im = axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='nearest').squeeze().detach().cpu());
 
-        fig, axes = plt.subplots(1, self.iters);
-        for i in range(self.iters):
+        fig, axes = plt.subplots(1, num_iters);
+        for i in range(num_iters):
             masked_img = torch.zeros(H_k, W_k);
             for h in range(H_k):
                 for w in range(W_k):

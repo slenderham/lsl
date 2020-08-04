@@ -16,5 +16,5 @@ python lsl/set_pred.py --cuda \
     --num_slots 6\
     --save_checkpoint\
     --oracle_world_config\
-    --data_dir /data/cw9951/hard_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/graph

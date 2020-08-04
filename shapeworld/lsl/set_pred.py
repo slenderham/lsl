@@ -52,6 +52,10 @@ if __name__ == "__main__":
     parser.add_argument('--oracle_world_config',
                         action='store_true',
                         help='If true, let slots predict all objects and positions. Else use those from language.')
+    parser.add_argument('--target_type',
+                        type=str,
+                        choices=['multihead single label', 'multilabel'],
+                        help='Whether to use one softmax for each attribute or sigmoid for all.')
     parser.add_argument('--noise',
                         type=float,
                         default=0.0,
@@ -277,7 +281,7 @@ if __name__ == "__main__":
     # params_to_optimize.extend(im_lang_whole_scorer_model.parameters())
 
     # projection
-    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])+1).to(device); # add one for no object
+    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
     params_to_optimize.extend(image_cls_projection.parameters());
 
     image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
@@ -290,7 +294,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion(num_classes=len(labels_to_idx), pos_cost_weight=args.pos_weight).to(device);
+    set_loss = SetCriterion(num_classes=len(labels_to_idx), pos_cost_weight=args.pos_weight, ).to(device);
 
     # optimizer
     optfunc = {
@@ -369,9 +373,9 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
-            # score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
-            # pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
-            # pred_loss_total += pred_loss
+            score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
+            pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
+            pred_loss_total += pred_loss
 
             slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
             slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
@@ -418,6 +422,8 @@ if __name__ == "__main__":
                 label = label.to(device)
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
+                world = rest[-1]; # this should be a list of lists
+                objs, poses = extract_objects_and_positions(world, labels_to_idx);
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(image); # --> N x n_slot x C
@@ -457,7 +463,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch);
+        train_loss = train(epoch, n_steps=1);
         if args.save_checkpoint:
             save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:

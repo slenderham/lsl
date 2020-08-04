@@ -100,6 +100,24 @@ def get_max_hint_length(data_dir=None):
         raise RuntimeError("Can't find any splits in {}".format(data_dir))
     return max_len
 
+def get_max_world_length(data_dir=None):
+    """
+    Get the maximum number of words in a sentence across all splits
+    """
+    if data_dir is None:
+        data_dir = DATA_DIR
+    max_len = 0
+    for split in ['train', 'val', 'test', 'val_same', 'test_same']:
+        worlds_file = os.path.join(data_dir, 'shapeworld', split, 'worlds.json')
+        if os.path.exists(worlds_file):
+            with open(worlds_file) as fp:
+                worlds = json.load(fp)
+            split_max_len = max([len(inst) for concept in worlds for inst in concept])
+            if split_max_len > max_len:
+                max_len = split_max_len
+    if max_len == 0:
+        raise RuntimeError("Can't find any splits in {}".format(data_dir))
+    return max_len
 
 def get_black_mask(imgs):
     if len(imgs.shape) == 4:
@@ -279,6 +297,7 @@ class ShapeWorld(data.Dataset):
 
         # this is the maximum number of tokens in a sentence
         max_length = get_max_hint_length(data_dir)
+        max_world_size = get_max_world_length(data_dir)
 
         hints, hint_lengths = [], []
         for hint in self.hints:
@@ -349,9 +368,12 @@ class ShapeWorld(data.Dataset):
                 th = hints[test_hint_i]
                 thl = hint_lengths[test_hint_i]
             if self.worlds!=None:
-                world = worlds[i];
+                world = worlds[i]
+                for concept in world:
+                    num_obj = len(concept);
+                    concept.extend([{}]*(max_world_size - num_obj));
             else:
-                world = None;
+                world = [[{}]*max_world_size]*(N_EX+1);
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
                       hint_lengths[hint_i], th, thl, world)
             data.append(data_i)
@@ -772,26 +794,27 @@ def extract_objects(hints):
         all_feats.append(feats)
     return all_feats
 
-def extract_objects_and_positions(world, labels_to_idx):
+def extract_objects_and_positions(world, labels_to_idx, target_type):
+    assert(target_type in ['multihead single label', 'multilabel'])
     objects = []
     positions = [];
     for concept in world:
         for inst in concept:
             objects.append(one_hot(inst, labels_to_idx))
-            positions.append(torch.tensor([shape['pos'] for shape in inst]));
+            positions.append(torch.tensor([shape['pos'] for shape in inst if shape]));
     return objects, positions
 
 def one_hot(inst, labels_to_idx):
     color_len = len(labels_to_idx['color'])
     shape_len = len(labels_to_idx['shape'])
-    n_obj = len(inst)
+    n_obj = len([obj for obj in inst if obj])
 
     color_onehot = torch.zeros(n_obj, color_len);
     shape_onehot = torch.zeros(n_obj, shape_len);
 
-    color_onehot[range(n_obj), [labels_to_idx['color'][c['color']] for c in inst]] = 1
-    shape_onehot[range(n_obj), [labels_to_idx['shape'][s['shape']] for s in inst]] = 1
+    color_onehot[range(n_obj), [labels_to_idx['color'][c['color']] for c in inst if c]] = 1
+    shape_onehot[range(n_obj), [labels_to_idx['shape'][s['shape']] for s in inst if s]] = 1
 
-    total = torch.cat([torch.ones(n_obj, 1), color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
+    total = torch.cat([color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
 
     return total

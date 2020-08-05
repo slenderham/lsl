@@ -722,15 +722,15 @@ class SetCriterion(nn.Module):
         else:
             target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device);
             default = torch.zeros(sum(self.num_classes)).to(src_logits.device);
-            for n in self.num_classes:
-                default[n] = 1.0
+            for n in np.cumsum(self.num_classes):
+                default[n-1] = 1.0
             target_classes = default.reshape(1, 1, -1).expand(src_logits.shape);
             target_classes[idx] = target_classes_o;
             src_logits_spl = torch.split(src_logits, self.num_classes, dim=-1);
             target_classes_spl = torch.split(target_classes, self.num_classes, dim=-1);
             target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl];
             loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i].to(src_logits.device))
-                            for i, _ in enumerate(src_logits_spl)]);
+                            for i, _ in enumerate(src_logits_spl)])/len(self.num_classes);
             metric = (torch.stack([torch.argmax(logit, dim=-1) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean();
         return loss_ce, metric
 

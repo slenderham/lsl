@@ -821,24 +821,20 @@ def extract_objects_and_positions(world, world_len, labels_to_idx):
     # make sure the to pad the null states with the last index
     objects = []
     positions = [];
-    for concept in world:
-        for inst in concept:
-            objects.append(one_hot(inst, labels_to_idx))
-            positions.append(torch.tensor([shape['pos'] for shape in inst if shape['pos']!=(float('inf'), float('inf'))], dtype=torch.float));
+    for i, concept in enumerate(world):
+        for j, inst in enumerate(concept):
+            objects.append(one_hot(inst, world_len[i][j], labels_to_idx))
+            positions.append(torch.tensor([shape['pos'] for shape in inst[:world_len[i][j]]])], dtype=torch.float));
     return objects, positions
 
-def one_hot(inst, labels_to_idx):
+def one_hot(inst, world_len, labels_to_idx):
     color_len = len(labels_to_idx['color'])
     shape_len = len(labels_to_idx['shape'])
-    n_obj = len([shape for shape in inst if shape['color']!='']) 
     # get the number of objects in that instance. The padded object will have None in 
 
-    color_onehot = torch.zeros(n_obj, color_len);
-    shape_onehot = torch.zeros(n_obj, shape_len);
-
-    color_onehot[range(n_obj), [labels_to_idx['color'][shape['color']] for shape in inst if shape['color']!='']] = 1
-    shape_onehot[range(n_obj), [labels_to_idx['shape'][shape['shape']] for shape in inst if shape['shape']!='']] = 1
-
+    color_onehot = torch.zeros(world_len, color_len);
+    shape_onehot = torch.zeros(world_len, shape_len);
+    color_onehot[range(world_len), [labels_to_idx['color'][shape['color']] for shape in inst[:world_len]]] = 1
+    shape_onehot[range(world_len), [labels_to_idx['shape'][shape['shape']] for shape in inst[:world_len]]] = 1
     total = torch.cat([color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
-
     return total

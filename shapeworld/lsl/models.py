@@ -695,12 +695,12 @@ class SetCriterion(nn.Module):
         self.num_classes = num_classes
         self.pos_cost_weight = pos_cost_weight
         self.eos_coef = eos_coef
-        assert(target_type in ['multihead single label', 'multilabel']);
+        assert(target_type in ['multihead_single_label', 'multilabel']);
         self.target_type = target_type;
-        if self.target_type=='multihead single label':
+        if self.target_type=='multihead_single_label':
             self.empty_weights = []
             for i, n_c in enumerate(self.num_classes):
-                empty_weight = torch.ones(n_c + 1)
+                empty_weight = torch.ones(n_c)
                 empty_weight[-1] = self.eos_coef
                 self.register_buffer(f'empty_weight{i}', empty_weight);
                 self.empty_weights.append(empty_weight);
@@ -711,7 +711,7 @@ class SetCriterion(nn.Module):
         src_logits = outputs['pred_logits']
         idx = self._get_src_permutation_idx(indices)
         
-        if self.target_type=='multilabel':    
+        if self.target_type=='multilabel':
             target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device);
             target_classes = torch.zeros(src_logits.shape, device=src_logits.device)
             target_classes[idx] = target_classes_o
@@ -720,20 +720,18 @@ class SetCriterion(nn.Module):
             f1 = f1_score(target_classes.long().cpu().numpy().ravel(), (src_logits>0).long().cpu().numpy().ravel())
             metric = (acc, f1)
         else:
-            loss_ce = 0;
-            acc = 0;
-            count = 0;
-            for i in range(len(self.num_classes)):
-                target_classes = torch.full(src_logits[i].shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits[i].device)
-                target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"][i], indices)]).to(src_logits[0].device);
-                target_classes = torch.zeros(src_logits[i].shape, device=src_logits[i].device)
-                target_classes[idx] = target_classes_o
-                loss_ce += F.cross_entropy(src_logits[i].transpose(1, 2), target_classes, self.empty_weights[i])/len(self.num_classes)
-                acc += (torch.argmax(src_logits[i], dim=-1)==target_classes).float().sum()
-                count += np.prod(target_classes.shape)
-            metric = acc/count;
-
+            target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device);
+            default = torch.zeros(sum(self.num_classes)).to(src_logits.device);
+            for n in self.num_classes:
+                default[n] = 1.0
+            target_classes = default.reshape(1, 1, -1).expand(src_logits.shape);
+            target_classes[idx] = target_classes_o
+            src_logits_spl = torch.split(src_logits, self.num_classes, dim=-1);
+            target_classes_spl = torch.split(target_classes, self.num_classes, dim=-1);
+            target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl];
+            loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i])
+                            for i, _ in enumerate(src_logits_spl)]);
+            metric = (torch.stack([torch.argmax(logit) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean();
         return loss_ce, metric
 
     def loss_position(self, outputs, targets, indices, num_boxes):
@@ -797,30 +795,30 @@ class SetCriterion(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        num_classes = [];
         sizes = [len(t) for t in targets['poses']];
+        n, num_slots, _ = outputs["pred_logits"].shape;
 
         if self.target_type=='multilabel':
-            n, num_slots, num_classes[0] = outputs["pred_logits"].shape;
             out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
-            tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
-            assert(tgt_ids.shape[0]==tgt_pos.shape[0])
-            cost_class = torch.cdist(out_prob, tgt_ids, p=1);
-        elif self.target_type=='multihead single label':
-            n, num_slots, _ = outputs["pred_logits"][0].shape;
-            num_classes = [logits.shape[-1] for logits in outputs["pred_logits"]]
-            out_prob = [logits.flatten(0, 1).softmax(-1) for logits in outputs["pred_logits"]]
-            tgt_ids = [torch.cat([v for v in target]).to(out_prob[0].device) for target in targets['labels']] # num_cls_heads x [sum_i num_obj_i]
-            assert(all([tgt_ids[i].shape[0]==tgt_pos.shape[0] for i in range(len(tgt_ids))]));
-            assert(all([tgt_ids[i].shape==tgt_ids[0].shape for i in range(len(tgt_ids))]))
-            cost_class = sum([-out_prob[i][:, tgt_ids[i]] for i in range(len(outputs["pred_logits"]))])/len(num_classes);
-            assert(cost_class.shape==(out_prob[0].shape[0], tgt_ids[0].shape[0]))
+        elif self.target_type=='multihead_single_label':
+            out_prob = outputs["pred_logits"].flatten(0, 1)
+            # split into chunks for different cls heads, then concat back together
+            out_prob = torch.split(out_prob, self.num_classes, dim=-1);
+            for o_p in out_prob:
+                o_p = o_p.softmax(-1);
+            out_prob = torch.cat(out_prob, dim=-1);
         else:
             raise ValueError('Not a valid target type')
+
+        tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
+        cost_class = torch.cdist(out_prob, tgt_ids, p=1);
         
         out_pos = outputs["pred_poses"].flatten(0, 1)
         tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device) # [sum_i num_obj_i] x 2
         cost_pos = torch.cdist(out_pos, tgt_pos, p=1);
+
+        assert(tgt_ids.shape[0]==tgt_pos.shape[0])
+
         cost = cost_class + self.pos_cost_weight*cost_pos;
         cost = cost.reshape(n, num_slots, -1).cpu();
 

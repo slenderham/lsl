@@ -79,7 +79,6 @@ def gen_class_noise(image_dim, noise, noise_type='gaussian'):
         return torch.zeros(image_dim,
                            requires_grad=False).uniform_(-noise, noise)
 
-
 def get_max_hint_length(data_dir=None):
     """
     Get the maximum number of words in a sentence across all splits
@@ -369,13 +368,16 @@ class ShapeWorld(data.Dataset):
                 thl = hint_lengths[test_hint_i]
             if self.worlds!=None:
                 world = worlds[i]
+                len_world = [];
                 for concept in world:
                     num_obj = len(concept);
-                    concept.extend([{}]*(max_world_size - num_obj));
+                    len_world.append(num_obj);
+                    concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj));
+                len_world = np.array(len_world);
             else:
-                world = [[{}]*max_world_size]*(N_EX+1);
+                world = None;
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
-                      hint_lengths[hint_i], th, thl, world)
+                      hint_lengths[hint_i], th, thl, world, len_world)
             data.append(data_i)
 
         self.data = data
@@ -421,6 +423,8 @@ class ShapeWorld(data.Dataset):
                         shapeset.add(col_n_shape_n_pos['shape']);
         color2idx = dict(zip(colorset, range(len(colorset))));
         shape2idx = dict(zip(shapeset, range(len(shapeset))));
+        color2idx['*'] = len(color2idx);
+        shape2idx['*'] = len(shape2idx);
         self.label2idx = {
             'color': color2idx,
             'shape': shape2idx
@@ -438,13 +442,14 @@ class ShapeWorld(data.Dataset):
         batch_hint = []
         batch_hint_length = []
         batch_worlds = [];
+        batch_world_lens = [];
         if self.test_hints is not None:
             batch_test_hint = []
             batch_test_hint_length = []
 
         for _ in range(n_batch):
             index = random.randint(n_train)
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = \
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = \
                 self.__getitem__(index)
 
             batch_examples.append(examples)
@@ -453,6 +458,7 @@ class ShapeWorld(data.Dataset):
             batch_hint.append(hint)
             batch_hint_length.append(hint_length)
             batch_worlds.append(world)
+            batch_world_lens.append(world_len);
             if self.test_hints is not None:
                 batch_test_hint.append(test_hint)
                 batch_test_hint_length.append(test_hint_length)
@@ -470,10 +476,12 @@ class ShapeWorld(data.Dataset):
         else:
             batch_test_hint = None
             batch_test_hint_length = None
-
+        
+        batch_world_lens = torch.from_numpy(np.array(batch_world_lens)).long()
+        
         return (
             batch_examples, batch_image, batch_label, batch_hint,
-            batch_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds
+            batch_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds, batch_world_lens
         )
 
     def add_fixed_noise_colors(self,
@@ -577,7 +585,7 @@ class ShapeWorld(data.Dataset):
 
     def __getitem__(self, index):
         if self.split == 'train' and self.augment:
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = self.data[
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = self.data[
                 index]
 
             # tie a language to a concept; convert to pytorch.
@@ -593,7 +601,7 @@ class ShapeWorld(data.Dataset):
                 # return a tuple (example_z, hint_z, 1) or...
                 # return a tuple (example_z, hint_other_z, 0).
                 # Sample a new test hint as well.
-                examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2, world2 = self.data[
+                examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2, world2, world2_len = self.data[
                     random.randint(n_train)]
 
                 # pick either an example or an image.
@@ -604,12 +612,14 @@ class ShapeWorld(data.Dataset):
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
                     world[-1] = world2[-1]
+                    world_len[-1] = world2_len[-1]
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
                     test_hint = support_hint2
                     test_hint_length = support_hint_length2
                     world[-1] = world2[swap]
+                    world_len[-1] = world2_len[swap]
 
                 test_hint = torch.from_numpy(test_hint).long()
 
@@ -635,7 +645,7 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 0, hint, hint_length, test_hint, test_hint_length, world
+                return examples, feats, 0, hint, hint_length, test_hint, test_hint_length, world, world_len
             else:  # sample_label == 1
                 swap = random.randint((N_EX + 1 if label == 1 else N_EX))
                 # pick either an example or an image.
@@ -646,11 +656,14 @@ class ShapeWorld(data.Dataset):
                     if label == 1:
                         examples[swap, ...] = image
                         world[swap], world[-1] = world[-1], world[swap]
+                        world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
                     else:
                         swap_from = random.randint(N_EX)
                         examples[swap, ...] = examples[swap_from, ...]
                         world[-1] = world[swap]
                         world[swap] = world[swap_from]
+                        world_len[-1] = world_len[swap]
+                        world_len[swap] = world_len[swap_from]
                     
                 # This is a positive example, so whatever example we've chosen,
                 # assume the query hint matches the support hint.
@@ -678,10 +691,10 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 1, hint, hint_length, test_hint, test_hint_length, world
+                return examples, feats, 1, hint, hint_length, test_hint, test_hint_length, world, world_len
 
         else:  # val, val_same, test, test_same
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world = self.data[
+            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = self.data[
                 index]
 
             # no fancy stuff. just return image.
@@ -691,6 +704,7 @@ class ShapeWorld(data.Dataset):
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
+            world_len = torch.from_numpy(world_len).long()
 
             # this is a 0 since feats does not match this hint.
             if self.fixed_noise_colors is not None:
@@ -707,7 +721,7 @@ class ShapeWorld(data.Dataset):
             if self.preprocess is not None:
                 image = self.preprocess(image)
                 examples = torch.stack([self.preprocess(e) for e in examples])
-            return examples, image, label, hint, hint_length, test_hint, test_hint_length, world
+            return examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len
 
     def to_text(self, hints):
         texts = []
@@ -767,7 +781,7 @@ def extract_objects(hints):
     """
     all_feats = []
     for hint in hints:
-        feats = []
+        feats = {};
         for maybe_rel in ['above', 'below', 'left', 'right']:
             if maybe_rel in hint:
                 rel = maybe_rel
@@ -787,33 +801,43 @@ def extract_objects(hints):
             # Use "an"
             snd_shape = snd[snd.index('an') + 1:-2]
         
-        if (fst_shape!=['shape']):
-            feats.append(" ".join(fst_shape));
-        if (snd_shape!=['shape']):
-            feats.append(" ".join(snd_shape));
-        all_feats.append(feats)
+        for fragment in [fst_shape, snd_shape]:
+            if (len(fragment)==2):
+                for feat in fragment:
+                    if feat in COLORS:
+                        feats['color'] = feat
+                    elif feat in SHAPES:
+                        feats['shape'] = feat
+                    elif feat == 'shape':
+                        feats['shape'] = '*'
+            elif (len(fragment)==1):
+                assert(fragment[0] in SHAPES), fragment;
+                feats['color'] = '*';
+            else:
+                raise RuntimeError('Each fragment should be size 1 or 2, you have {}'.format(fragment))
     return all_feats
 
-def extract_objects_and_positions(world, labels_to_idx, target_type):
-    assert(target_type in ['multihead single label', 'multilabel'])
+def extract_objects_and_positions(world, world_len, labels_to_idx):
+    # make sure the to pad the null states with the last index
     objects = []
     positions = [];
     for concept in world:
         for inst in concept:
             objects.append(one_hot(inst, labels_to_idx))
-            positions.append(torch.tensor([shape['pos'] for shape in inst if shape]));
+            positions.append(torch.tensor([shape['pos'] for shape in inst if shape['pos']!=(float('inf'), float('inf'))], dtype=torch.float));
     return objects, positions
 
 def one_hot(inst, labels_to_idx):
     color_len = len(labels_to_idx['color'])
     shape_len = len(labels_to_idx['shape'])
-    n_obj = len([obj for obj in inst if obj])
+    n_obj = len([shape for shape in inst if shape['color']!='']) 
+    # get the number of objects in that instance. The padded object will have None in 
 
     color_onehot = torch.zeros(n_obj, color_len);
     shape_onehot = torch.zeros(n_obj, shape_len);
 
-    color_onehot[range(n_obj), [labels_to_idx['color'][c['color']] for c in inst if c]] = 1
-    shape_onehot[range(n_obj), [labels_to_idx['shape'][s['shape']] for s in inst if s]] = 1
+    color_onehot[range(n_obj), [labels_to_idx['color'][shape['color']] for shape in inst if shape['color']!='']] = 1
+    shape_onehot[range(n_obj), [labels_to_idx['shape'][shape['shape']] for shape in inst if shape['shape']!='']] = 1
 
     total = torch.cat([color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
 

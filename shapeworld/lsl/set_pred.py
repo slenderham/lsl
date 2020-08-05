@@ -54,7 +54,8 @@ if __name__ == "__main__":
                         help='If true, let slots predict all objects and positions. Else use those from language.')
     parser.add_argument('--target_type',
                         type=str,
-                        choices=['multihead single label', 'multilabel'],
+                        choices=['multihead_single_label', 'multilabel'],
+                        default='multihead_single_label',
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
     parser.add_argument('--noise',
                         type=float,
@@ -146,6 +147,9 @@ if __name__ == "__main__":
 
     if not os.path.isdir(args.exp_dir):
         os.makedirs(args.exp_dir)
+
+    if not args.oracle_world_config:
+        args.pos_weight = 0.0; # if not using oracle object info, can't use coordinates for supervision
 
     # reproducibility
     torch.manual_seed(args.seed)
@@ -294,7 +298,10 @@ if __name__ == "__main__":
     params_to_optimize.extend(hint_model.parameters())
 
     # loss
-    set_loss = SetCriterion(num_classes=len(labels_to_idx), pos_cost_weight=args.pos_weight, ).to(device);
+    set_loss = SetCriterion(num_classes=[len(labels_to_idx['color']), len(labels_to_idx['shape'])], 
+                            pos_cost_weight=args.pos_weight, 
+                            eos_coef=0.5, 
+                            target_type=args.target_type).to(device);
 
     # optimizer
     optfunc = {
@@ -307,7 +314,8 @@ if __name__ == "__main__":
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_part_model, image_cls_projection, image_pos_projection, im_im_scorer_model, hint_model, optimizer];
+    models_to_save = [image_part_model, image_cls_projection, image_pos_projection, \
+                        im_im_scorer_model, hint_model, optimizer];
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
@@ -335,8 +343,13 @@ if __name__ == "__main__":
             label = label.to(device)
             batch_size = len(image)
             n_ex = examples.shape[1]
-            world = rest[-1]; # this should be a list of lists
-            objs, poses = extract_objects_and_positions(world, labels_to_idx);
+            world = rest[-2]; # this should be a list of lists
+            world_len = rest[-1]; # batch size x n_ex, for how many objects each image contains
+            if args.oracle_world_config:
+                objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
+            else:
+                objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
+                _, poses = extract_objects_and_positions(world, labels_to_idx); # this will not be used, but need to be here for set criterion to work
 
             if args.debug_example:
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
@@ -380,11 +393,17 @@ if __name__ == "__main__":
             slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
             slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
  
-            losses, (acc, f1) = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+            losses, metric = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                 {'labels': objs, 'poses': poses});
 
             # Hypothesis loss
             loss = args.concept_lambda*pred_loss + args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
+
+            if (args.target_type=='multilabel'):
+                acc, f1 = metric;
+            else:
+                acc = metric;
+                f1 = 0;
 
             cls_loss_total += losses['class'].item()
             pos_loss_total += losses['position'].item()
@@ -422,8 +441,25 @@ if __name__ == "__main__":
                 label = label.to(device)
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
-                world = rest[-1]; # this should be a list of lists
-                objs, poses = extract_objects_and_positions(world, labels_to_idx);
+                n_ex = len(image[0])
+                world = rest[-2]; # this should be a list of lists
+                world_len = rest[-1]
+                
+                actual_world = []; # the batches get collated in the weirdest way possible maybe better off not batching at all
+                for i in range(batch_size):
+                    actual_world.append([
+                        [
+                            
+                            {
+                                'color': world[j][k]['color'][i],
+                                'shape': world[j][k]['shape'][i],
+                                'pos': (world[j][k]['pos'][0][i], world[j][k]['pos'][1][i])
+                            } for k in range(world_len[i][j])
+                        ] for j in range(n_ex+1)
+                    ])
+                world = actual_world
+
+                objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(image); # --> N x n_slot x C
@@ -435,10 +471,15 @@ if __name__ == "__main__":
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
                 slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
     
-                _, (acc, _) = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+                _, metric = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                     {'labels': objs, 'poses': poses});
 
-                accuracy = accuracy_score(label_np, label_hat)
+
+                if (args.target_type=='multilabel'):
+                    acc = metric[0];
+                else:
+                    acc = metric;
+
                 accuracy_meter.update(acc,
                                       batch_size,
                                       raw_scores=None)

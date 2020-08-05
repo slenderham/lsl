@@ -725,13 +725,13 @@ class SetCriterion(nn.Module):
             for n in self.num_classes:
                 default[n] = 1.0
             target_classes = default.reshape(1, 1, -1).expand(src_logits.shape);
-            target_classes[idx] = target_classes_o
+            target_classes[idx] = target_classes_o;
             src_logits_spl = torch.split(src_logits, self.num_classes, dim=-1);
             target_classes_spl = torch.split(target_classes, self.num_classes, dim=-1);
             target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl];
-            loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i])
+            loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i].to(src_logits.device))
                             for i, _ in enumerate(src_logits_spl)]);
-            metric = (torch.stack([torch.argmax(logit) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean();
+            metric = (torch.stack([torch.argmax(logit, dim=-1) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean();
         return loss_ce, metric
 
     def loss_position(self, outputs, targets, indices, num_boxes):

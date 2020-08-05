@@ -800,24 +800,25 @@ class SetCriterion(nn.Module):
 
         if self.target_type=='multilabel':
             out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
+            tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
+            cost_class = torch.cdist(out_prob, tgt_ids, p=1);
         elif self.target_type=='multihead_single_label':
             out_prob = outputs["pred_logits"].flatten(0, 1)
             # split into chunks for different cls heads, then concat back together
             out_prob = torch.split(out_prob, self.num_classes, dim=-1);
             for o_p in out_prob:
                 o_p = o_p.softmax(-1);
-            out_prob = torch.cat(out_prob, dim=-1);
+            tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob[0].device)
+            target_classes_spl = torch.split(tgt_ids, self.num_classes, dim=-1);
+            target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl];
+            cost_class = -sum([o_p[:,t_c] for o_p, t_c in zip(out_prob, target_classes_spl)])/len(out_prob);
         else:
             raise ValueError('Not a valid target type')
 
-        tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
-        cost_class = torch.cdist(out_prob, tgt_ids, p=1);
         
         out_pos = outputs["pred_poses"].flatten(0, 1)
         tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device) # [sum_i num_obj_i] x 2
         cost_pos = torch.cdist(out_pos, tgt_pos, p=1);
-
-        assert(tgt_ids.shape[0]==tgt_pos.shape[0])
 
         cost = cost_class + self.pos_cost_weight*cost_pos;
         cost = cost.reshape(n, num_slots, -1).cpu();

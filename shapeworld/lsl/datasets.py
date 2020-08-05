@@ -824,7 +824,7 @@ def extract_objects_and_positions(world, world_len, labels_to_idx):
     for i, concept in enumerate(world):
         for j, inst in enumerate(concept):
             objects.append(one_hot(inst, world_len[i][j], labels_to_idx))
-            positions.append(torch.tensor([shape['pos'] for shape in inst[:world_len[i][j]]])], dtype=torch.float));
+            positions.append(torch.tensor([shape['pos'] for shape in inst[:world_len[i][j]]], dtype=torch.float));
     return objects, positions
 
 def one_hot(inst, world_len, labels_to_idx):

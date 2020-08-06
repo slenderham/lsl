@@ -16,7 +16,8 @@ python lsl/set_pred.py --cuda \
     --target_type multihead_single_label\
     --num_slots 6\
     --save_checkpoint\
+    --load_checkpoint\
     --skip_eval\
     --oracle_world_config\
-    --data_dir /data/cw9951/hard_sw\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/graph

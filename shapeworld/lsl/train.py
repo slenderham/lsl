@@ -370,7 +370,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(scorer_model.parameters())
 
     if args.use_hyp:
-        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size, padding_idx=pad_index)
 
     if args.decode_hyp:
         proposal_model = TextProposal(embedding_model, hidden_size=args.hidden_size)
@@ -491,7 +491,8 @@ if __name__ == "__main__":
                     hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
                     hypo_loss = F.cross_entropy(hypo_out_2d,
                                                 hint_seq_2d,
-                                                reduction='none')
+                                                reduction='none',
+                                                ignore_index=pad_index)
                     hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
                     hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
 

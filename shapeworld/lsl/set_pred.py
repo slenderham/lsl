@@ -22,7 +22,7 @@ from utils import (
 )
 from datasets import ShapeWorld, extract_features, extract_objects, extract_objects_and_positions
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
-from models import ImageRep, TextRep, TextProposal, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
+from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
 from models import SANet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer, SinkhornScorer, SetCriterion
 from vision import Conv4NP, ResNet18, Conv4NP
@@ -57,6 +57,11 @@ if __name__ == "__main__":
                         choices=['multihead_single_label', 'multilabel'],
                         default='multihead_single_label',
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
+    parser.add_argument('--aux_task',
+                        type=str,
+                        choices=['set_pred', 'caption'],
+                        default='caption',
+                        help='Whether to predict caption or predict objects')
     parser.add_argument('--noise',
                         type=float,
                         default=0.0,
@@ -268,37 +273,34 @@ if __name__ == "__main__":
     # image_whole_model = image_whole_model.to(device);
 
     params_to_optimize = list(image_part_model.parameters())
+    models_to_save = [image_part_model];
     # params_to_optimize = list(image_whole_model.parameters())
 
     # scorer
     im_im_scorer_model = DotPScorer()
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
-
-    # base_scorer_model = CosineScorer(temperature=args.temperature)
-    # im_lang_part_scorer_model = SinkhornScorer(base_scorer, iters=20);
-    # im_lang_part_scorer_model = im_lang_part_scorer_model.to(device)
-    # params_to_optimize.extend(im_lang_part_scorer_model.parameters())
-
-    # im_lang_whole_scorer_model = SinkhornScorer(base_scorer, iters=20);
-    # im_lang_whole_scorer_model = im_lang_whole_scorer_model.to(device)
-    # params_to_optimize.extend(im_lang_whole_scorer_model.parameters())
+    models_to_save.append(im_im_scorer_model)
 
     # projection
     image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
     params_to_optimize.extend(image_cls_projection.parameters());
+    models_to_save.append(image_cls_projection)
 
     image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
     params_to_optimize.extend(image_pos_projection.parameters());
+    models_to_save.append(image_pos_projection)
 
     # language
     embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-    hint_model = TextRep(embedding_model, hidden_size=args.hidden_size)
+    hint_model = TextProposalWithAttn(embedding_model, encoder_dim=64, hidden_size=args.hidden_size)
     hint_model = hint_model.to(device)
     params_to_optimize.extend(hint_model.parameters())
+    models_to_save.append(hint_model)
 
     # loss
-    set_loss = SetCriterion(num_classes=[len(labels_to_idx['color']), len(labels_to_idx['shape'])], 
+    if args.aux_task=='set_pred':
+        hype_loss = SetCriterion(num_classes=[len(labels_to_idx['color']), len(labels_to_idx['shape'])], 
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
@@ -314,8 +316,6 @@ if __name__ == "__main__":
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
     print(sum([p.numel() for p in params_to_optimize]));
-    models_to_save = [image_part_model, image_cls_projection, image_pos_projection, \
-                        im_im_scorer_model, hint_model, optimizer];
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
@@ -343,13 +343,15 @@ if __name__ == "__main__":
             label = label.to(device)
             batch_size = len(image)
             n_ex = examples.shape[1]
-            world = rest[-2]; # this should be a list of lists
-            world_len = rest[-1]; # batch size x n_ex, for how many objects each image contains
-            if args.oracle_world_config:
-                objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
-            else:
-                objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
-                _, poses = extract_objects_and_positions(world, labels_to_idx); # this will not be used, but need to be here for set criterion to work
+
+            if args.aux_task=='set_pred':
+                world = rest[-2]; # this should be a list of lists
+                world_len = rest[-1]; # batch size x n_ex, for how many objects each image contains
+                if args.oracle_world_config:
+                    objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
+                else:
+                    objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
+                    _, poses = extract_objects_and_positions(world, world_len, labels_to_idx); # this will not be used, but need to be here for set criterion to work
 
             if args.debug_example:
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
@@ -377,8 +379,6 @@ if __name__ == "__main__":
             if max_hint_length != hint_seq.shape[1]:
                 hint_seq = hint_seq[:, :max_hint_length]
 
-            hint_rep = hint_model(hint_seq, hint_length); # --> N x C
-
             # Learn representations of images and examples
             image_slot = image_part_model(image); # --> N x n_slot x C
             # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
@@ -390,25 +390,41 @@ if __name__ == "__main__":
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
 
-            slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
-            slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
- 
-            losses, metric = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
-                                {'labels': objs, 'poses': poses});
+            loss = args.concept_lambda*pred_loss
 
-            # Hypothesis loss
-            loss = args.concept_lambda*pred_loss + args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
+            if args.aux_task=='set_pred':
+                slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+                slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+    
+                losses, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+                                    {'labels': objs, 'poses': poses});
 
-            if (args.target_type=='multilabel'):
-                acc, f1 = metric;
+                # Hypothesis loss
+                loss += args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
+
+                cls_loss_total += losses['class'].item()
+                pos_loss_total += losses['position'].item()
+                cls_acc += metric['acc'];
+            elif args.aux_task=='caption':
+                hypo_out = hint_model(examples_slot.flatten(1,2), hint_seq, hint_length);
+                seq_len = hint_seq.size(1)
+                hypo_out = hypo_out[:, :-1].contiguous()
+                hint_seq = hint_seq[:, 1:].contiguous()
+                hyp_batch_size = batch_size
+
+                hypo_out_2d = hypo_out.view(hyp_batch_size * (seq_len - 1),
+                                            train_vocab_size)
+                hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
+                hypo_loss = F.cross_entropy(hypo_out_2d,
+                                            hint_seq_2d,
+                                            reduction='none',
+                                            ignore_index=pad_index)
+                hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
+                hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
+                loss += args.hypo_lambda*hypo_loss
+                metric = {'acc': (torch.argmax(hypo_out_2d, dim=-1)==hint_seq_2d).float().mean()};
             else:
-                acc = metric;
-                f1 = 0;
-
-            cls_loss_total += losses['class'].item()
-            pos_loss_total += losses['position'].item()
-            cls_acc += acc;
-            # cls_acc += (torch.argmax(slot_cls_score, dim=-1)[]==).float().mean();
+                raise ValueError("invalid auxiliary task name")
 
             optimizer.zero_grad()
             loss.backward()
@@ -416,8 +432,8 @@ if __name__ == "__main__":
             optimizer.step()
 
             if batch_idx % args.log_interval == 0:
-                pbar.set_description('Epoch {} Loss: {:.6f} F1: {:.6f}'.format(
-                    epoch, loss.item(), f1))
+                pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(
+                    epoch, loss.item(), metric))
                 pbar.refresh()
 
             pbar.update()
@@ -471,7 +487,7 @@ if __name__ == "__main__":
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
                 slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
     
-                _, metric = set_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+                _, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
                                     {'labels': objs, 'poses': poses});
 
 

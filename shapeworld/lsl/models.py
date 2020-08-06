@@ -307,6 +307,185 @@ class TextProposal(nn.Module):
 
         return sampled_ids, sampled_lengths
 
+class Attention(nn.Module):
+    """
+    Attention Network.
+    """
+    def __init__(self, encoder_dim, decoder_dim, attention_dim):
+        """
+        :param encoder_dim: feature size of encoded images
+        :param decoder_dim: size of decoder's RNN
+        :param attention_dim: size of the attention network
+        """
+        super(Attention, self).__init__()
+        self.encoder_att = nn.Linear(encoder_dim, attention_dim)  # linear layer to transform encoded image
+        self.decoder_att = nn.Linear(decoder_dim, attention_dim)  # linear layer to transform decoder's output
+        self.full_att = nn.Linear(attention_dim, 1)  # linear layer to calculate values to be softmax-ed
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
+
+    def forward(self, encoder_out, decoder_hidden):
+        """
+        Forward propagation.
+        :param encoder_out: encoded slots, a tensor of dimension (batch_size, num_slots, encoder_dim)
+        :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
+        :return: attention weighted encoding, weights
+        """
+        att1 = self.encoder_att(encoder_out)  # (batch_size, num_slots, attention_dim)
+        att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
+        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_slots)
+        alpha = self.softmax(att)  # (batch_size, num_pixels)
+        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
+
+        return attention_weighted_encoding, alpha
+
+class TextProposalWithAttn(nn.Module):
+    r"""Reverse proposal model, estimating:
+
+        argmax_lambda log q(w_i|x_1, y_1, ..., x_n, y_n; lambda)
+
+    approximation to the distribution of descriptions.
+
+    Because they use only positive labels, it actually simplifies to
+
+        argmax_lambda log q(w_i|x_1, ..., x_4; lambda)
+
+    https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
+    """
+
+    def __init__(self, embedding_module, encoder_dim, hidden_size):
+        super(TextProposalWithAttn, self).__init__()
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.encoder_dim = encoder_dim
+        self.vocab_size = embedding_module.num_embeddings
+        self.gru = nn.GRUCell(self.embedding_dim+self.encoder_dim, hidden_size)
+        self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size)
+        self.hidden_size = hidden_size
+        self.init_h = nn.Linear(encoder_dim, hidden_size)
+        self.f_beta = nn.Linear(hidden_size, encoder_dim)  # linear layer to create a sigmoid-activated gate
+        self.sigmoid = nn.Sigmoid()
+        self.attention = Attention(encoder_dim, hidden_size, hidden_size)
+
+    def forward(self, feats, seq, length):
+        # feats is from slots
+        batch_size = seq.size(0)
+
+        if batch_size > 1:
+            # BUGFIX? dont we need to sort feats too?
+            sorted_lengths, sorted_idx = torch.sort(length, descending=True)
+            seq = seq[sorted_idx]
+            feats = feats[sorted_idx]
+
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+
+        # shape = (seq_len, batch, hidden_dim)
+
+        output = torch.zeros(sorted_lengths[0], batch_size, self.vocab_size).to(seq.device)
+        # alphas = torch.zeros(batch_size, sorted_lengths[0], num_pixels).to(seq.device)
+
+        h = self.init_hidden_state(feats);
+
+        for t in range(sorted_lengths[0]):
+            batch_size_t = sum([l > t for l in sorted_lengths]);
+            attention_weighted_encoding, _ = self.attention(feats[:batch_size_t],
+                                                                h[:batch_size_t])
+            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
+            attention_weighted_encoding = gate * attention_weighted_encoding
+            h = self.gru(
+                            torch.cat([embed_seq[t, :batch_size_t, :], attention_weighted_encoding], dim=1),
+                            h[:batch_size_t]
+                           )  # (batch_size_t, decoder_dim)
+            preds = self.outputs2vocab(h)  # (batch_size_t, vocab_size)
+            output[t, :batch_size_t, :] = preds
+            # alphas[t, :batch_size_t, :] = alpha
+
+        # reorder from (L,B,D) to (B,L,D)
+        output = output.transpose(0, 1)
+
+        if batch_size > 1:
+            _, reversed_idx = torch.sort(sorted_idx)
+            output = output[reversed_idx]
+
+        max_length = output.size(1)
+
+        return output
+
+    def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
+        """Generate from image features using greedy search."""
+        with torch.no_grad():
+            batch_size = feats.size(0)
+
+            # initialize hidden states using image features
+            states = feats.unsqueeze(0)
+
+            # first input is SOS token
+            inputs = np.array([sos_index for _ in range(batch_size)])
+            inputs = torch.from_numpy(inputs)
+            inputs = inputs.unsqueeze(1)
+            inputs = inputs.to(feats.device)
+
+            # save SOS as first generated token
+            inputs_npy = inputs.squeeze(1).cpu().numpy()
+            sampled_ids = [[w] for w in inputs_npy]
+
+            # (B,L,D) to (L,B,D)
+            inputs = inputs.transpose(0, 1)
+
+            # compute embeddings
+            inputs = self.embedding(inputs)
+
+            for i in range(20):  # like in jacobs repo
+                outputs, states = self.gru(inputs,
+                                           states)  # outputs: (L=1,B,H)
+                outputs = outputs.squeeze(0)  # outputs: (B,H)
+                outputs = self.outputs2vocab(outputs)  # outputs: (B,V)
+
+                if greedy:
+                    predicted = outputs.max(1)[1]
+                    predicted = predicted.unsqueeze(1)
+                else:
+                    outputs = F.softmax(outputs, dim=1)
+                    predicted = torch.multinomial(outputs, 1)
+
+                predicted_npy = predicted.squeeze(1).cpu().numpy()
+                predicted_lst = predicted_npy.tolist()
+
+                for w, so_far in zip(predicted_lst, sampled_ids):
+                    if so_far[-1] != eos_index:
+                        so_far.append(w)
+
+                inputs = predicted.transpose(0, 1)  # inputs: (L=1,B)
+                inputs = self.embedding(inputs)  # inputs: (L=1,B,E)
+
+            sampled_lengths = [len(text) for text in sampled_ids]
+            sampled_lengths = np.array(sampled_lengths)
+
+            max_length = max(sampled_lengths)
+            padded_ids = np.ones((batch_size, max_length)) * pad_index
+
+            for i in range(batch_size):
+                padded_ids[i, :sampled_lengths[i]] = sampled_ids[i]
+
+            sampled_lengths = torch.from_numpy(sampled_lengths).long()
+            sampled_ids = torch.from_numpy(padded_ids).long()
+
+        return sampled_ids, sampled_lengths
+
+    def init_hidden_state(self, encoder_out):
+        """
+        Creates the initial hidden and cell states for the decoder's LSTM based on the encoded images.
+        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
+        :return: hidden state, cell state
+        """
+        mean_encoder_out = encoder_out.mean(dim=1)
+        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
+        return h
+
 class SlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
         super().__init__()
@@ -405,7 +584,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False, num_iters=None, num_slots=None):
+    def forward(self, img, visualize_attns=False, num_iters=5, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -428,7 +607,9 @@ class SANet(nn.Module):
         fig, axes = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):
             for j in range(num_slots):
-                im = axes[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='nearest').squeeze().detach().cpu());
+                axes[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W), cmap='copper')
+                axes[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
+                    F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1));
 
         fig, axes = plt.subplots(1, num_iters);
         for i in range(num_iters):
@@ -718,7 +899,7 @@ class SetCriterion(nn.Module):
             loss_ce = F.binary_cross_entropy_with_logits(src_logits, target_classes, weight=self.eos_coef+target_classes*(1-self.eos_coef))
             acc = (target_classes.long()==(src_logits>0).long()).float().mean()
             f1 = f1_score(target_classes.long().cpu().numpy().ravel(), (src_logits>0).long().cpu().numpy().ravel())
-            metric = (acc, f1)
+            metric = {'acc': acc.item(), 'f1': f1}
         else:
             target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device);
             default = torch.zeros(sum(self.num_classes)).to(src_logits.device);
@@ -731,7 +912,7 @@ class SetCriterion(nn.Module):
             target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl];
             loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i].to(src_logits.device))
                             for i, _ in enumerate(src_logits_spl)])/len(self.num_classes);
-            metric = (torch.stack([torch.argmax(logit, dim=-1) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean();
+            metric = {'acc': (torch.stack([torch.argmax(logit, dim=-1) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean().item()};
         return loss_ce, metric
 
     def loss_position(self, outputs, targets, indices, num_boxes):

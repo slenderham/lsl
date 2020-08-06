@@ -423,6 +423,8 @@ if __name__ == "__main__":
                 hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
                 loss += args.hypo_lambda*hypo_loss
                 metric = {'acc': (torch.argmax(hypo_out_2d, dim=-1)==hint_seq_2d).float().mean()};
+                cls_loss_total += hypo_loss.item()
+                cls_acc += metric['acc'];
             else:
                 raise ValueError("invalid auxiliary task name")
 

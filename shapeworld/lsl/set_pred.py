@@ -527,7 +527,7 @@ if __name__ == "__main__":
                 else:
                     raise ValueError("invalid auxiliary task name")
 
-        print('====> {:>12}\tEpoch: {:>3}\Metric: {:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tMetric: {:.4f}'.format(
             '({})'.format(split), epoch, metric_meter.avg))
 
         return metric_meter.avg
@@ -540,7 +540,6 @@ if __name__ == "__main__":
     best_val_tre_std = 0
     best_test_acc = 0
     best_test_same_acc = 0
-    best_test_acc_ci = 0
     lowest_val_tre = 1e10
     lowest_val_tre_std = 0
     metrics = defaultdict(lambda: [])
@@ -574,14 +573,12 @@ if __name__ == "__main__":
 
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
-            best_test_acc_ci = test_acc_ci
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)
         metrics['val_same_acc'].append(val_same_acc)
         metrics['test_acc'].append(test_acc)
         metrics['test_same_acc'].append(test_same_acc)
-        metrics['test_acc_ci'].append(test_acc_ci)
 
         metrics = dict(metrics)
         # Assign best accs
@@ -590,8 +587,7 @@ if __name__ == "__main__":
         metrics['best_val_same_acc'] = best_val_same_acc
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_same_acc'] = best_test_same_acc
-        metrics['best_test_acc_ci'] = best_test_acc_ci
-        metrics['has_same'] = has_same
+=        metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
 

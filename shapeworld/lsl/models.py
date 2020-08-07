@@ -584,7 +584,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False, num_iters=5, num_slots=None):
+    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -607,7 +607,7 @@ class SANet(nn.Module):
         fig, axes = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):
             for j in range(num_slots):
-                axes[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W), cmap='copper')
+                axes[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
                 axes[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1));
 
@@ -758,60 +758,6 @@ class BilinearScorer(DotPScorer):
         wy = self.dropout(wy)
         # wy: (batch_size, n_examples, h)
         return super(BilinearScorer, self).batchwise_score(x, wy)
-
-class TransformerScorer(Scorer):
-    def __init__(self, hidden_size, scorer, get_diag):
-        # transformer layer for contextualized embedding of objects
-        super(TransformerScorer, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
-        
-        # aggregation of all objects after embedded
-        self.agg_gate = nn.Linear(hidden_size, hidden_size);
-        self.agg = nn.Linear(hidden_size, hidden_size);
-
-        # final scorer on aggregations
-        self.scorer = {
-            'cosine': CosineScorer(temperature=scorer['temp']),
-            'dotp': DotPScorer(),
-        }[scorer['name']];
-
-        self.get_diag = get_diag
-
-    def score(self, x, y, y_mask):
-        N, n_ex, num_obj_x, hidden_size = x.shape;
-        x = x.reshape(N, n_ex*num_obj_x, hidden_size);
-        assert(y.shape[0]==N and y.shape[2]==hidden_size)
-
-        x_mask = torch.ones(N, n_ex*num_obj_x)<0.5; # --> N x n_ex*num_obj_x
-        if y_mask==None:
-            y_mask = torch.ones(y.shape[0], y.shape[1])<0.5 # --> N x num_obj_y
-
-        if torch.cuda.is_available():
-            x_mask = x_mask.cuda()
-            y_mask = y_mask.cuda()
-
-        if (self.get_diag):
-            total_input = torch.cat([x, y], dim=1).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N x hidden size
-            total_mask = torch.cat([x_mask, y_mask], dim=1); # --> N x (n_ex*num_obj_x + num_obj_y)
-        else:
-            total_input = self._cartesian_product(x, y).transpose(0, 1); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
-            total_mask = self._cartesian_product(x_mask, y_mask); # --> N*N x (num_obj_x*n_ex+num_obj_y)
-            y_mask = y_mask.repeat(N, 1)
-
-        x_y_enc = self.model(total_input); # --> (num_obj_x*n_ex+num_obj_y) x N*N x hidden size
-        x_y_enc = torch.sigmoid(self.agg_gate(x_y_enc))*self.agg(x_y_enc);
-        x_enc = x_y_enc[:n_ex*num_obj_x];
-        y_enc = x_y_enc[n_ex*num_obj_x:];
-        y_mask = (~y_mask).transpose(0, 1).unsqueeze(-1).float();
-        y_enc = y_enc*y_mask;
-
-        x_agged = torch.mean(x_enc, dim=0); # --> N*N x hidden size
-        y_agged = torch.sum(y_enc, dim=0)/y_mask.sum(dim=0); # --> N*N x hidden size
-        if (not self.get_diag):
-            return self.scorer.score(x_agged, y_agged).reshape(N, N);
-        else:
-            return self.scorer.score(x_agged, y_agged);
 
 class SinkhornScorer(Scorer):
     def __init__(self, base_scorer, iters=20):

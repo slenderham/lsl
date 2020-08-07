@@ -16,7 +16,6 @@ from utils import next_random, OrderedCounter
 # Set your data directory here!
 # DATA_DIR = '/Users/wangchong/Downloads/hard_sw'
 # DATA_DIR = "/content/minishapeworld-master"
-DATA_DIR = "/data/cw9951/easy_sw"
 
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 
@@ -255,6 +254,7 @@ class ShapeWorld(data.Dataset):
             self.test_hints = test_hints
         else:
             self.test_hints = None
+            test_hints = None
 
         if self.test_hints is not None:
             for a, b, label in zip(hints, test_hints, labels):

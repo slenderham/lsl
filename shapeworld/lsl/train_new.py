@@ -24,7 +24,7 @@ from datasets import ShapeWorld, extract_features, extract_objects, extract_obje
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, TransformerScorer, SinkhornScorer, SetCriterion
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
 from utils import GradualWarmupScheduler
@@ -322,7 +322,7 @@ if __name__ == "__main__":
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
-        sds = torch.load(ckpt_path, map_location=torch.device('cpu'));
+        sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m, sd in zip(models_to_save, sds):
             m.load_state_dict(sd);
         print("loaded checkpoint");
@@ -445,7 +445,7 @@ if __name__ == "__main__":
         pbar.close()
         print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Classification Loss: {:.4f} Position Loss: {:.4f} Classification Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, cls_loss_total, pos_loss_total, cls_acc));
 
-        return args.concept_lambda*pred_loss_total + args.hypo_lambda*(cls_loss_total + args.pos_weight*pos_loss_total)
+        return loss
 
     def test(epoch, split='train'):
         for m in models_to_save:

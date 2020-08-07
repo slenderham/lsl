@@ -2,7 +2,7 @@
 
 HYPO_LAMBDA=1
 
-python lsl/set_pred.py --cuda \
+python lsl/train_new.py --cuda \
     --hypo_lambda $HYPO_LAMBDA \
     --batch_size 32\
     --seed $RANDOM \

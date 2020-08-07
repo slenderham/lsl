@@ -463,20 +463,33 @@ if __name__ == "__main__":
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
                 n_ex = len(image[0])
-                world = rest[-2]; # this should be a list of lists
-                world_len = rest[-1]
-                
-                actual_world = []; # the batches get collated in the weirdest way possible maybe better off not batching at all
-                for i in range(batch_size):
-                    actual_world.append([[{
-                                'color': world[j][k]['color'][i],
-                                'shape': world[j][k]['shape'][i],
-                                'pos': (world[j][k]['pos'][0][i], world[j][k]['pos'][1][i])
-                            } for k in range(world_len[i][j])] for j in range(n_ex+1)
-                    ])
-                world = actual_world
 
-                objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
+
+                if args.aux_task=='set_pred':
+                    world = rest[-2]; # this should be a list of lists
+                    world_len = rest[-1]; # batch size x n_ex, for how many objects each image contains
+                    actual_world = []; # the batches get collated in the weirdest way possible maybe better off not batching at all
+                    for i in range(batch_size):
+                        actual_world.append([[{
+                                    'color': world[j][k]['color'][i],
+                                    'shape': world[j][k]['shape'][i],
+                                    'pos': (world[j][k]['pos'][0][i], world[j][k]['pos'][1][i])
+                                } for k in range(world_len[i][j])] for j in range(n_ex+1)
+                        ])
+                    world = actual_world
+                    if args.oracle_world_config:
+                        objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
+                    else:
+                        objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
+                        _, poses = extract_objects_and_positions(world, world_len, labels_to_idx); # this will not be used, but need to be here for set criterion to work
+                
+                
+                hint_seq = hint_seq.to(device)
+                hint_length = hint_length.to(device)
+                max_hint_length = hint_length.max().item()
+                # Cap max length if it doesn't fill out the tensor
+                if max_hint_length != hint_seq.shape[1]:
+                    hint_seq = hint_seq[:, :max_hint_length]
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(image); # --> N x n_slot x C

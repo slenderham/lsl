@@ -522,7 +522,7 @@ if __name__ == "__main__":
                                                 ignore_index=pad_index)
                     hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
                     hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
-                    metric_meter.update(hypo_loss, batch_size, raw_scores=None);
+                    metric_meter.update(hypo_loss.item(), batch_size, raw_scores=None);
                     
                 else:
                     raise ValueError("invalid auxiliary task name")
@@ -587,7 +587,7 @@ if __name__ == "__main__":
         metrics['best_val_same_acc'] = best_val_same_acc
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_same_acc'] = best_test_same_acc
-=        metrics['has_same'] = has_same
+        metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
 

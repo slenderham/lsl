@@ -15,6 +15,5 @@ python lsl/set_pred.py --cuda \
     --lr 0.0001\
     --num_slots 6\
     --save_checkpoint\
-    --skip_eval\
     --data_dir /data/cw9951/hard_sw\
     exp/caption

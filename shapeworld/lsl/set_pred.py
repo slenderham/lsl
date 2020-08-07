@@ -283,20 +283,23 @@ if __name__ == "__main__":
     models_to_save.append(im_im_scorer_model)
 
     # projection
-    image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
-    params_to_optimize.extend(image_cls_projection.parameters());
-    models_to_save.append(image_cls_projection)
+    if args.aux_task=='set_pred':
+        image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
+        params_to_optimize.extend(image_cls_projection.parameters());
+        models_to_save.append(image_cls_projection)
 
-    image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
-    params_to_optimize.extend(image_pos_projection.parameters());
-    models_to_save.append(image_pos_projection)
-
+        image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
+        params_to_optimize.extend(image_pos_projection.parameters());
+        models_to_save.append(image_pos_projection)
+    elif args.aux_task=='caption':
     # language
-    embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-    hint_model = TextProposalWithAttn(embedding_model, encoder_dim=64, hidden_size=args.hidden_size)
-    hint_model = hint_model.to(device)
-    params_to_optimize.extend(hint_model.parameters())
-    models_to_save.append(hint_model)
+        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        hint_model = TextProposalWithAttn(embedding_model, encoder_dim=64, hidden_size=args.hidden_size)
+        hint_model = hint_model.to(device)
+        params_to_optimize.extend(hint_model.parameters())
+        models_to_save.append(hint_model)
+    else:
+        raise ValueError('invalid auxiliary task name')
 
     # loss
     if args.aux_task=='set_pred':
@@ -449,7 +452,7 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.eval();
 
-        accuracy_meter = AverageMeter(raw=False)
+        metric_meter = AverageMeter(raw=False)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -465,15 +468,11 @@ if __name__ == "__main__":
                 
                 actual_world = []; # the batches get collated in the weirdest way possible maybe better off not batching at all
                 for i in range(batch_size):
-                    actual_world.append([
-                        [
-                            
-                            {
+                    actual_world.append([[{
                                 'color': world[j][k]['color'][i],
                                 'shape': world[j][k]['shape'][i],
                                 'pos': (world[j][k]['pos'][0][i], world[j][k]['pos'][1][i])
-                            } for k in range(world_len[i][j])
-                        ] for j in range(n_ex+1)
+                            } for k in range(world_len[i][j])] for j in range(n_ex+1)
                     ])
                 world = actual_world
 
@@ -485,27 +484,40 @@ if __name__ == "__main__":
 
                 examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
                 # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+                if args.aux_task=='set_pred':
+                    slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+                    slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+        
+                    _, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
+                                        {'labels': objs, 'poses': poses});
 
-                slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
-                slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
-    
-                _, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
-                                    {'labels': objs, 'poses': poses});
+                    metric_meter.update(metric['acc'], batch_size, raw_scores=None)
 
+                elif args.aux_task=='caption':
+                    hypo_out = hint_model(examples_slot.flatten(1,2), hint_seq, hint_length);
+                    seq_len = hint_seq.size(1)
+                    hypo_out = hypo_out[:, :-1].contiguous()
+                    hint_seq = hint_seq[:, 1:].contiguous()
+                    hyp_batch_size = batch_size
 
-                if (args.target_type=='multilabel'):
-                    acc = metric[0];
+                    hypo_out_2d = hypo_out.view(hyp_batch_size * (seq_len - 1),
+                                                train_vocab_size)
+                    hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
+                    hypo_loss = F.cross_entropy(hypo_out_2d,
+                                                hint_seq_2d,
+                                                reduction='none',
+                                                ignore_index=pad_index)
+                    hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
+                    hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
+                    metric_meter.update(hypo_loss, batch_size, raw_scores=None);
+                    
                 else:
-                    acc = metric;
+                    raise ValueError("invalid auxiliary task name")
 
-                accuracy_meter.update(acc,
-                                      batch_size,
-                                      raw_scores=None)
+        print('====> {:>12}\tEpoch: {:>3}\Metric: {:.4f}'.format(
+            '({})'.format(split), epoch, metric_meter.avg))
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg))
-
-        return accuracy_meter.avg
+        return metric_meter.avg
 
     best_epoch = 0
     best_epoch_acc = 0
@@ -522,7 +534,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch);
+        train_loss = train(epoch, n_steps=0);
         if args.save_checkpoint:
             save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:

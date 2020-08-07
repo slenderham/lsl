@@ -12,7 +12,7 @@ python lsl/set_pred.py --cuda \
     --pos_weight 1.0\
     --comparison dotp\
     --hidden_size 128\
-    --lr 0.0004\
+    --lr 0.0001\
     --num_slots 6\
     --save_checkpoint\
     --skip_eval\

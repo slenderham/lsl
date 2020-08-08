@@ -584,7 +584,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
+    def forward(self, img, visualize_attns=False, num_iters=None, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);

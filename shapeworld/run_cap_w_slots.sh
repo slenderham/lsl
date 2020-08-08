@@ -13,7 +13,7 @@ python lsl/train_new.py --cuda \
     --comparison dotp\
     --hidden_size 128\
     --lr 0.0001\
-    --num_slots 6\
+    --num_slots 3\
     --save_checkpoint\
     --data_dir /data/cw9951/hard_sw\
     exp/caption

@@ -409,11 +409,12 @@ if __name__ == "__main__":
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='caption':
-                hypo_out = hint_model(examples_slot.flatten(1,2), hint_seq, hint_length);
+                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
+                hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
                 hypo_out = hypo_out[:, :-1].contiguous()
                 hint_seq = hint_seq[:, 1:].contiguous()
-                hyp_batch_size = batch_size
+                hyp_batch_size = batch_size*n_ex
 
                 hypo_out_2d = hypo_out.view(hyp_batch_size * (seq_len - 1),
                                             train_vocab_size)
@@ -507,11 +508,12 @@ if __name__ == "__main__":
                     metric_meter.update(metric['acc'], batch_size, raw_scores=None)
 
                 elif args.aux_task=='caption':
-                    hypo_out = hint_model(examples_slot.flatten(1,2), hint_seq, hint_length);
+                    hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0) 
+                    hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                     seq_len = hint_seq.size(1)
                     hypo_out = hypo_out[:, :-1].contiguous()
                     hint_seq = hint_seq[:, 1:].contiguous()
-                    hyp_batch_size = batch_size
+                    hyp_batch_size = batch_size*n_ex
 
                     hypo_out_2d = hypo_out.view(hyp_batch_size * (seq_len - 1),
                                                 train_vocab_size)

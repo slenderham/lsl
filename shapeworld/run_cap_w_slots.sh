@@ -15,5 +15,6 @@ python lsl/train_new.py --cuda \
     --lr 0.0001\
     --num_slots 6\
     --save_checkpoint\
-    --data_dir /data/cw9951/hard_sw\
+    --load_checkpoint\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/caption

@@ -758,8 +758,8 @@ class SinkhornScorer(Scorer):
         super(SinkhornScorer, self).__init__();
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
-        self.dustbin_scores_ling = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-        torch.nn.init.uniform_(self.dustbin_scores_ling.weight, -0.1, 0.1)
+        self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
+        torch.nn.init.uniform_(self.dustbin_scores_lang.weight, -0.1, 0.1)
         self.dustbin_scores_im = nn.Parameter(0.2*torch.rand(1, 1, 1)-0.1);
         self.dustbin_scores_both = nn.Parameter(0.2*torch.randn(1, 1, 1)-0.1);
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
@@ -771,20 +771,19 @@ class SinkhornScorer(Scorer):
         n_ex = x.shape[0]//n; 
         assert(x.shape[0]==n*n_ex)
         assert(y_mask.shape==y.shape[:2])
-        
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0); # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-        y_expand = y.repeat(n**2*n_ex, y.shape[1], y.shape[2]);  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        y_expand = y.repeat(n*n_ex, 1, 1);  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
         
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n**2*n_ex, x.shape[1]+1, y.shape[1]); # the similarity of each image to special language token is -inf
-        y_mask = torch.cat([y_mask, torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5], dim=2); # append dustbin dimension as FALSE
+        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
+        y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
         
         matching = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
-                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)).squeeze(-1), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
-        assert(matching.shape==(n**2, x.shape[1], y.shape[1]));
+        assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1]));
         scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
         return matching, scores;
     

@@ -767,25 +767,25 @@ class SinkhornScorer(Scorer):
 
     def score(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
-        n = x.shape[0]; 
-        assert(y.shape[0]==n)
+        n = y.shape[0];
+        n_ex = x.shape[0]//n; 
+        assert(x.shape[0]==n*n_ex)
         assert(y_mask.shape==y.shape[:2])
-        print(x.shape, y.shape)
         
-        x_expand = torch.repeat_interleave(x, repeats=n, dim=0); # --> x1, x1, x1, ... x2, x2, x2, ... xn, xn, xn
-        y_expand = y.repeat(n**2, y.shape[1], y.shape[2]);       # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        x_expand = torch.repeat_interleave(x, repeats=n, dim=0); # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+        y_expand = y.repeat(n**2*n_ex, y.shape[1], y.shape[2]);  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
-        assert(scores.shape==(n**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
+        assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
         
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n**2, x.shape[1]+1, y.shape[1]); # the similarity of each image to special language token is -inf
-        y_mask = torch.cat([y_mask, torch.ones(n**2, x.shape[1]+1, 1)<0.5], dim=2); # append dustbin dimension as FALSE
+        y_mask = y_mask.unsqueeze(1).repeat(n**2*n_ex, x.shape[1]+1, y.shape[1]); # the similarity of each image to special language token is -inf
+        y_mask = torch.cat([y_mask, torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5], dim=2); # append dustbin dimension as FALSE
         
         matching = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
         assert(matching.shape==(n**2, x.shape[1], y.shape[1]));
-        scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n, n); # elementwise product to produce final scores
+        scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
         return matching, scores;
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):

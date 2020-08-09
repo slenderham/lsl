@@ -779,9 +779,9 @@ class SinkhornScorer(Scorer):
         # pad the score matrix where language is special token
         y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
         y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
-        
+        word_idx = word_idx.unsqueeze(1).repeat(n*n_ex, y.shape[1], 1).squeeze(-1);
         matching = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
-                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)).squeeze(-1), \
+                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1]));
         scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores

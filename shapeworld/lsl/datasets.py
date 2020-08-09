@@ -402,7 +402,8 @@ class ShapeWorld(data.Dataset):
                 hint_tokens = hint.split()
                 w2c.update(hint_tokens)
 
-        for w, c in list(w2c.items()):
+        # sort token so that different instantiations of the dataset is compatible
+        for w, c in sorted(list(w2c.items())):
             i2w[len(w2i)] = w
             w2i[w] = len(w2i)
 

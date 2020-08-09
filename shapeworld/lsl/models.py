@@ -129,7 +129,7 @@ class TextRep(nn.Module):
         seq = seq.transpose(0, 1)
 
         # embed your sequences
-        embed_seq = self.embedding(seq)
+        embed_seq = self.embedding(seq);
 
         packed_input = rnn_utils.pack_padded_sequence(embed_seq,
                                                       sorted_lengths)
@@ -139,21 +139,24 @@ class TextRep(nn.Module):
             sorted_lengths.data.tolist()
             if batch_size > 1 else length.data.tolist())
 
-        _, hidden = self.gru(packed)
-        hidden = hidden[-1, ...];
+        hidden, _ = self.gru(packed); 
+        hidden, _ = rnn_utils.pad_packed_sequence(hidden)
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
-            hidden = hidden[reversed_idx]
+            hidden = hidden[:,reversed_idx,:]
+
+        hidden = hidden.transpose(0, 1)
 
         return hidden
 
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.model = MultilayerTransformer(hidden_size, 4, 4);
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32);
 
     def forward(self, seq, padding_mask):
@@ -165,7 +168,10 @@ class TextRepTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask)[0,...];
+        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask);
+
+        # reorder back to (B,L,D)
+        hidden = hidden.transpose(0, 1)
 
         return hidden
 
@@ -645,14 +651,6 @@ class ImagePositionalEmbedding(nn.Module):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords);
 
-class MultilayerTransformer(nn.Module):
-    def __init__(self, dim, nhead, num_layers):
-        super(MultilayerTransformer, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=nhead, dim_feedforward=4*dim, dropout=0.0);
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers);
-
-    def forward(self, x):
-        return self.transformer(x.transpose(0, 1)).transpose(0, 1);
 """
 Similarity Scores
 """
@@ -689,17 +687,13 @@ class CosineScorer(Scorer):
 
     def score(self, x, y, input_is_normed=False, get_diag=True):
         if not input_is_normed:
-            x = F.normalize(x, p=2, dim=1);
-            y = F.normalize(y, p=2, dim=1);
+            x = F.normalize(x, p=2, dim=-1);
+            y = F.normalize(y, p=2, dim=-1);
         if get_diag:
-            return torch.sum(x * y, dim=1)/self.temperature;
+            return torch.sum(x * y, dim=-1)/self.temperature;
         else:
-            return torch.mm(x, y.t())/self.temperature;
-
-    def score_sequence(self, x, y, input_is_normed=False):
-         if not input_is_normed:
-            x = F.normalize(x, p=2, dim=1);
-            y = F.normalize(y, p=2, dim=1);
+            # batch_size x num_obj_x x dim, batch_size x num_obj_y x dim --> batch_size x num_obj_x x num_obj_y
+            return torch.matmul(x, y.transpose(-1, -2))/self.temperature;
     
     def score_im_s(self, im, hint, input_is_normed=False):
         assert(len(im.shape)==3), "Image tensor should be of size (N, n_ex, hidden_size)";
@@ -760,35 +754,56 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, base_scorer, iters=20):
+    def __init__(self, num_embedding, iters=20, **kwargs):
         super(SinkhornScorer, self).__init__();
-        self.base_scorer = base_scorer;
+        self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
-        self.dustbin_weights = nn.Parameter(torch.ones(1))
-        self.iters = iters
+        self.dustbin_scores_ling = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
+        torch.nn.init.uniform_(self.dustbin_scores_ling.weight, -0.1, 0.1)
+        self.dustbin_scores_im = nn.Parameter(0.2*torch.rand(1, 1, 1)-0.1);
+        self.dustbin_scores_both = nn.Parameter(0.2*torch.randn(1, 1, 1)-0.1);
+        self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
+        self.iters = iters;
 
-    def score(self, x, y):
-        n = x.shape[0]; # x.shape = n, num_obj, h; y.shape = n, num_obj_y, h
+    def score(self, x, y, word_idx, y_mask):
+        # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
+        n = x.shape[0]; 
         assert(y.shape[0]==n)
-        x_expand = torch.repeat_interleave(x, repeats=n, dim=0);
-        y_expand = torch.repeat(y, repeats=n, dim=0);
-        scores = self.base_scorer(x, y);
-        scores = self.log_optimal_transport(scores, self.dustbin_weights, self.iters);
-        return scores;
+        assert(y_mask.shape==y.shape[:2])
+        print(x.shape, y.shape)
+        
+        x_expand = torch.repeat_interleave(x, repeats=n, dim=0); # --> x1, x1, x1, ... x2, x2, x2, ... xn, xn, xn
+        y_expand = y.repeat(n**2, y.shape[1], y.shape[2]);       # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
+        assert(scores.shape==(n**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
+        
+        # pad the score matrix where language is special token
+        y_mask = y_mask.unsqueeze(1).repeat(n**2, x.shape[1]+1, y.shape[1]); # the similarity of each image to special language token is -inf
+        y_mask = torch.cat([y_mask, torch.ones(n**2, x.shape[1]+1, 1)<0.5], dim=2); # append dustbin dimension as FALSE
+        
+        matching = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
+                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
+        assert(matching.shape==(n**2, x.shape[1], y.shape[1]));
+        scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n, n); # elementwise product to produce final scores
+        return matching, scores;
     
-    def log_optimal_transport(self, scores, alpha, iters: int):
+    def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
         one = scores.new_tensor(1)
         ms, ns = (m*one).to(scores), (n*one).to(scores)
 
-        bins0 = alpha.expand(b, m, 1)
-        bins1 = alpha.expand(b, 1, n)
-        alpha = alpha.expand(b, 1, 1)
+        assert(alpha_lang.shape==(b, n)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
+        bins0 = alpha_img.expand(b, m, 1)
+        bins1 = alpha_lang.expand(b, 1, n)
+        alpha = alpha_both.expand(b, 1, 1)
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
+        mask_val = torch.finfo(scores.dtype).min
+        couplings.masked_fill(scores_mask, mask_val);
 
         norm = - (ms + ns).log()
         log_mu = torch.cat([norm.expand(m), ns.log()[None] + norm])
@@ -802,7 +817,8 @@ class SinkhornScorer(Scorer):
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
-        for _ in range(iters):
+        for i in range(iters):
+            print(i)
             u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
             v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
         return Z + u.unsqueeze(2) + v.unsqueeze(1)

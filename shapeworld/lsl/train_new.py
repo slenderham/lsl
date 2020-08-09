@@ -22,7 +22,7 @@ from utils import (
 )
 from datasets import ShapeWorld, extract_features, extract_objects, extract_objects_and_positions
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
-from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, MultilayerTransformer
+from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer
 from models import SANet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion
 from vision import Conv4NP, ResNet18, Conv4NP
@@ -59,7 +59,7 @@ if __name__ == "__main__":
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['set_pred', 'caption'],
+                        choices=['set_pred', 'caption', 'matching'],
                         default='caption',
                         help='Whether to predict caption or predict objects')
     parser.add_argument('--noise',
@@ -298,6 +298,16 @@ if __name__ == "__main__":
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
+    elif args.aux_task=='matching':
+        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        hint_model = TextRep(embedding_model, hidden_size=args.hidden_size)
+        hint_model = hint_model.to(device)
+        params_to_optimize.extend(hint_model.parameters())
+        models_to_save.append(hint_model)
+        
+        slot_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
+        params_to_optimize.extend(slot_to_lang_matching.parameters())
+        models_to_save.append(slot_to_lang_matching)
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -307,6 +317,8 @@ if __name__ == "__main__":
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
+    elif args.aux_task=='matching':
+        hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
 
     # optimizer
     optfunc = {
@@ -429,6 +441,15 @@ if __name__ == "__main__":
                 metric = {'acc': (torch.argmax(hypo_out_2d, dim=-1)==hint_seq_2d).float().mean()};
                 cls_loss_total += hypo_loss.item()
                 cls_acc += metric['acc'];
+            elif args.aux_task=='matching':
+                hint_rep = hint_model(hint_seq, hint_length); 
+                examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
+                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
+                hint_rep = torch.repeat_interleave(hint_rep, repeats=n_ex, dim=0); 
+                scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                                    y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
+                hypo_loss = F.log_softmax(scores, dim=-1).diag().mean();
+                loss += args.hypo_lambda*hypo_loss;
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -525,7 +546,6 @@ if __name__ == "__main__":
                     hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
                     hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
                     metric_meter.update(hypo_loss.item(), batch_size, raw_scores=None);
-                    
                 else:
                     raise ValueError("invalid auxiliary task name")
 

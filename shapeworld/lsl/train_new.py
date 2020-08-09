@@ -444,13 +444,14 @@ if __name__ == "__main__":
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_length); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
-                pos_mask = torch.block_diag([torch.ones(n_ex, 1)]*batch_size)>0.5
+                print(matching[0])
+                pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                 scores_reshaped = torch.cat([pos, neg], dim=1);
-                loss += -args.hypo_lambda*F.log_softmax(scores_reshaped, dim=1)[0];
+                loss += -args.hypo_lambda*F.log_softmax(scores_reshaped, dim=1)[0].mean();
                 metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean()}
             else:
                 raise ValueError("invalid auxiliary task name")

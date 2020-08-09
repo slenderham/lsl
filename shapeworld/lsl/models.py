@@ -779,12 +779,12 @@ class SinkhornScorer(Scorer):
         # pad the score matrix where language is special token
         y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
         y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
-        word_idx = word_idx.unsqueeze(1).repeat(n*n_ex, y.shape[1], 1).squeeze(-1);
+        word_idx = word_idx.repeat(n*n_ex, 1);
         matching = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
-        assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1]));
-        scores = (scores*matching.exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
+        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
+        scores = (scores*matching[:, :-1, :-1].exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
         return matching, scores;
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
@@ -794,9 +794,9 @@ class SinkhornScorer(Scorer):
         one = scores.new_tensor(1)
         ms, ns = (m*one).to(scores), (n*one).to(scores)
 
-        assert(alpha_lang.shape==(b, n)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
+        assert(alpha_lang.shape==(b, n, 1)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
         bins0 = alpha_img.expand(b, m, 1)
-        bins1 = alpha_lang.expand(b, 1, n)
+        bins1 = alpha_lang.transpose(1, 2)
         alpha = alpha_both.expand(b, 1, 1)
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),
@@ -817,7 +817,6 @@ class SinkhornScorer(Scorer):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
         for i in range(iters):
-            print(i)
             u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
             v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
         return Z + u.unsqueeze(2) + v.unsqueeze(1)

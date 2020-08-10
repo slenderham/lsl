@@ -337,10 +337,11 @@ class Attention(nn.Module):
         :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
         :return: attention weighted encoding, weights
         """
+        
         att1 = self.encoder_att(encoder_out)  # (batch_size, num_slots, attention_dim)
         att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
         att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_slots)
-        alpha = self.softmax(att)  # (batch_size, num_pixels)
+        alpha = self.softmax(att)  # (batch_size, num_slots)
         attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
 
         return attention_weighted_encoding, alpha
@@ -392,13 +393,13 @@ class TextProposalWithAttn(nn.Module):
         # shape = (seq_len, batch, hidden_dim)
 
         output = torch.zeros(sorted_lengths[0], batch_size, self.vocab_size).to(seq.device)
-        # alphas = torch.zeros(batch_size, sorted_lengths[0], num_pixels).to(seq.device)
+        alphas = torch.zeros(sorted_lengths[0], batch_size, feats.shape[1]).to(seq.device)
 
         h = self.init_hidden_state(feats);
 
         for t in range(sorted_lengths[0]):
             batch_size_t = sum([l > t for l in sorted_lengths]);
-            attention_weighted_encoding, _ = self.attention(feats[:batch_size_t],
+            attention_weighted_encoding, alpha = self.attention(feats[:batch_size_t],
                                                                 h[:batch_size_t])
             gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
             attention_weighted_encoding = gate * attention_weighted_encoding
@@ -408,10 +409,11 @@ class TextProposalWithAttn(nn.Module):
                            )  # (batch_size_t, decoder_dim)
             preds = self.outputs2vocab(h)  # (batch_size_t, vocab_size)
             output[t, :batch_size_t, :] = preds
-            # alphas[t, :batch_size_t, :] = alpha
+            alphas[t, :batch_size_t, :] = alpha
 
         # reorder from (L,B,D) to (B,L,D)
         output = output.transpose(0, 1)
+        alphas = alphas.transpose(0, 1);
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
@@ -419,7 +421,7 @@ class TextProposalWithAttn(nn.Module):
 
         max_length = output.size(1)
 
-        return output
+        return output, alpha
 
     def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
         """Generate from image features using greedy search."""
@@ -590,7 +592,7 @@ class SANet(nn.Module):
 
         self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
 
-    def forward(self, img, visualize_attns=False, num_iters=None, num_slots=None):
+    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
@@ -608,7 +610,8 @@ class SANet(nn.Module):
         N, C, H, W = img.shape;
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
-        rand_idx = torch.randint(0, N, size=(1,)).item();
+        # rand_idx = torch.randint(0, N, size=(1,)).item();
+        rand_idx=10
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
         fig, axes = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):

@@ -423,8 +423,12 @@ if __name__ == "__main__":
                 cls_acc += metric['acc'];
             elif args.aux_task=='caption':
                 hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
-                hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
+                hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
+
+                print(attns[10]);
+                print(hypo_out.shape);
+                print([train_i2w[h] for h in hypo_out[10]]);
 
                 hypo_out = hypo_out[:, :-1].contiguous()
                 hint_seq = hint_seq[:, 1:].contiguous()

@@ -4,9 +4,9 @@ HYPO_LAMBDA=1
 
 python lsl/train_new.py --cuda \
     --hypo_lambda $HYPO_LAMBDA \
-    --batch_size 16\
+    --batch_size 4\
     --seed $RANDOM \
-    --temperature 0.1\
+    --temperature 0.25\
     --hypo_lambda 1.0\
     --concept_lambda 0.0\
     --pos_weight 1.0\
@@ -16,5 +16,6 @@ python lsl/train_new.py --cuda \
     --num_slots 3\
     --aux_task matching\
     --save_checkpoint\
-    --data_dir /data/cw9951/hard_sw\
+    --skip_eval\
+    --data_dir /Users/wangchong/Downloads/hard_sw\
     exp/graph

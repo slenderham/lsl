@@ -784,6 +784,7 @@ class SinkhornScorer(Scorer):
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
+        matching.masked_fill(y_mask, torch.finfo(matching.dtype).min)
         scores = (scores*matching[:, :-1, :-1].exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
         return matching, scores;
     

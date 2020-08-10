@@ -319,6 +319,8 @@ if __name__ == "__main__":
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
         hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
+        params_to_optimize.extend(slot_to_lang_matching.parameters())
+        models_to_save.append(slot_to_lang_matching)
 
     # optimizer
     optfunc = {
@@ -345,8 +347,7 @@ if __name__ == "__main__":
                 m.train();
 
         pred_loss_total = 0;
-        cls_loss_total = 0;
-        pos_loss_total = 0;
+        aux_loss_total = 0;
         cls_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
@@ -450,8 +451,11 @@ if __name__ == "__main__":
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                 scores_reshaped = torch.cat([pos, neg], dim=1);
-                loss += -args.hypo_lambda*F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+                hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+                loss += -args.hypo_lambda*hypo_loss;
                 metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean()}
+                cls_acc += metric['acc'];
+                aux_loss_total += hypo_loss.item();
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -467,7 +471,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Classification Loss: {:.4f} Position Loss: {:.4f} Classification Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, cls_loss_total, pos_loss_total, cls_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Auxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, aux_loss_total, cls_acc));
 
         return loss
 

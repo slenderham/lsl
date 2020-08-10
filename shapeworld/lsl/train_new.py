@@ -446,7 +446,6 @@ if __name__ == "__main__":
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                 matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
-                print(matching[0])
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);

@@ -754,14 +754,14 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=20, **kwargs):
+    def __init__(self, num_embedding, iters=50, **kwargs):
         super(SinkhornScorer, self).__init__();
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
         self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-        torch.nn.init.uniform_(self.dustbin_scores_lang.weight, -0.1, 0.1)
-        self.dustbin_scores_im = nn.Parameter(0.2*torch.rand(1, 1, 1)-0.1);
-        self.dustbin_scores_both = nn.Parameter(0.2*torch.randn(1, 1, 1)-0.1);
+        torch.nn.init.uniform_(self.dustbin_scores_lang.weight, -0.01, 0.01)
+        self.dustbin_scores_im = nn.Parameter(0.02*torch.rand(1, 1, 1)-0.01);
+        self.dustbin_scores_both = nn.Parameter(0.02*torch.randn(1, 1, 1)-0.01);
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
         self.iters = iters;
 

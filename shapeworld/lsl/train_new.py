@@ -450,7 +450,7 @@ if __name__ == "__main__":
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                 scores_reshaped = torch.cat([pos, neg], dim=1);
-                loss += -args.hypo_lambda*F.log_softmax(scores_reshaped, dim=1)[0].mean();
+                loss += -args.hypo_lambda*F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                 metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean()}
             else:
                 raise ValueError("invalid auxiliary task name")

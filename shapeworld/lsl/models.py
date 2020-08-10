@@ -754,14 +754,14 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, **kwargs):
+    def __init__(self, num_embedding, iters=20, **kwargs):
         super(SinkhornScorer, self).__init__();
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
         self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-        torch.nn.init.uniform_(self.dustbin_scores_lang.weight, -0.01, 0.01)
-        self.dustbin_scores_im = nn.Parameter(0.02*torch.rand(1, 1, 1)-0.01);
-        self.dustbin_scores_both = nn.Parameter(0.02*torch.rand(1, 1, 1)-0.01);
+        torch.nn.init.uniform_(self.dustbin_scores_lang.weight, -1, 1)
+        self.dustbin_scores_im = nn.Parameter(2*torch.rand(1, 1, 1)-1);
+        self.dustbin_scores_both = nn.Parameter(2*torch.rand(1, 1, 1)-1);
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
         self.iters = iters;
 
@@ -784,7 +784,7 @@ class SinkhornScorer(Scorer):
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
-        matching.masked_fill(y_mask, torch.finfo(matching.dtype).min)
+        matching = matching.masked_fill(y_mask, torch.finfo(matching.dtype).min)
         scores = (scores*matching[:, :-1, :-1].exp()).sum(dim=(1,2)).reshape(n*n_ex, n); # elementwise product to produce final scores
         return matching, scores;
     
@@ -803,7 +803,7 @@ class SinkhornScorer(Scorer):
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
         mask_val = torch.finfo(scores.dtype).min
-        couplings.masked_fill(scores_mask, mask_val);
+        couplings = couplings.masked_fill(scores_mask, mask_val);
 
         norm = - (ms + ns).log()
         log_mu = torch.cat([norm.expand(m), ns.log()[None] + norm])

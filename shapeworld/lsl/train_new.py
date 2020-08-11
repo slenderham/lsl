@@ -349,6 +349,7 @@ if __name__ == "__main__":
         pred_loss_total = 0;
         aux_loss_total = 0;
         cls_acc = 0;
+        main_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -406,6 +407,7 @@ if __name__ == "__main__":
             score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
+            main_acc += ((score>0).long()==label).float().mean()
 
             loss = args.concept_lambda*pred_loss
 
@@ -428,7 +430,12 @@ if __name__ == "__main__":
                 seq_len = hint_seq.size(1)
                 
                 if (args.visualize_attns):
-                    plt.subplot(111).imshow(attns[4].detach().t());
+                    if (args.aux_task=='caption_slot'):
+                        plt.subplot(111).imshow(attns[4].detach().t());
+                    elif(args.aux_task=='caption_image'):
+                        fig, axes = plt.subplots(2, 7)
+                        for i, a in enumerate(attns[4].detach()):
+                            axes[i//7][i%7].imshow(a.reshape(56, 56));
                     print([train_i2w[h.item()] for h in torch.argmax(hypo_out[4], dim=-1)]);
                     print([train_i2w[h.item()] for h in hint_seq[4]]);
                     plt.show()
@@ -464,6 +471,8 @@ if __name__ == "__main__":
                 metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean()}
                 cls_acc += metric['acc'];
                 aux_loss_total += hypo_loss.item();
+                metric['pos_score'] = pos.mean();
+                metric['neg_score'] = neg.mean();
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -479,7 +488,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Auxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, aux_loss_total, cls_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Concept Acc: {:.4f} Auxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, main_acc, aux_loss_total, cls_acc));
 
         return loss
 

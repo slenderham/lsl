@@ -131,8 +131,7 @@ class TextRep(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq);
 
-        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
-                                                      sorted_lengths)
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq, sorted_lengths)
 
         packed = rnn_utils.pack_padded_sequence(
             embed_seq,
@@ -145,7 +144,7 @@ class TextRep(nn.Module):
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[:,reversed_idx,:]
-
+        
         hidden = hidden.transpose(0, 1)
 
         return hidden
@@ -613,6 +612,8 @@ class SANet(nn.Module):
                 self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots));
         elif (self.slot_model=='slot_mlp'):
             x = self.slot_mlp(x);
+            if visualize_attns:
+                plt.imshow(img[4].permute(1, 2, 0).detach().cpu());
         return x;
 
     def _visualize_attns(self, img, attns, num_iters, num_slots):
@@ -770,7 +771,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=200, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
@@ -778,8 +779,8 @@ class SinkhornScorer(Scorer):
         if (comparison=='im_lang'):
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
             torch.nn.init.ones_(self.dustbin_scores_lang.weight)
-        self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
+        self.dustbin_scores_im = nn.Parameter(-0.01*torch.ones(1, 1, 1));
+        self.dustbin_scores_both = nn.Parameter(-0.01*torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
         self.iters = iters;
 
@@ -793,7 +794,6 @@ class SinkhornScorer(Scorer):
         y_expand = y.repeat(n*n_ex, 1, 1);  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
-        
         # pad the score matrix where language is special token
         y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
         y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
@@ -829,6 +829,9 @@ class SinkhornScorer(Scorer):
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
         Z = Z - norm.reshape(b, 1, 1)  # multiply probabilities by M+N
+        plt.subplot(211).imshow(Z[0].exp().detach());
+        plt.subplot(212).imshow(couplings[0].detach(), vmin=-10);
+        plt.show();
         return Z, (couplings*Z.exp()).sum(dim=(1,2))
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):

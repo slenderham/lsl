@@ -497,7 +497,8 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.eval();
 
-        metric_meter = AverageMeter(raw=False)
+        concept_avg_meter = AverageMeter(raw=True)
+        aux_metric_meter = AverageMeter(raw=False)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -507,8 +508,7 @@ if __name__ == "__main__":
                 label = label.to(device)
                 label_np = label.cpu().numpy().astype(np.uint8)
                 batch_size = len(image)
-                n_ex = len(image[0])
-
+                n_ex = examples.shape[1]
 
                 if args.aux_task=='set_pred':
                     world = rest[-2]; # this should be a list of lists
@@ -542,6 +542,13 @@ if __name__ == "__main__":
 
                 examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
                 # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+
+                score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
+                label_hat = score > 0
+                label_hat = label_hat.cpu().numpy()
+                accuracy = accuracy_score(label_np, label_hat);
+                concept_avg_meter.update(accuracy, batch_size, raw_scores=(label_hat == label_np))
+
                 if args.aux_task=='set_pred':
                     slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
                     slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
@@ -564,48 +571,61 @@ if __name__ == "__main__":
                     hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
                     hypo_loss = F.cross_entropy(hypo_out_2d,
                                                 hint_seq_2d,
-                                                reduction='mean',
+                                                reduction='none',
                                                 ignore_index=pad_index); # switch to token-wise loss
-                    metric_meter.update(hypo_loss.item(), batch_size, raw_scores=None);
+                    non_pad_total = (hint_seq_2d!=pad_index).float().sum()-hyp_batch_size; # total number of tokens, len-1 for each sample
+                    aux_metric_meter.update(hypo_loss.item(), non_pad_total, raw_scores=None);
+                elif args.aux_task=='matching':
+                    hint_rep = hint_model(hint_seq, hint_length); 
+                    examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
+                    matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                                        y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
+                    pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
+                    pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
+                    neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
+                    scores_reshaped = torch.cat([pos, neg], dim=1);
+                    hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+                    aux_metric_meter.update(hypo_loss.item(), batch_size*n_ex, raw_scores=None);
                 else:
                     raise ValueError("invalid auxiliary task name")
 
         print('====> {:>12}\tEpoch: {:>3}\tMetric: {:.4f}'.format(
             '({})'.format(split), epoch, metric_meter.avg))
 
-        return metric_meter.avg
+        return concept_avg_meter.avg, aux_metric_meter.avg, concept_avg_meter.raw_scores
 
     best_epoch = 0
     best_epoch_acc = 0
     best_val_acc = 0
     best_val_same_acc = 0
-    best_val_tre = 0
-    best_val_tre_std = 0
     best_test_acc = 0
     best_test_same_acc = 0
-    lowest_val_tre = 1e10
-    lowest_val_tre_std = 0
+    best_test_acc_ci = 0
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch);
+        # train_loss = train(epoch);
         if args.save_checkpoint:
             save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:
             continue
-        train_acc = test(epoch, 'train')
-        val_acc = test(epoch, 'val')
-        test_acc = test(epoch, 'test')
+        train_acc, train_aux_metric, _ = test(epoch, 'train')
+        val_acc, val_aux_metric, _ = test(epoch, 'val')
+        test_acc, test_aux_metric, test_raw_scores = test(epoch, 'test')
         if has_same:
-            val_same_acc = test(epoch, 'val_same')
-            test_same_acc = test(epoch, 'test_same')
+            val_same_acc, val_same_aux_metric, _ = test(epoch, 'val_same')
+            test_same_acc, test_same_aux_metric, test_same_raw_scores = test(epoch, 'test_same')
+            all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
             test_same_acc = test_acc
+            all_test_raw_scores = test_raw_scores
 
         # Compute confidence intervals
-
+        n_test = len(all_test_raw_scores)
+        test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
+        
         epoch_acc = (val_acc + val_same_acc) / 2
         is_best_epoch = epoch_acc > best_epoch_acc
         if is_best_epoch:
@@ -613,15 +633,21 @@ if __name__ == "__main__":
             best_epoch_acc = epoch_acc
             best_val_acc = val_acc
             best_val_same_acc = val_same_acc
-
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
+            best_test_acc_ci = test_acc_ci
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)
         metrics['val_same_acc'].append(val_same_acc)
         metrics['test_acc'].append(test_acc)
         metrics['test_same_acc'].append(test_same_acc)
+        metrics['test_acc_ci'].append(test_acc_ci)
+        metrics['train_aux_metric'].append(train_aux_metric)
+        metrics['val_aux_metric'].append(val_aux_metric)
+        metrics['test_aux_metric'].append(test_aux_metric)
+        metrics['val_same_aux_metric'].append(val_same_aux_metric)
+        metrics['test_same_aux_metric'].append(test_same_aux_metric)
 
         metrics = dict(metrics)
         # Assign best accs
@@ -630,6 +656,7 @@ if __name__ == "__main__":
         metrics['best_val_same_acc'] = best_val_same_acc
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_same_acc'] = best_test_same_acc
+        metrics['best_test_acc_ci'] = best_test_acc_ci
         metrics['has_same'] = has_same
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))

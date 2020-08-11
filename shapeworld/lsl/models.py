@@ -829,9 +829,6 @@ class SinkhornScorer(Scorer):
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
         Z = Z - norm.reshape(b, 1, 1)  # multiply probabilities by M+N
-        plt.subplot(211).imshow(Z[0].exp().detach());
-        plt.subplot(212).imshow(couplings[0].detach(), vmin=-10);
-        plt.show();
         return Z, (couplings*Z.exp()).sum(dim=(1,2))
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):

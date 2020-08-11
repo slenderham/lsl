@@ -600,7 +600,7 @@ class SANet(nn.Module):
             ); # for the attentional decoder with attention over all image location. use 1x1 conv to balance (approximately) the number of params
 
     def forward(self, img, **kwargs):
-        visualize_attns=kwargs.get('visualize_attns');
+        visualize_attns=kwargs.get('visualize_attns', False);
         num_iters=kwargs.get('num_iters');
         num_slots=kwargs.get('num_slots');
         x = self.encoder(img);
@@ -624,7 +624,7 @@ class SANet(nn.Module):
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
         # rand_idx = torch.randint(0, N, size=(1,)).item();
-        rand_idx = 10
+        rand_idx = 4
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
         fig, axes = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):
@@ -641,7 +641,7 @@ class SANet(nn.Module):
                     masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w]);
             axes[i].imshow(masked_img, cmap=cmap, norm=norm);
 
-        plt.show();
+        # plt.show();
 
 class ImagePositionalEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):

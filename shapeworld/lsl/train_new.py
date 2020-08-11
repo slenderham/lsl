@@ -62,6 +62,9 @@ if __name__ == "__main__":
                         choices=['set_pred_partial', 'caption_slot', 'caption_image', 'matching'],
                         default='matching',
                         help='Whether to predict caption or predict objects')
+    parser.add_argument('--visualize_attns',
+                        action='store_true',
+                        help='If true, visualize attention masks of slots and matching/caption if applicable')
     parser.add_argument('--noise',
                         type=float,
                         default=0.0,
@@ -370,10 +373,11 @@ if __name__ == "__main__":
                 rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
                 print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
                 print(label[rand_idx])
-                for w in world[rand_idx]:
-                    print(w); 
-                print(objs[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
-                print(poses[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
+                if (args.aux_task=='set_pred'):
+                    for w in world[rand_idx]:
+                        print(w); 
+                    print(objs[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
+                    print(poses[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
                 print(examples[rand_idx][0].shape)
                 fig, axes = plt.subplots(5);
                 for i in range(4):
@@ -393,10 +397,10 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image); # --> N x n_slot x C
+            image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
             # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
 
-            examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
+            examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
             score = im_im_scorer_model.score(examples_slot.mean(dim=[1,2]), image_slot.mean(dim=1));
@@ -423,9 +427,11 @@ if __name__ == "__main__":
                 hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
                 
-                # plt.imshow(attns[10].detach());
-                # plt.show()
-                # print([train_i2w[h.item()] for h in torch.argmax(hypo_out[10], dim=-1)]);
+                if (args.visualize_attns):
+                    plt.subplot(111).imshow(attns[4].detach().t());
+                    print([train_i2w[h.item()] for h in torch.argmax(hypo_out[4], dim=-1)]);
+                    print([train_i2w[h.item()] for h in hint_seq[4]]);
+                    plt.show()
 
                 hypo_out = hypo_out[:, :-1].contiguous()
                 hint_seq = hint_seq[:, 1:].contiguous()

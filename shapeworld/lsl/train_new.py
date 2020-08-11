@@ -415,7 +415,7 @@ if __name__ == "__main__":
                 # Hypothesis loss
                 loss += args.hypo_lambda*(losses['class'] + args.pos_weight*losses['position'])
 
-                cls_loss_total += losses['class'].item()
+                aux_loss_total += losses['class'].item()
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
@@ -536,7 +536,7 @@ if __name__ == "__main__":
 
                     metric_meter.update(metric['acc'], batch_size, raw_scores=None)
 
-                elif args.aux_task=='caption':
+                elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
                     hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0) 
                     hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                     seq_len = hint_seq.size(1)

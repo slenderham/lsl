@@ -537,8 +537,8 @@ if __name__ == "__main__":
                     metric_meter.update(metric['acc'], batch_size, raw_scores=None)
 
                 elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
-                    hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0) 
-                    hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
+                    hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
+                    hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                     seq_len = hint_seq.size(1)
                     hypo_out = hypo_out[:, :-1].contiguous()
                     hint_seq = hint_seq[:, 1:].contiguous()
@@ -549,10 +549,8 @@ if __name__ == "__main__":
                     hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
                     hypo_loss = F.cross_entropy(hypo_out_2d,
                                                 hint_seq_2d,
-                                                reduction='none',
-                                                ignore_index=pad_index)
-                    hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
-                    hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
+                                                reduction='mean',
+                                                ignore_index=pad_index); # switch to token-wise loss
                     metric_meter.update(hypo_loss.item(), batch_size, raw_scores=None);
                 else:
                     raise ValueError("invalid auxiliary task name")

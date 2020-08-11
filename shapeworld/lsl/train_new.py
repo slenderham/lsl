@@ -468,11 +468,11 @@ if __name__ == "__main__":
                 scores_reshaped = torch.cat([pos, neg], dim=1);
                 hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                 loss += -args.hypo_lambda*hypo_loss;
-                metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean()}
+                metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()}
                 cls_acc += metric['acc'];
                 aux_loss_total += hypo_loss.item();
-                metric['pos_score'] = pos.mean();
-                metric['neg_score'] = neg.mean();
+                metric['pos_score'] = pos.mean().item();
+                metric['neg_score'] = neg.mean().item();
             else:
                 raise ValueError("invalid auxiliary task name")
 

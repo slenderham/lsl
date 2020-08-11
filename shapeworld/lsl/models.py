@@ -499,8 +499,8 @@ class SlotAttention(nn.Module):
         self.eps = eps
         self.scale = dim ** -0.5
 
-        self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.randn(1, 1, dim))
+        self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
+        self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim))
 
         self.to_q = nn.Linear(dim, dim, bias = False)
         self.to_k = nn.Linear(dim, dim, bias = False)

@@ -288,7 +288,7 @@ if __name__ == "__main__":
         image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
         params_to_optimize.extend(image_pos_projection.parameters());
         models_to_save.append(image_pos_projection)
-    elif args.aux_task=='caption':
+    elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
     # language
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         hint_model = TextProposalWithAttn(embedding_model, encoder_dim=64, hidden_size=args.hidden_size)
@@ -418,7 +418,7 @@ if __name__ == "__main__":
                 cls_loss_total += losses['class'].item()
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc'];
-            elif args.aux_task=='caption':
+            elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
                 hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
                 hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
@@ -438,7 +438,7 @@ if __name__ == "__main__":
                                             reduction='mean',
                                             ignore_index=pad_index); # switch to token-wise loss
                 loss += args.hypo_lambda*hypo_loss;
-                non_pad_mask = hint_seq!=pad_index;
+                non_pad_mask = hint_seq_2d!=pad_index;
                 hypo_pred = torch.argmax(hypo_out_2d, dim=-1).masked_select(non_pad_mask);
                 hypo_gt = hint_seq_2d.masked_select(non_pad_mask);
                 metric = {'acc': (hypo_pred==hypo_gt).float().mean()}; 

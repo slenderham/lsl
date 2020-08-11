@@ -20,4 +20,4 @@ python lsl/set_pred.py --cuda \
     --skip_eval\
     --oracle_world_config\
     --data_dir /Users/wangchong/Downloads/hard_sw\
-    exp/graph
+    exp/set_pred

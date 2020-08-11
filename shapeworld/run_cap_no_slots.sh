@@ -11,10 +11,10 @@ python lsl/train_new.py --cuda \
     --concept_lambda 0.0\
     --pos_weight 1.0\
     --comparison dotp\
-    --aux_task caption_slot\
+    --aux_task caption_image\
     --hidden_size 128\
     --lr 0.0001\
     --num_slots 3\
     --save_checkpoint\
     --data_dir /data/cw9951/hard_sw\
-    exp/caption_w_slots
+    exp/caption_no_slots

@@ -42,7 +42,7 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine'],
+                        choices=['dotp', 'cosine', 'sinkhorn'],
                         default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--max_train',
@@ -59,8 +59,8 @@ if __name__ == "__main__":
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['set_pred', 'caption', 'matching'],
-                        default='caption',
+                        choices=['set_pred_partial', 'caption_slot', 'caption_image', 'matching'],
+                        default='matching',
                         help='Whether to predict caption or predict objects')
     parser.add_argument('--noise',
                         type=float,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     if not os.path.isdir(args.exp_dir):
         os.makedirs(args.exp_dir)
 
-    if not args.oracle_world_config:
+    if args.aux_task=='set_pred' and not args.oracle_world_config:
         args.pos_weight = 0.0; # if not using oracle object info, can't use coordinates for supervision
 
     # reproducibility
@@ -262,22 +262,19 @@ if __name__ == "__main__":
     labels_to_idx = train_dataset.label2idx
 
     # vision
-    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64);
-    image_part_model = ExWrapper(ImageRep(backbone_model, \
-                                     hidden_size=None, \
-                                     tune_backbone=True, \
-                                     normalize_feats=False));
-    image_part_model = image_part_model.to(device)
-    
-    # image_whole_model = ExWrapper(MultilayerTransformer(64, 2, 2));
-    # image_whole_model = image_whole_model.to(device);
-
+    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));
+    image_part_model = ExWrapper(backbone_model).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
     # params_to_optimize = list(image_whole_model.parameters())
 
     # scorer
-    im_im_scorer_model = DotPScorer()
+    if (args.comparison=='sinkhorn'):
+        raise NotImplementedError();
+    im_im_scorer_model = {
+        'dotp': DotPScorer(),
+        'cosine': CosineScorer(temperature=1),
+    }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
@@ -338,7 +335,7 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m, sd in zip(models_to_save, sds):
-            m.load_state_dict(sd);
+            print(m.load_state_dict(sd));
         print("loaded checkpoint");
 
     def train(epoch, n_steps=100):
@@ -425,10 +422,10 @@ if __name__ == "__main__":
                 hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
                 hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
-
-                print(attns[10]);
-                print(hypo_out.shape);
-                print([train_i2w[h] for h in hypo_out[10]]);
+                
+                # plt.imshow(attns[10].detach());
+                # plt.show()
+                # print([train_i2w[h.item()] for h in torch.argmax(hypo_out[10], dim=-1)]);
 
                 hypo_out = hypo_out[:, :-1].contiguous()
                 hint_seq = hint_seq[:, 1:].contiguous()
@@ -438,13 +435,14 @@ if __name__ == "__main__":
                 hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
                 hypo_loss = F.cross_entropy(hypo_out_2d,
                                             hint_seq_2d,
-                                            reduction='none',
-                                            ignore_index=pad_index)
-                hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
-                hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
-                loss += args.hypo_lambda*hypo_loss
-                metric = {'acc': (torch.argmax(hypo_out_2d, dim=-1)==hint_seq_2d).float().mean()};
-                cls_loss_total += hypo_loss.item()
+                                            reduction='mean',
+                                            ignore_index=pad_index); # switch to token-wise loss
+                loss += args.hypo_lambda*hypo_loss;
+                non_pad_mask = hint_seq!=pad_index;
+                hypo_pred = torch.argmax(hypo_out_2d, dim=-1).masked_select(non_pad_mask);
+                hypo_gt = hint_seq_2d.masked_select(non_pad_mask);
+                metric = {'acc': (hypo_pred==hypo_gt).float().mean()}; 
+                aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_length); 

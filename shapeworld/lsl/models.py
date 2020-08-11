@@ -399,8 +399,7 @@ class TextProposalWithAttn(nn.Module):
 
         for t in range(sorted_lengths[0]):
             batch_size_t = sum([l > t for l in sorted_lengths]);
-            attention_weighted_encoding, alpha = self.attention(feats[:batch_size_t],
-                                                                h[:batch_size_t])
+            attention_weighted_encoding, alpha = self.attention(feats[:batch_size_t], h[:batch_size_t])
             gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
             attention_weighted_encoding = gate * attention_weighted_encoding
             h = self.gru(
@@ -412,16 +411,15 @@ class TextProposalWithAttn(nn.Module):
             alphas[t, :batch_size_t, :] = alpha
 
         # reorder from (L,B,D) to (B,L,D)
-        output = output.transpose(0, 1)
+        output = output.transpose(0, 1);
         alphas = alphas.transpose(0, 1);
 
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
             output = output[reversed_idx]
+            alphas = alphas[reversed_idx]
 
-        max_length = output.size(1)
-
-        return output, alpha
+        return output, alphas
 
     def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
         """Generate from image features using greedy search."""
@@ -561,8 +559,10 @@ class SlotAttention(nn.Module):
         return slots, attns;
 
 class SANet(nn.Module):
-    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8):
+    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn'):
         super(SANet, self).__init__()
+        assert(slot_model in ['slot_attn', 'slot_mlp']);
+        self.slot_model = slot_model;
         self.encoder = nn.Sequential(
             nn.Conv2d(3, dim, 3),
             nn.ReLU(inplace=True),
@@ -590,16 +590,29 @@ class SANet(nn.Module):
         self.iters = iters;
         self.num_slots = num_slots;
 
-        self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+        if (slot_model=='slot_attn'):
+            self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+        elif (slot_model=='slot_mlp'):
+            self.slot_mlp = nn.Sequential(
+                nn.Conv2d(64, 256, 1),
+                nn.ReLU(),
+                nn.Conv2d(256, 64, 1),
+            ); # for the attentional decoder with attention over all image location. use 1x1 conv to balance (approximately) the number of params
 
-    def forward(self, img, visualize_attns=True, num_iters=None, num_slots=None):
+    def forward(self, img, **kwargs):
+        visualize_attns=kwargs.get('visualize_attns');
+        num_iters=kwargs.get('num_iters');
+        num_slots=kwargs.get('num_slots');
         x = self.encoder(img);
         n, c, h, w = x.shape;
         x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
         x = self.post_mlp(x);
-        x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots); # --> N * num slots * feature size
-        if visualize_attns:
-            self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots));
+        if (self.slot_model=='slot_attn'):
+            x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots); # --> N * num slots * feature size
+            if visualize_attns:
+                self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots));
+        elif (self.slot_model=='slot_mlp'):
+            x = self.slot_mlp(x);
         return x;
 
     def _visualize_attns(self, img, attns, num_iters, num_slots):
@@ -611,7 +624,7 @@ class SANet(nn.Module):
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
         # rand_idx = torch.randint(0, N, size=(1,)).item();
-        rand_idx=10
+        rand_idx = 10
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
         fig, axes = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):
@@ -757,12 +770,14 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=200, **kwargs):
+    def __init__(self, num_embedding, iters=200, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
+        assert(comparison in ['im_im', 'im_lang']);
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
-        self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-        torch.nn.init.ones_(self.dustbin_scores_lang.weight)
+        if (comparison=='im_lang'):
+            self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
+            torch.nn.init.ones_(self.dustbin_scores_lang.weight)
         self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);

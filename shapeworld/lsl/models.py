@@ -500,8 +500,8 @@ class SlotAttention(nn.Module):
         self.eps = eps
         self.scale = dim ** -0.5
 
-        self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.randn(1, 1, dim))
+        self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
+        self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim))
 
         self.to_q = nn.Linear(dim, dim, bias = False)
         self.to_k = nn.Linear(dim, dim, bias = False)
@@ -770,7 +770,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=200, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);

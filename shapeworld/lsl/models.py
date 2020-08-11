@@ -594,9 +594,9 @@ class SANet(nn.Module):
             self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
         elif (slot_model=='slot_mlp'):
             self.slot_mlp = nn.Sequential(
-                nn.Linear(64, 256),
+                nn.Linear(64, 512),
                 nn.ReLU(),
-                nn.Linear(256, 64),
+                nn.Linear(512, 64),
             ); # for the attentional decoder with attention over all image location. use 1x1 conv to balance (approximately) the number of params
 
     def forward(self, img, **kwargs):

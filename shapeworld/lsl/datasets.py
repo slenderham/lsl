@@ -373,8 +373,8 @@ class ShapeWorld(data.Dataset):
                     concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj));
                 len_world = np.array(len_world);
             else:
-                world = None;
-                len_world = None;
+                world = hints[test_hint_i]
+                len_world = hint_lengths[test_hint_i]
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
                       hint_lengths[hint_i], th, thl, world, len_world)
             data.append(data_i)
@@ -615,23 +615,15 @@ class ShapeWorld(data.Dataset):
                     # Use the QUERY hint of the new example
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
-                    if self.worlds is not None:
-                        world[-1] = world2[-1]
-                        world_len[-1] = world2_len[-1]
-                    else:
-                        world = [];
-                        world_len = [];
+                    world[-1] = world2[-1]
+                    world_len[-1] = world2_len[-1]
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
                     test_hint = support_hint2
                     test_hint_length = support_hint_length2
-                    if self.worlds is not None:
-                        world[-1] = world2[swap]
-                        world_len[-1] = world2_len[swap]
-                    else:
-                        world = [];
-                        world_len = [];
+                    world[-1] = world2[swap]
+                    world_len[-1] = world2_len[swap]
 
                 test_hint = torch.from_numpy(test_hint).long()
 
@@ -667,23 +659,15 @@ class ShapeWorld(data.Dataset):
                     feats = examples[swap, ...].copy()
                     if label == 1:
                         examples[swap, ...] = image
-                        if self.worlds is not None:
-                            world[swap], world[-1] = world[-1], world[swap]
-                            world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
-                        else:
-                            world = [];
-                            world_len = [];
+                        world[swap], world[-1] = world[-1], world[swap]
+                        world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
                     else:
                         swap_from = random.randint(N_EX)
                         examples[swap, ...] = examples[swap_from, ...]
-                        if self.worlds is not None:
-                            world[-1] = world[swap]
-                            world[swap] = world[swap_from]
-                            world_len[-1] = world_len[swap]
-                            world_len[swap] = world_len[swap_from]
-                        else:
-                            world = [];
-                            world_len = [];
+                        world[-1] = world[swap]
+                        world[swap] = world[swap_from]
+                        world_len[-1] = world_len[swap]
+                        world_len[swap] = world_len[swap_from]
                 # This is a positive example, so whatever example we've chosen,
                 # assume the query hint matches the support hint.
                 test_hint = hint
@@ -723,11 +707,8 @@ class ShapeWorld(data.Dataset):
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
-            if self.worlds is not None:
-                world_len = torch.from_numpy(world_len).long()
-            else:
-                world = [];
-                world_len = [];
+            world_len = torch.from_numpy(world_len).long()
+
             # this is a 0 since feats does not match this hint.
             if self.fixed_noise_colors is not None:
                 examples, image = self.add_fixed_noise_colors(

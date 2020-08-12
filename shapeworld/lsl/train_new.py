@@ -269,7 +269,6 @@ if __name__ == "__main__":
     image_part_model = ExWrapper(backbone_model).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
-    # params_to_optimize = list(image_whole_model.parameters())
 
     # scorer
     if (args.comparison=='sinkhorn'):

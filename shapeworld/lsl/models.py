@@ -341,11 +341,11 @@ class Attention(nn.Module):
         att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
         att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_slots)
         alpha = self.softmax(att);  # (batch_size, num_slots)
-        alpha = scope[:alpha.shape[0],:]*alpha;
+        alpha_tilde = scope[:alpha.shape[0],:]*alpha;
         scope[:alpha.shape[0],:] = scope[:alpha.shape[0],:]*(1-alpha);
         attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
 
-        return attention_weighted_encoding, alpha, scope
+        return attention_weighted_encoding, alpha_tilde, scope
 
 class TextProposalWithAttn(nn.Module):
     r"""Reverse proposal model, estimating:

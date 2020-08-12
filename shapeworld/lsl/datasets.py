@@ -618,6 +618,9 @@ class ShapeWorld(data.Dataset):
                     if world is not None:
                         world[-1] = world2[-1]
                         world_len[-1] = world2_len[-1]
+                    else:
+                        world = [];
+                        world_len = [];
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
@@ -626,6 +629,9 @@ class ShapeWorld(data.Dataset):
                     if world is not None:
                         world[-1] = world2[swap]
                         world_len[-1] = world2_len[swap]
+                    else:
+                        world = [];
+                        world_len = [];
 
                 test_hint = torch.from_numpy(test_hint).long()
 
@@ -664,6 +670,9 @@ class ShapeWorld(data.Dataset):
                         if world is not None:
                             world[swap], world[-1] = world[-1], world[swap]
                             world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
+                        else:
+                            world = [];
+                            world_len = [];
                     else:
                         swap_from = random.randint(N_EX)
                         examples[swap, ...] = examples[swap_from, ...]
@@ -672,7 +681,9 @@ class ShapeWorld(data.Dataset):
                             world[swap] = world[swap_from]
                             world_len[-1] = world_len[swap]
                             world_len[swap] = world_len[swap_from]
-                    
+                        else:
+                            world = [];
+                            world_len = [];
                 # This is a positive example, so whatever example we've chosen,
                 # assume the query hint matches the support hint.
                 test_hint = hint
@@ -714,7 +725,9 @@ class ShapeWorld(data.Dataset):
             examples = torch.from_numpy(examples).float()
             if world_len is not None:
                 world_len = torch.from_numpy(world_len).long()
-
+            else:
+                world = [];
+                world_len = [];
             # this is a 0 since feats does not match this hint.
             if self.fixed_noise_colors is not None:
                 examples, image = self.add_fixed_noise_colors(

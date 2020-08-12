@@ -457,8 +457,9 @@ class ShapeWorld(data.Dataset):
             batch_label.append(label)
             batch_hint.append(hint)
             batch_hint_length.append(hint_length)
-            batch_worlds.append(world)
-            batch_world_lens.append(world_len);
+            if self.worlds is not None:
+                batch_worlds.append(world)
+                batch_world_lens.append(world_len);
             if self.test_hints is not None:
                 batch_test_hint.append(test_hint)
                 batch_test_hint_length.append(test_hint_length)
@@ -476,9 +477,12 @@ class ShapeWorld(data.Dataset):
         else:
             batch_test_hint = None
             batch_test_hint_length = None
-        
-        batch_world_lens = torch.from_numpy(np.array(batch_world_lens)).long()
-        
+       
+        if self.worlds is not None: 
+            batch_world_lens = torch.from_numpy(np.array(batch_world_lens)).long()
+        else:
+            batch_worlds = None;
+            batch_world_lens = None
         return (
             batch_examples, batch_image, batch_label, batch_hint,
             batch_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds, batch_world_lens

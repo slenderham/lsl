@@ -113,8 +113,6 @@ def get_max_world_length(data_dir=None):
             split_max_len = max([len(inst) for concept in worlds for inst in concept])
             if split_max_len > max_len:
                 max_len = split_max_len
-    if max_len == 0:
-        raise RuntimeError("Can't find any splits in {}".format(data_dir))
     return max_len
 
 def get_black_mask(imgs):
@@ -376,6 +374,7 @@ class ShapeWorld(data.Dataset):
                 len_world = np.array(len_world);
             else:
                 world = None;
+                len_world = None;
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
                       hint_lengths[hint_i], th, thl, world, len_world)
             data.append(data_i)
@@ -612,6 +611,7 @@ class ShapeWorld(data.Dataset):
                     # Use the QUERY hint of the new example
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
+                    
                     world[-1] = world2[-1]
                     world_len[-1] = world2_len[-1]
                 else:

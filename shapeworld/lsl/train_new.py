@@ -261,8 +261,8 @@ if __name__ == "__main__":
         'val_same': val_same_loader if has_same else None,
         'test_same': test_same_loader if has_same else None,
     }
-
-    labels_to_idx = train_dataset.label2idx
+    if args.aux_task=='set_pred':
+        labels_to_idx = train_dataset.label2idx
 
     # vision
     backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));

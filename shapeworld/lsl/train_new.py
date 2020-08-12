@@ -269,7 +269,6 @@ if __name__ == "__main__":
     image_part_model = ExWrapper(backbone_model).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
-    # params_to_optimize = list(image_whole_model.parameters())
 
     # scorer
     if (args.comparison=='sinkhorn'):
@@ -319,8 +318,8 @@ if __name__ == "__main__":
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
         hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
-        params_to_optimize.extend(slot_to_lang_matching.parameters())
-        models_to_save.append(slot_to_lang_matching)
+        params_to_optimize.extend(hype_loss.parameters())
+        models_to_save.append(hype_loss)
 
     # optimizer
     optfunc = {

@@ -574,10 +574,10 @@ if __name__ == "__main__":
                     hint_seq_2d = hint_seq.long().view(hyp_batch_size * (seq_len - 1))
                     hypo_loss = F.cross_entropy(hypo_out_2d,
                                                 hint_seq_2d,
-                                                reduction='none',
+                                                reduction='mean',
                                                 ignore_index=pad_index); # switch to token-wise loss
                     non_pad_total = (hint_seq_2d!=pad_index).float().sum()-hyp_batch_size; # total number of tokens, len-1 for each sample
-                    aux_metric_meter.update(hypo_loss.item(), non_pad_total, raw_scores=None);
+                    aux_metric_meter.update(hypo_loss.item(), non_pad_total.item(), raw_scores=None);
                 elif args.aux_task=='matching':
                     hint_rep = hint_model(hint_seq, hint_length); 
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);

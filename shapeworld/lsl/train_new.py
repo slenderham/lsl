@@ -609,9 +609,9 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch);
-        if args.save_checkpoint:
-            save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:
+            if args.save_checkpoint:
+                save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
             continue
         train_acc, train_aux_metric, _ = test(epoch, 'train')
         val_acc, val_aux_metric, _ = test(epoch, 'val')
@@ -639,6 +639,9 @@ if __name__ == "__main__":
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
             best_test_acc_ci = test_acc_ci
+
+        if args.save_checkpoint:
+            save_checkpoint([m.state_dict() for m in models_to_save], is_best=is_best_epoch, folder=args.exp_dir);
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

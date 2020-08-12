@@ -373,8 +373,8 @@ class ShapeWorld(data.Dataset):
                     concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj));
                 len_world = np.array(len_world);
             else:
-                world = hints[test_hint_i]
-                len_world = hint_lengths[test_hint_i]
+                world = [hints[test_hint_i]]*(N_EX+1)
+                len_world = [hint_lengths[test_hint_i]]*(N_EX+1)
             data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
                       hint_lengths[hint_i], th, thl, world, len_world)
             data.append(data_i)

@@ -615,7 +615,7 @@ class ShapeWorld(data.Dataset):
                     # Use the QUERY hint of the new example
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
-                    if world is not None:
+                    if self.worlds is not None:
                         world[-1] = world2[-1]
                         world_len[-1] = world2_len[-1]
                     else:
@@ -626,7 +626,7 @@ class ShapeWorld(data.Dataset):
                     # Use the SUPPORT hint of the new example
                     test_hint = support_hint2
                     test_hint_length = support_hint_length2
-                    if world is not None:
+                    if self.worlds is not None:
                         world[-1] = world2[swap]
                         world_len[-1] = world2_len[swap]
                     else:
@@ -667,7 +667,7 @@ class ShapeWorld(data.Dataset):
                     feats = examples[swap, ...].copy()
                     if label == 1:
                         examples[swap, ...] = image
-                        if world is not None:
+                        if self.worlds is not None:
                             world[swap], world[-1] = world[-1], world[swap]
                             world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
                         else:
@@ -676,7 +676,7 @@ class ShapeWorld(data.Dataset):
                     else:
                         swap_from = random.randint(N_EX)
                         examples[swap, ...] = examples[swap_from, ...]
-                        if world is not None:
+                        if self.worlds is not None:
                             world[-1] = world[swap]
                             world[swap] = world[swap_from]
                             world_len[-1] = world_len[swap]
@@ -723,7 +723,7 @@ class ShapeWorld(data.Dataset):
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
-            if world_len is not None:
+            if self.worlds is not None:
                 world_len = torch.from_numpy(world_len).long()
             else:
                 world = [];

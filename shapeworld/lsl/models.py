@@ -329,7 +329,7 @@ class Attention(nn.Module):
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
 
-    def forward(self, encoder_out, decoder_hidden):
+    def forward(self, encoder_out, decoder_hidden, scope):
         """
         Forward propagation.
         :param encoder_out: encoded slots, a tensor of dimension (batch_size, num_slots, encoder_dim)
@@ -341,9 +341,11 @@ class Attention(nn.Module):
         att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
         att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_slots)
         alpha = self.softmax(att)  # (batch_size, num_slots)
+        alpha = scope*alpha;
+        scope = scope*(1-alpha);
         attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
 
-        return attention_weighted_encoding, alpha
+        return attention_weighted_encoding, alpha, scope
 
 class TextProposalWithAttn(nn.Module):
     r"""Reverse proposal model, estimating:
@@ -396,9 +398,11 @@ class TextProposalWithAttn(nn.Module):
 
         h = self.init_hidden_state(feats);
 
+        scope = torch.ones(feats.shape[:2]).to(feats.device);
+
         for t in range(sorted_lengths[0]):
             batch_size_t = sum([l > t for l in sorted_lengths]);
-            attention_weighted_encoding, alpha = self.attention(feats[:batch_size_t], h[:batch_size_t])
+            attention_weighted_encoding, alpha, scope = self.attention(feats[:batch_size_t], h[:batch_size_t], scope)
             gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
             attention_weighted_encoding = gate * attention_weighted_encoding
             h = self.gru(
@@ -771,7 +775,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);

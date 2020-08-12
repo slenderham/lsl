@@ -778,7 +778,7 @@ class SinkhornScorer(Scorer):
         assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
         if (comparison=='im_lang'):
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-            torch.nn.init.ones_(self.dustbin_scores_lang.weight)
+            torch.nn.init.uniform_(self.dustbin_scores_lang.weight)
         self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
@@ -837,12 +837,16 @@ class SinkhornScorer(Scorer):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
         for i in range(iters):
-            u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
-            v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
+            u += self.reg * (log_mu - self.lse(self.M(Z, u, v), dim=2))
+            v += self.reg * (log_nu - self.lse(self.M(Z, u, v), dim=1))
         return self.M(Z, u, v)
 
-    def M(Z, u, v):                                                                           
+    def M(self, Z, u, v):                                                                           
         return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg;
+
+    def lse(self, A, dim):
+        "log-sum-exp, add 1e-6 to prevent underflow in the "
+        return torch.log(torch.exp(A).sum(dim) + 1e-6)
 
 class SetCriterion(nn.Module):
     """

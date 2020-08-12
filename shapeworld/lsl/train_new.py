@@ -319,8 +319,8 @@ if __name__ == "__main__":
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
         hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
-        params_to_optimize.extend(slot_to_lang_matching.parameters())
-        models_to_save.append(slot_to_lang_matching)
+        params_to_optimize.extend(hype_loss.parameters())
+        models_to_save.append(hype_loss)
 
     # optimizer
     optfunc = {
@@ -589,8 +589,8 @@ if __name__ == "__main__":
                 else:
                     raise ValueError("invalid auxiliary task name")
 
-        print('====> {:>12}\tEpoch: {:>3}\tMetric: {:.4f}'.format(
-            '({})'.format(split), epoch, metric_meter.avg))
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tMetric: {:.4f}'.format(
+            '({})'.format(split), epoch, concept_avg_meter.avg, aux_metric_meter.avg))
 
         return concept_avg_meter.avg, aux_metric_meter.avg, concept_avg_meter.raw_scores
 
@@ -605,7 +605,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        # train_loss = train(epoch);
+        train_loss = train(epoch);
         if args.save_checkpoint:
             save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
         if args.skip_eval:

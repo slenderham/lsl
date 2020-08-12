@@ -779,8 +779,8 @@ class SinkhornScorer(Scorer):
         if (comparison=='im_lang'):
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
             torch.nn.init.ones_(self.dustbin_scores_lang.weight)
-        self.dustbin_scores_im = nn.Parameter(-0.01*torch.ones(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(-0.01*torch.ones(1, 1, 1));
+        self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
+        self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
         self.iters = iters;
 

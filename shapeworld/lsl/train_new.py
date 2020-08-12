@@ -386,7 +386,6 @@ if __name__ == "__main__":
                 axes[4].imshow(image[rand_idx].permute(1, 2, 0));
                 axes[4].axis('off')
                 plt.show();
-                return 0;
 
             # Load hint
             hint_seq = hint_seq.to(device)
@@ -399,7 +398,6 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
             # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
-
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
@@ -461,6 +459,12 @@ if __name__ == "__main__":
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                 matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
+                if args.visualize_attns:
+                    ax = plt.subplot(111)
+                    ax.imshow(matching[4][1].detach().exp(), vmin=0, vmax=1)
+                    ax.set_xticks(np.arange(len(hint_seq[1])))
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[1]])
+                    plt.show()
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);

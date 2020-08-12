@@ -771,7 +771,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
@@ -783,6 +783,7 @@ class SinkhornScorer(Scorer):
         self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
         self.iters = iters;
+        self.reg = reg;
 
     def score(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
@@ -803,6 +804,7 @@ class SinkhornScorer(Scorer):
                                                 self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
         scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
+        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
         return matching, scores;
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
@@ -835,9 +837,12 @@ class SinkhornScorer(Scorer):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
         for i in range(iters):
-            u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
-            v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
-        return Z + u.unsqueeze(2) + v.unsqueeze(1)
+            u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
+            v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
+        return self.M(Z, u, v)
+
+    def M(Z, u, v):                                                                           
+        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg;
 
 class SetCriterion(nn.Module):
     """

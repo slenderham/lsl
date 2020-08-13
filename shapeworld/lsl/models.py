@@ -776,7 +776,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         if (comparison=='im_lang'):
@@ -1005,13 +1005,13 @@ class TransformerScorer(Scorer):
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
-        self.agg = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.agg = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
     def score(self, support, query):
         b, n_ex, num_slots, h = support.shape;
         support = support.flatten(0, 1).transpose(0, 1);
         support_out = self.model(torch.cat([self.agg.expand(1, b*n_ex, h), support]));
         support_out = support_out[0,...].reshape(b, n_ex, h).mean(1);
-        query_out = self.model(torch.cat([self.agg.expand(1, b, h), query.transpose(0, 1)]));
+        query_out = self.model(torch.cat([self.agg.expand(1, b, h), query.transpose(0,1)]));
         query_out = query_out[0,...]
         return torch.sum(support_out * query_out, dim=1);

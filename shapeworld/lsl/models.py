@@ -631,12 +631,14 @@ class SANet(nn.Module):
         # rand_idx = torch.randint(0, N, size=(1,)).item();
         rand_idx = 4
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
-        fig, axes = plt.subplots(num_iters, num_slots);
+        fig1, axes1 = plt.subplots(num_iters, num_slots);
+        fig2, axes2 = plt.subplots(num_iters, num_slots);
         for i in range(num_iters):
             for j in range(num_slots):
-                axes[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
-                axes[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
+                axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
+                axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1));
+                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu());
 
         fig, axes = plt.subplots(1, num_iters);
         for i in range(num_iters):
@@ -1002,14 +1004,14 @@ class TransformerScorer(Scorer):
     def __init__(self, hidden_size):
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.agg = nn.Parameter(torch.randn(1, 1, hidden_size))
 
     def score(self, support, query):
         b, n_ex, num_slots, h = support.shape;
         support = support.flatten(0, 1).transpose(0, 1);
-        support_out = self.model(torch.cat([self.agg.reshape(1, b*n_ex, h), support]));
+        support_out = self.model(torch.cat([self.agg.expand(1, b*n_ex, h), support]));
         support_out = support_out[0,...].reshape(b, n_ex, h).mean(1);
-        query_out = self.model(torch.cat([self.agg.reshape(1, b, h), query]));
+        query_out = self.model(torch.cat([self.agg.expand(1, b, h), query.transpose(0, 1)]));
         query_out = query_out[0,...]
         return torch.sum(support_out * query_out, dim=1);

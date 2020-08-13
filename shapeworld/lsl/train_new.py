@@ -343,6 +343,7 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m, sd in zip(models_to_save, sds):
+            print(m)
             print(m.load_state_dict(sd));
         print("loaded checkpoint");
 

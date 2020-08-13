@@ -270,9 +270,10 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    slot_to_concept = MLP(64, args.hidden_size, args.hidden_size).to(device)
-    params_to_optimize.extend(slot_to_concept.parameters());
-    models_to_save.append(slot_to_concept);
+    if args.comparison != 'transformer':
+        slot_to_concept = MLP(64, args.hidden_size, args.hidden_size).to(device)
+        params_to_optimize.extend(slot_to_concept.parameters());
+        models_to_save.append(slot_to_concept);
 
     # scorer
     if (args.comparison=='sinkhorn'):
@@ -406,7 +407,10 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
-            score = im_im_scorer_model.score(slot_to_concept(examples_slot).mean(dim=[1,2]), slot_to_concept(image_slot).mean(dim=1));
+            if args.comparison=='transformer':
+                score = im_im_scorer_model.score(examples_slot, image_slot);
+            else:
+                score = im_im_scorer_model.score(slot_to_concept(examples_slot).mean(dim=[1,2]), slot_to_concept(image_slot).mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()

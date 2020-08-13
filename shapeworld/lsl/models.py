@@ -671,7 +671,6 @@ class ImagePositionalEmbedding(nn.Module):
     def forward(self, x):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords);
-
 """
 Similarity Scores
 """
@@ -998,3 +997,22 @@ class SetCriterion(nn.Module):
 
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+
+class TransformerScorer(Scorer):
+    def __init__(self, hidden_size):
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        self.support_emb = nn.Parameter(torch.randn(1, 1, hidden_size));
+        self.query_emb = nn.Parameter(torch.randn(1, 1, hidden_size));
+        self.aggregate_emb = nn.Parameter(torch.randn(1, 1, hidden_size));
+        self.scorer = nn.Linear(hidden_size, 1);
+
+    def score(self, support, query):
+        b, n_ex, num_slots, h = support.shape;
+        support = support.flatten(1, 2);
+        support = support + self.support_emb;
+        query = query + self.query_emb;
+        total_in = torch.cat([self.aggregate_emb.expand(b, 1, h), support, query], dim=1).transpose(0, 1);
+        score = self.model(total_in)[0,...];
+        return self.scorer(score);
+"""

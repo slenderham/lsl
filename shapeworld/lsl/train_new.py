@@ -24,7 +24,7 @@ from datasets import ShapeWorld, extract_features, extract_objects, extract_obje
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerScorer
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
 from utils import GradualWarmupScheduler
@@ -42,7 +42,7 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine', 'sinkhorn'],
+                        choices=['dotp', 'cosine', 'transformer'],
                         default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--max_train',
@@ -280,6 +280,7 @@ if __name__ == "__main__":
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
+        'transformer': TransformerScorer(64),
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())

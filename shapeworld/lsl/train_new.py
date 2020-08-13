@@ -408,7 +408,7 @@ if __name__ == "__main__":
             # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
             if args.comparison=='transformer':
-                score = im_im_scorer_model.score(examples_slot, image_slot);
+                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
             else:
                 score = im_im_scorer_model.score(slot_to_concept(examples_slot).mean(dim=[1,2]), slot_to_concept(image_slot).mean(dim=1));
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());

@@ -1005,7 +1005,6 @@ class TransformerScorer(Scorer):
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.support_emb = nn.Parameter(torch.randn(1, 1, hidden_size)*(hidden_size**0.5));
         self.query_emb = nn.Parameter(torch.randn(1, 1, hidden_size)*(hidden_size**0.5));
-        self.aggregate_emb = nn.Parameter(torch.randn(1, 1, hidden_size)*(hidden_size**0.5));
         self.scorer = nn.Linear(hidden_size, 1);
 
     def score(self, support, query):
@@ -1013,6 +1012,8 @@ class TransformerScorer(Scorer):
         support = support.flatten(1, 2);
         support = support + self.support_emb;
         query = query + self.query_emb;
-        total_in = torch.cat([self.aggregate_emb.expand(b, 1, h), support, query], dim=1).transpose(0, 1);
-        score = self.model(total_in)[0,...];
-        return self.scorer(score);
+        total_in = torch.cat([support, query], dim=1).transpose(0, 1);
+        out = self.model(total_in);
+        support = out[:n_ex*num_slots].mean(0)
+        query = out[n_ex*num_slots:].mean(0)
+        return torch.sum(support * query, dim=1);

@@ -1000,7 +1000,8 @@ class SetCriterion(nn.Module):
 
 class TransformerScorer(Scorer):
     def __init__(self, hidden_size):
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
+        super(TransformerScorer, self).__init__();
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.support_emb = nn.Parameter(torch.randn(1, 1, hidden_size));
         self.query_emb = nn.Parameter(torch.randn(1, 1, hidden_size));
@@ -1015,4 +1016,3 @@ class TransformerScorer(Scorer):
         total_in = torch.cat([self.aggregate_emb.expand(b, 1, h), support, query], dim=1).transpose(0, 1);
         score = self.model(total_in)[0,...];
         return self.scorer(score);
-"""

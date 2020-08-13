@@ -778,11 +778,12 @@ class SinkhornScorer(Scorer):
     def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
-        self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
-        assert(isinstance(self.base_scorer, Scorer)), "base_scorer should be a scorer itself"
         if (comparison=='im_lang'):
+            self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
             torch.nn.init.uniform_(self.dustbin_scores_lang.weight)
+        else:
+            self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);

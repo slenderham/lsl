@@ -112,11 +112,13 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module, hidden_size):
+    def __init__(self, embedding_module, hidden_size, bidirectional=False):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, hidden_size);
+        self.bidirectional = bidirectional
+        self.hidden_size = hidden_size
+        self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional);
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -146,6 +148,8 @@ class TextRep(nn.Module):
             hidden = hidden[:,reversed_idx,:]
         
         hidden = hidden.transpose(0, 1)
+        if self.bidirectional:
+            hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2;
 
         return hidden
 
@@ -629,7 +633,7 @@ class SANet(nn.Module):
         N, dim_q, dim_k = attns[0].shape; # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k);
         # rand_idx = torch.randint(0, N, size=(1,)).item();
-        rand_idx = 4
+        rand_idx = 2
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu());
         fig1, axes1 = plt.subplots(num_iters, num_slots);
         fig2, axes2 = plt.subplots(num_iters, num_slots);
@@ -1000,18 +1004,15 @@ class SetCriterion(nn.Module):
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
-class TransformerScorer(Scorer):
+class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.agg = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
-    def score(self, support, query):
-        b, n_ex, num_slots, h = support.shape;
-        support = support.flatten(0, 1).transpose(0, 1);
-        support_out = self.model(torch.cat([self.agg.expand(1, b*n_ex, h), support]));
-        support_out = support_out[0,...].reshape(b, n_ex, h).mean(1);
-        query_out = self.model(torch.cat([self.agg.expand(1, b, h), query.transpose(0,1)]));
-        query_out = query_out[0,...]
-        return torch.sum(support_out * query_out, dim=1);
+    def score(self, x):
+        b, num_slots, h = x.shape;
+        x = x.transpose(0, 1);
+        x = self.model(torch.cat([self.agg.expand(1, b, h), x]));
+        return x[0,...];

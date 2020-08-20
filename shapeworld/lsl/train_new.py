@@ -24,7 +24,7 @@ from datasets import ShapeWorld, extract_features, extract_objects, extract_obje
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerScorer
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerAgg
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
 from utils import GradualWarmupScheduler
@@ -42,7 +42,7 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine', 'transformer'],
+                        choices=['dotp', 'cosine'],
                         default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--max_train',
@@ -270,18 +270,14 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    if args.comparison != 'transformer':
-        slot_to_concept = MLP(64, args.hidden_size, args.hidden_size).to(device)
-        params_to_optimize.extend(slot_to_concept.parameters());
-        models_to_save.append(slot_to_concept);
+    image_whole_model = ExWrapper(TransformerAgg(64)).to(device);
+    params_to_optimize.extend(image_whole_model.parameters());
+    models_to_save.append(image_whole_model);
 
     # scorer
-    if (args.comparison=='sinkhorn'):
-        raise NotImplementedError();
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
-        'transformer': TransformerScorer(64),
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -305,7 +301,7 @@ if __name__ == "__main__":
         models_to_save.append(hint_model)
     elif args.aux_task=='matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        hint_model = TextRep(embedding_model, hidden_size=args.hidden_size)
+        hint_model = TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
@@ -323,9 +319,13 @@ if __name__ == "__main__":
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
-        hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
-        params_to_optimize.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
+        hype_part_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
+        params_to_optimize.extend(hype_part_loss.parameters())
+        models_to_save.append(hype_part_loss)
+
+        hype_whole_loss = CosineScorer(temperature=args.temperature).to(device);
+        params_to_optimize.extend(hype_whole_loss.parameters())
+        models_to_save.append(hype_whole_loss)
 
     # optimizer
     optfunc = {
@@ -346,6 +346,11 @@ if __name__ == "__main__":
             print(m)
             print(m.load_state_dict(sd));
         print("loaded checkpoint");
+
+    # if args.visualize_attns and args.aux_task=='matching':
+    #     for k, v in train_w2i.items():
+    #         print(k, hype_loss.dustbin_scores_lang.weight[:, v]);
+
 
     def train(epoch, n_steps=100):
         for m in models_to_save:
@@ -404,14 +409,11 @@ if __name__ == "__main__":
 
             # Learn representations of images and examples
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
-            # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
+            image_whole = image_whole_model(image_slot); # --> N x C
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+            examples_whole = image_whole_model(examples); # --> N x n_ex x C
 
-            if args.comparison=='transformer':
-                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
-            else:
-                score = im_im_scorer_model.score(slot_to_concept(examples_slot).mean(dim=[1,2]), slot_to_concept(image_slot).mean(dim=1));
+            score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_slot).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -438,13 +440,13 @@ if __name__ == "__main__":
                 
                 if (args.visualize_attns):
                     if (args.aux_task=='caption_slot'):
-                        plt.subplot(111).imshow(attns[4].detach().t());
+                        plt.subplot(111).imshow(attns[2].detach().t());
                     elif(args.aux_task=='caption_image'):
                         fig, axes = plt.subplots(2, 7)
-                        for i, a in enumerate(attns[4].detach()):
+                        for i, a in enumerate(attns[2].detach()):
                             axes[i//7][i%7].imshow(a.reshape(56, 56));
-                    print([train_i2w[h.item()] for h in torch.argmax(hypo_out[4], dim=-1)]);
-                    print([train_i2w[h.item()] for h in hint_seq[4]]);
+                    print([train_i2w[h.item()] for h in torch.argmax(hypo_out[2], dim=-1)]);
+                    print([train_i2w[h.item()] for h in hint_seq[2]]);
                     plt.show()
 
                 hypo_out = hypo_out[:, :-1].contiguous()
@@ -467,14 +469,18 @@ if __name__ == "__main__":
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_length); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                matching, part_scores = hype_part_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    ax.imshow(matching[4][1].detach().exp(), vmin=0, vmax=1)
-                    ax.set_xticks(np.arange(len(hint_seq[1])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[1]])
+                    ax.imshow(matching[2][0].detach().exp(), vmin=0, vmax=1)
+                    ax.set_xticks(np.arange(len(hint_seq[0])))
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     plt.show()
+
+                whole_scores = hype_whole_loss.score(examples_whole.mean(dim=1), (hint_rep[0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
+                scores = 0.1*part_scores + whole_scores;
+                
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);

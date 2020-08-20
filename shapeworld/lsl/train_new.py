@@ -270,7 +270,7 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_whole_model = TransformerAgg(64).to(device);
+    image_whole_model = TransformerAgg(args.hidden_size).to(device);
     params_to_optimize.extend(image_whole_model.parameters());
     models_to_save.append(image_whole_model);
 
@@ -309,6 +309,10 @@ if __name__ == "__main__":
         slot_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
         params_to_optimize.extend(slot_to_lang_matching.parameters())
         models_to_save.append(slot_to_lang_matching)
+
+        whole_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
+        params_to_optimize.extend(whole_to_lang_matching.parameters())
+        models_to_save.append(whole_to_lang_matching)
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -477,8 +481,7 @@ if __name__ == "__main__":
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     plt.show()
-                print(examples_whole.mean(dim=1).shape,  (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :]).shape);
-                whole_scores = hype_whole_loss.score(examples_whole.mean(dim=1), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
+                whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
                 scores = 0.1*part_scores + whole_scores;
                 
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
@@ -599,7 +602,7 @@ if __name__ == "__main__":
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                     matching, part_scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
-                    whole_scores = hype_whole_loss.score(examples_whole.mean(dim=1), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
+                    whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
                     scores = 0.1*part_scores + whole_scores;
                     pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                     pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);

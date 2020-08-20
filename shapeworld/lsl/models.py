@@ -1004,14 +1004,14 @@ class SetCriterion(nn.Module):
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
-class TransformerAgg(Scorer):
+class TransformerAgg(nn.Module):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.agg = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
-    def score(self, x):
+    def forward(self, x):
         b, num_slots, h = x.shape;
         x = x.transpose(0, 1);
         x = self.model(torch.cat([self.agg.expand(1, b, h), x]));

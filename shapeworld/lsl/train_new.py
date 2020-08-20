@@ -270,7 +270,7 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_whole_model = ExWrapper(TransformerAgg(64)).to(device);
+    image_whole_model = TransformerAgg(64).to(device);
     params_to_optimize.extend(image_whole_model.parameters());
     models_to_save.append(image_whole_model);
 
@@ -411,7 +411,7 @@ if __name__ == "__main__":
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
             image_whole = image_whole_model(image_slot); # --> N x C
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            examples_whole = image_whole_model(examples_slot); # --> N x n_ex x C
+            examples_whole = image_whole_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots, 64); # --> N x n_ex x C
 
             score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_whole).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
@@ -560,7 +560,7 @@ if __name__ == "__main__":
                 image_whole = image_whole_model(image_slot); # --> N x n_slot x C
 
                 examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
-                examples_whole = image_whole_model(examples_slot); # --> N x n_ex x n_slot x C
+                examples_whole = image_whole_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots, 64); # --> N x n_ex x n_slot x C
 
                 score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_whole).squeeze();            
                 label_hat = score > 0

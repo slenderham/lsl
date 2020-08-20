@@ -488,17 +488,18 @@ if __name__ == "__main__":
                 scores_reshaped = torch.cat([pos, neg], dim=1);
                 hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                 loss += -args.hypo_lambda*hypo_loss;
+                metric = {'part_acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()}
 
                 whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
-                pos_mask = torch.diag(torch.ones(batch_size))>0.5;
-                pos = part_scores.masked_select(pos_mask).reshape(batch_size, 1);
-                neg = part_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
+                pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
+                pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
+                neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
                 scores_reshaped = torch.cat([pos, neg], dim=1);
                 hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                 loss += -args.hypo_lambda*hypo_loss;
 
-                metric = {'acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()}
-                cls_acc += metric['acc'];
+                metric = {'whole_acc': (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()}
+                cls_acc += (metric['part_acc']+metric['whole_acc'])/2;
                 aux_loss_total += hypo_loss.item();
                 metric['pos_score'] = pos.mean().item();
                 metric['neg_score'] = neg.mean().item();
@@ -609,20 +610,19 @@ if __name__ == "__main__":
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                     matching, part_scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
-                                    pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
+                    
+                    pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                     pos = part_scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                     neg = part_scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                     scores_reshaped = torch.cat([pos, neg], dim=1);
                     hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
-                    loss += -args.hypo_lambda*hypo_loss;
 
                     whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
-                    pos_mask = torch.diag(torch.ones(batch_size))>0.5;
-                    pos = part_scores.masked_select(pos_mask).reshape(batch_size, 1);
-                    neg = part_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
+                    pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
+                    pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
+                    neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
                     scores_reshaped = torch.cat([pos, neg], dim=1);
-                    hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
-                    loss += -args.hypo_lambda*hypo_loss;
+                    hypo_loss += F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                     aux_metric_meter.update(hypo_loss.item(), batch_size*n_ex, raw_scores=None);
                 else:
                     raise ValueError("invalid auxiliary task name")

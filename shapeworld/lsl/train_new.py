@@ -557,15 +557,12 @@ if __name__ == "__main__":
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(image); # --> N x n_slot x C
-                # image_whole = image_whole_model(image_slot); # --> N x n_slot x C
+                image_whole = image_whole_model(image_slot); # --> N x n_slot x C
 
                 examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
-                # examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
+                examples_whole = image_whole_model(examples); # --> N x n_ex x n_slot x C
 
-                if args.comparison=='transformer':
-                    score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
-                else:
-                    score = im_im_scorer_model.score(slot_to_concept(examples_slot).mean(dim=[1,2]), slot_to_concept(image_slot).mean(dim=1));                
+                score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_slot).squeeze();            
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);

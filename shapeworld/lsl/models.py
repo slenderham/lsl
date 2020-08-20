@@ -1006,7 +1006,7 @@ class SetCriterion(nn.Module):
 
 class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
-        super(TransformerScorer, self).__init__();
+        super(TransformerAgg, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.agg = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))

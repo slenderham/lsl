@@ -504,7 +504,7 @@ if __name__ == "__main__":
                 # metric['whole_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()
                 # aux_loss_total += hypo_loss.item();
 
-                cls_acc += metric['part_acc']/2;
+                cls_acc += metric['part_acc'];
                 # metric['pos_score'] += pos.mean().item();
                 # metric['neg_score'] += neg.mean().item();
             else:

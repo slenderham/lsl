@@ -323,13 +323,13 @@ if __name__ == "__main__":
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
-        hype_part_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
+        hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
         params_to_optimize.extend(hype_part_loss.parameters())
         models_to_save.append(hype_part_loss)
 
-        hype_whole_loss = CosineScorer(temperature=args.temperature).to(device);
-        params_to_optimize.extend(hype_whole_loss.parameters())
-        models_to_save.append(hype_whole_loss)
+        # hype_whole_loss = CosineScorer(temperature=args.temperature).to(device);
+        # params_to_optimize.extend(hype_whole_loss.parameters())
+        # models_to_save.append(hype_whole_loss)
 
     # optimizer
     optfunc = {
@@ -474,7 +474,7 @@ if __name__ == "__main__":
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                matching, scores = hype_part_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
@@ -612,20 +612,20 @@ if __name__ == "__main__":
                 elif args.aux_task=='matching':
                     hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                    matching, part_scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                    matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                     pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
-                    pos = part_scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
-                    neg = part_scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
+                    pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
+                    neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                     scores_reshaped = torch.cat([pos, neg], dim=1);
                     hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
 
-                    whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
-                    pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
-                    pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
-                    neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
-                    scores_reshaped = torch.cat([pos, neg], dim=1);
-                    hypo_loss += F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+                    # whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
+                    # pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
+                    # pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
+                    # neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
+                    # scores_reshaped = torch.cat([pos, neg], dim=1);
+                    # hypo_loss += F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                     aux_metric_meter.update(hypo_loss.item(), batch_size*n_ex, raw_scores=None);
                 else:
                     raise ValueError("invalid auxiliary task name")

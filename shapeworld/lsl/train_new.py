@@ -610,7 +610,7 @@ if __name__ == "__main__":
                     non_pad_total = (hint_seq_2d!=pad_index).float().sum()-hyp_batch_size; # total number of tokens, len-1 for each sample
                     aux_metric_meter.update(hypo_loss.item(), non_pad_total.item(), raw_scores=None);
                 elif args.aux_task=='matching':
-                    hint_rep = hint_model(hint_seq, hint_length); 
+                    hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                     matching, part_scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));

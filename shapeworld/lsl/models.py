@@ -133,8 +133,6 @@ class TextRep(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq);
 
-        packed_input = rnn_utils.pack_padded_sequence(embed_seq, sorted_lengths)
-
         packed = rnn_utils.pack_padded_sequence(
             embed_seq,
             sorted_lengths.data.tolist()
@@ -160,9 +158,9 @@ class TextRepTransformer(nn.Module):
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32);
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
 
-    def forward(self, seq, padding_mask):
+    def forward(self, seq, src_key_padding_mask):
         batch_size = seq.size(0)
 
         # reorder from (B,L,D) to (L,B,D)
@@ -171,7 +169,7 @@ class TextRepTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, src_key_padding_mask=padding_mask);
+        hidden = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask);
 
         # reorder back to (B,L,D)
         hidden = hidden.transpose(0, 1)
@@ -498,6 +496,53 @@ class TextProposalWithAttn(nn.Module):
         mean_encoder_out = encoder_out.mean(dim=1)
         h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
         return h
+
+class TextProposalTransformer(nn.Module):
+    r"""Reverse proposal model, estimating:
+
+        argmax_lambda log q(w_i|x_1, y_1, ..., x_n, y_n; lambda)
+
+    approximation to the distribution of descriptions.
+
+    Because they use only positive labels, it actually simplifies to
+
+        argmax_lambda log q(w_i|x_1, ..., x_4; lambda)
+
+    https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
+    """
+
+    def __init__(self, embedding_module, hidden_size):
+        super(TextProposalTransformer, self).__init__()
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.vocab_size = embedding_module.num_embeddings
+        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerDecoder(encoder_layer, num_layers=4);
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
+        self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size)
+        self.hidden_size = hidden_size
+        self.register_buffer("mask", torch.tril(torch.ones(16, 16)).view(1, 1, 16, 16)<0.5)
+
+    def forward(self, feats, seq, tgt_key_padding_mask):
+        # feats is from example images
+        batch_size = seq.size(0)
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+        embed_seq = self.pe(embed_seq)
+        
+        # shape = (seq_len, batch, hidden_dim)
+        output = self.model(embed_seq, feats, \
+                            tgt_mask=self.mask[:max_len, :max_len], \
+                            tgt_key_padding_mask=tgt_key_padding_mask);
+
+        # reorder from (L,B,D) to (B,L,D)
+        output = output.transpose(0, 1)
+        output = self.outputs2vocab(output)
+
+        return output
 
 class SlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -1007,12 +1052,11 @@ class SetCriterion(nn.Module):
 class TransformerAgg(nn.Module):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=2*hidden_size, dropout=0.0);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
-        self.agg = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
     def forward(self, x):
         b, num_slots, h = x.shape;
         x = x.transpose(0, 1);
-        x = self.model(torch.cat([self.agg.expand(1, b, h), x]));
-        return x[0,...];
+        x = self.model(x);
+        return x.mean(dim=0);

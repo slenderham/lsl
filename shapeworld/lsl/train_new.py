@@ -22,7 +22,7 @@ from utils import (
 )
 from datasets import ShapeWorld, extract_features, extract_objects, extract_objects_and_positions
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
-from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer
+from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, TextProposalTransformer
 from models import SANet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerAgg
 from vision import Conv4NP, ResNet18, Conv4NP
@@ -295,13 +295,13 @@ if __name__ == "__main__":
     elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
     # language
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        hint_model = TextProposalWithAttn(embedding_model, encoder_dim=64, hidden_size=args.hidden_size)
+        hint_model = TextProposalTransformer(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
     elif args.aux_task=='matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        hint_model = TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True)
+        hint_model = TextRepTransformer(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
@@ -438,6 +438,7 @@ if __name__ == "__main__":
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
+                raise NotImplementedError("need to see how to extract attention");
                 hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
                 hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));   
                 seq_len = hint_seq.size(1)
@@ -471,7 +472,7 @@ if __name__ == "__main__":
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='matching':
-                hint_rep = hint_model(hint_seq, hint_length); 
+                hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
                 matching, part_scores = hype_part_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
@@ -493,7 +494,7 @@ if __name__ == "__main__":
                 metric['pos_score'] = pos.mean().item();
                 metric['neg_score'] = neg.mean().item();
 
-                whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length, :])/2, get_diag=False);
+                whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole).mean(dim=1), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
                 pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
                 pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
                 neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
@@ -619,7 +620,7 @@ if __name__ == "__main__":
                     scores_reshaped = torch.cat([pos, neg], dim=1);
                     hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
 
-                    whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), (hint_rep[:,0]+hint_rep[torch.arange(batch_size), hint_length-1, :])/2, get_diag=False);
+                    whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
                     pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
                     pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
                     neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);

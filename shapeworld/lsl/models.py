@@ -155,7 +155,7 @@ class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=4);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
@@ -517,7 +517,7 @@ class TextProposalTransformer(nn.Module):
         self.embedding_dim = embedding_module.embedding_dim
         self.vocab_size = embedding_module.num_embeddings
         decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerDecoder(encoder_layer, num_layers=4);
+        self.model = nn.TransformerDecoder(encoder_layer, num_layers=1);
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
         self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size)
         self.hidden_size = hidden_size

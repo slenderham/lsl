@@ -825,20 +825,21 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
+            self.base_scorer = CosineScorer(temperature=1);
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-            torch.nn.init.uniform_(self.dustbin_scores_lang.weight)
+            torch.nn.init.ones_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
-        self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
+        self.clip_dustbin = lambda x: torch.clamp(x, 0, 2);
         self.iters = iters;
         self.reg = reg;
+        self.temperature = kwargs['temperature'];
 
     def score(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
@@ -848,21 +849,21 @@ class SinkhornScorer(Scorer):
         assert(y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0); # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n*n_ex, 1, 1);  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
-        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
+        scores = 1-self.base_scorer.score(x_expand, y_expand, get_diag=False);
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
         # pad the score matrix where language is special token
         y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
         y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
         word_idx = word_idx.repeat(n*n_ex, 1);
-        matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
+        matching, scores = self.optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
+                                                self.clip_dustbin(self.dustbin_scores_both), y_mask);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
         scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
         return matching, scores;
     
-    def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
+    def optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -877,31 +878,35 @@ class SinkhornScorer(Scorer):
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
-        mask_val = torch.finfo(scores.dtype).min
+        mask_val = 1e-6;
         couplings = couplings.masked_fill(scores_mask, mask_val);
         
-        norm = - (ms + ns).log().unsqueeze(-1); # --> batch size x 1
-        log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
-        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1); # batch size x num_obj_y+1
-        log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
-        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
-        Z = Z - norm.reshape(b, 1, 1)  # multiply probabilities by M+N
-        return Z, (couplings*Z.exp()).sum(dim=(1,2))
+        norm = 1/(ms+ns).unsqueeze(-1); # --> batch size x 1
+        mu = torch.cat([norm.expand(b, m), ns[:, None]*norm], dim=1); # batch size x num_obj_x+1
+        nu = torch.cat([norm.expand(b, n), ms[None, None]*norm], dim=1); # batch size x num_obj_y+1
+        nu = nu.masked_fill(scores_mask[:, 0, :], mask_val);
+        Z = self.ipot_iter(couplings, mu, nu, scores_mask)
+        plt.imshow(Z[0].detach())
+        plt.show()
+        return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
 
-    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
+    def ipot_iter(self, C, mu, nu, scores_mask, K=1):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
-        u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
-        for i in range(iters):
-            u += self.reg * (log_mu - self.lse(self.M(Z, u, v), dim=2))
-            v += self.reg * (log_nu - self.lse(self.M(Z, u, v), dim=1))
-        return self.M(Z, u, v)
-
-    def M(self, Z, u, v):                                                                           
-        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg;
-
-    def lse(self, A, dim):
-        "log-sum-exp, add 1e-6 to prevent underflow in the "
-        return torch.log(torch.exp(A).sum(dim) + 1e-6)
+        T = torch.matmul(mu.unsqueeze(2), nu.unsqueeze(1));
+        A = torch.exp(-C/self.reg);
+        delta = torch.ones_like(mu);
+        sigma = torch.ones_like(nu);
+        sigma = sigma.masked_fill(scores_mask[:, 0, :], 1e-6);
+        for t in range(self.iters):
+            Q = A * T
+            for k in range(K):
+                delta = mu/(Q.matmul(sigma.unsqueeze(2))+1e-6).squeeze();
+                sigma = nu/(Q.transpose(-2, -1).matmul(delta.unsqueeze(2))+1e-6).squeeze();
+                sigma = sigma.masked_fill(scores_mask[:, 0, :], 1e-6);
+            # Squeeze such that [n,1] for delta and [m,1] for sigma turn to [n] and [m]
+            # such that torch.diag() can be used to turn delta and sigma into [n,n] and [m,m] matrices
+            T = delta.unsqueeze(2)*Q*sigma.unsqueeze(1);
+        return T
 
 class SetCriterion(nn.Module):
     """

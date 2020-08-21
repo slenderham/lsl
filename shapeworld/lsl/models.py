@@ -886,8 +886,6 @@ class SinkhornScorer(Scorer):
         nu = torch.cat([norm.expand(b, n), ms[None, None]*norm], dim=1); # batch size x num_obj_y+1
         nu = nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.ipot_iter(couplings, mu, nu, scores_mask)
-        plt.imshow(Z[0].detach())
-        plt.show()
         return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
 
     def ipot_iter(self, C, mu, nu, scores_mask, K=1):

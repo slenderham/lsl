@@ -324,8 +324,8 @@ if __name__ == "__main__":
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
         hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
-        params_to_optimize.extend(hype_part_loss.parameters())
-        models_to_save.append(hype_part_loss)
+        params_to_optimize.extend(hype_loss.parameters())
+        models_to_save.append(hype_loss)
 
         # hype_whole_loss = CosineScorer(temperature=args.temperature).to(device);
         # params_to_optimize.extend(hype_whole_loss.parameters())

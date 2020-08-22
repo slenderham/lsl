@@ -154,8 +154,8 @@ class TextRep(nn.Module):
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
@@ -864,8 +864,6 @@ class SinkhornScorer(Scorer):
         return matching, scores;
     
     def optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask):
-        """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
-            Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
         one = scores.new_tensor(1)
         ms = (m*one).to(scores);
@@ -878,7 +876,7 @@ class SinkhornScorer(Scorer):
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
-        mask_val = 1e-6;
+        mask_val = 0;
         couplings = couplings.masked_fill(scores_mask, mask_val);
         
         norm = 1/(ms+ns).unsqueeze(-1); # --> batch size x 1
@@ -889,12 +887,9 @@ class SinkhornScorer(Scorer):
         return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
 
     def ipot_iter(self, C, mu, nu, scores_mask, K=1):
-        """ Perform Sinkhorn Normalization in Log-space for stability"""
-        T = torch.matmul(mu.unsqueeze(2), nu.unsqueeze(1));
+        T = torch.ones_like(C);
         A = torch.exp(-C/self.reg);
-        delta = torch.ones_like(mu);
-        sigma = torch.ones_like(nu);
-        sigma = sigma.masked_fill(scores_mask[:, 0, :], 1e-6);
+        sigma = nu;
         for t in range(self.iters):
             Q = A * T
             for k in range(K):

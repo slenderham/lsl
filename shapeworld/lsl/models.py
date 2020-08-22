@@ -154,7 +154,7 @@ class TextRep(nn.Module):
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
@@ -825,21 +825,21 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
+        self.temperature = kwargs['temperature'];
         if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=1);
+            self.base_scorer = CosineScorer(temperature=self.temperature);
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
             torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
-        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1);
+        self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;
-        self.temperature = kwargs['temperature'];
 
     def score(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y

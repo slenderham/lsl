@@ -825,20 +825,21 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=20, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=50, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=kwargs['temperature']);
+            self.base_scorer = CosineScorer(temperature=1);
             self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
             torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
         self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
-        self.clip_dustbin = lambda x: torch.clamp(x, -1/kwargs['temperature'], 1/kwargs['temperature']);
+        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1);
         self.iters = iters;
         self.reg = reg;
+        self.temperature = kwargs['temperature'];
 
     def score(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
@@ -884,8 +885,8 @@ class SinkhornScorer(Scorer):
         log_nu = -(ns+1).log()[:, None].expand(b, n+1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
-        # Z = Z - norm.reshape(b, 1, 1)  # multiply probabilities by M+N
-        return Z.exp(), (couplings*Z.exp()).sum(dim=(1,2))
+        Z = Z.exp()/self.temperature  # multiply probabilities by M+N
+        return Z, (couplings*Z).sum(dim=(1,2))
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""

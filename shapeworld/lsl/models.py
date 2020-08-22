@@ -883,20 +883,20 @@ class SinkhornScorer(Scorer):
         mu = torch.cat([norm.expand(b, m), ns[:, None]*norm], dim=1); # batch size x num_obj_x+1
         nu = torch.cat([norm.expand(b, n), ms[None, None]*norm], dim=1); # batch size x num_obj_y+1
         nu = nu.masked_fill(scores_mask[:, 0, :], mask_val);
-        Z = self.ipot_iter(couplings, mu, nu, scores_mask)/norm.reshape(b, 1, 1);
-        return Z, (couplings*Z).sum(dim=(1,2))
+        Z = self.ipot_iter(couplings, mu, nu, scores_mask);
+        return Z, ((1-couplings)*Z).sum(dim=(1,2))/self.temperature
 
     def ipot_iter(self, C, mu, nu, scores_mask, K=1):
         T = torch.ones_like(C);
         A = torch.exp(-C/self.reg);
+        T = T.masked_fill(scores_mask, 0);
+        A = A.masked_fill(scores_mask, 0);
         sigma = nu;
         for t in range(self.iters):
             Q = A * T
             for k in range(K):
                 delta = mu/(Q.matmul(sigma.unsqueeze(2))).squeeze();
                 sigma = nu/(Q.transpose(-2, -1).matmul(delta.unsqueeze(2)).squeeze()+scores_mask[:, 0, :].to(Q.dtype)*torch.finfo().max);
-            # Squeeze such that [n,1] for delta and [m,1] for sigma turn to [n] and [m]
-            # such that torch.diag() can be used to turn delta and sigma into [n,n] and [m,m] matrices
             T = delta.unsqueeze(2)*Q*sigma.unsqueeze(1);
         T = T.masked_fill(scores_mask, 0);
         return T

@@ -825,7 +825,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, num_embedding, iters=10, reg=5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         if (comparison=='im_lang'):
@@ -896,9 +896,10 @@ class SinkhornScorer(Scorer):
         A = A.masked_fill(scores_mask, torch.finfo(A.dtype).min);
         for _ in range(self.iters):
             Q = A + T;
-            u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
-            v = log_nu - torch.logsumexp(Q + u.unsqueeze(2), dim=1)
+            u = log_mu - self.lse(Q + v.unsqueeze(1), dim=2)
+            v = log_nu - self.lse(Q + u.unsqueeze(2), dim=1)
             T = Q + u.unsqueeze(2) + v.unsqueeze(1)
+            T = T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
         return T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
@@ -907,6 +908,10 @@ class SinkhornScorer(Scorer):
             u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
             v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
         return Z + u.unsqueeze(2) + v.unsqueeze(1)
+
+    def lse(self, A, dim):
+        "log-sum-exp, add 1e-6 to prevent underflow in the "
+        return torch.log(torch.exp(A).sum(dim) + 1e-6)
 
 class SetCriterion(nn.Module):
     """

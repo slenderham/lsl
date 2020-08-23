@@ -885,7 +885,7 @@ class SinkhornScorer(Scorer):
         log_nu = -(ns+1).log()[:, None].expand(b, n+1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
-        Z = Z.exp()/self.temperature  # multiply probabilities by M+N
+        Z = Z.exp()  # multiply probabilities by M+N
         return Z, (couplings*Z).sum(dim=(1,2))
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):

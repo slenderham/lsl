@@ -463,8 +463,8 @@ if __name__ == "__main__":
                 cls_acc += metric['acc'];
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
-                examples_whole = slot_to_lang_matching(examples_whole).flatten(0, 1);
-                matching, scores = hype_loss.score(x=examples_whole, y=hint_rep, word_idx=hint_seq, \
+                examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
+                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
@@ -586,8 +586,8 @@ if __name__ == "__main__":
                     aux_metric_meter.update(hypo_loss.item(), non_pad_total.item(), raw_scores=None);
                 elif args.aux_task=='matching':
                     hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
-                    examples_whole = slot_to_lang_matching(examples_whole).flatten(0, 1);
-                    matching, scores = hype_loss.score(x=examples_whole, y=hint_rep, word_idx=hint_seq, \
+                    examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
+                    matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                     pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                     pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);

@@ -42,8 +42,8 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine', 'transformer'],
-                        default='transformer',
+                        choices=['dotp', 'cosine'],
+                        default='dotp',
                         help='How to compare support to query reps')
     parser.add_argument('--max_train',
                         type=int,
@@ -553,10 +553,10 @@ if __name__ == "__main__":
                     hint_seq = hint_seq[:, :max_hint_length]
 
                 # Learn representations of images and examples
-                image_slot = image_part_model(image); # --> N x n_slot x C
-                examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
-
-                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
+                image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
+                examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
+                examples_whole, image_whole = image_whole_model(examples_slot, image_slot);
+                score = im_im_scorer_model.score(examples_whole.mean(dim=(1,2)), image_whole.mean(dim=1)).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);
@@ -590,8 +590,8 @@ if __name__ == "__main__":
                     aux_metric_meter.update(hypo_loss.item(), non_pad_total.item(), raw_scores=None);
                 elif args.aux_task=='matching':
                     hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
-                    examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                    matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                    examples_whole = slot_to_lang_matching(examples_whole).flatten(0, 1);
+                    matching, scores = hype_loss.score(x=examples_whole, y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                     pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                     pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);

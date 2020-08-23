@@ -1053,10 +1053,9 @@ class TransformerScorer(Scorer):
     def __init__(self, hidden_size, n_ex):
         super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
-        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
         self.image_id = nn.Parameter(torch.randn(1, n_ex+1, 1, hidden_size)/(hidden_size**0.5));
-        self.fc = nn.Linear(hidden_size, 1);
+        self.gate = nn.Linear(hidden_size, hidden_size);
 
     def score(self, x, y):
         b, n_ex, num_slots, h = x.shape;
@@ -1066,5 +1065,9 @@ class TransformerScorer(Scorer):
         y += id_embedding[:,n_ex,:,:];
         x = x.flatten(1, 2).transpose(0, 1);
         y = y.transpose(0, 1);
-        whole_rep = self.model(torch.cat([self.seed.expand(1, b, h), x, y], dim=0))[0];
-        return self.fc(whole_rep);
+        whole_rep = self.model(torch.cat([x, y], dim=0));
+        assert(whole_rep.shape==(num_slots*(n_ex+1), b, h));
+        whole_rep = whole_rep*torch.sigmoid(self.gate(whole_rep))
+        x = whole_rep[:n_ex*num_slots].mean(dim=0)
+        y = whole_rep[n_ex*num_slots:].mean(dim=0)
+        return (x*y).sum(dim=1);

@@ -24,7 +24,7 @@ from datasets import ShapeWorld, extract_features, extract_objects, extract_obje
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, TextProposalTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerAgg
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerScorer
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
 from utils import GradualWarmupScheduler
@@ -42,8 +42,8 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine'],
-                        default='dotp',
+                        choices=['dotp', 'cosine', 'transformer'],
+                        default='transformer',
                         help='How to compare support to query reps')
     parser.add_argument('--max_train',
                         type=int,
@@ -270,14 +270,11 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_whole_model = TransformerAgg(64).to(device);
-    params_to_optimize.extend(image_whole_model.parameters());
-    models_to_save.append(image_whole_model);
-
     # scorer
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
+        'transformer': TransformerScorer(64, 4), 
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -309,10 +306,6 @@ if __name__ == "__main__":
         slot_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
         params_to_optimize.extend(slot_to_lang_matching.parameters())
         models_to_save.append(slot_to_lang_matching)
-
-        whole_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
-        params_to_optimize.extend(whole_to_lang_matching.parameters())
-        models_to_save.append(whole_to_lang_matching)
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -413,11 +406,8 @@ if __name__ == "__main__":
 
             # Learn representations of images and examples
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
-            image_whole = image_whole_model(image_slot); # --> N x C
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            examples_whole = image_whole_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex,  64); # --> N x n_ex x C
-
-            score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_whole).squeeze();
+            score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -494,19 +484,7 @@ if __name__ == "__main__":
                 metric['pos_score'] = pos.mean().item();
                 metric['neg_score'] = neg.mean().item();
 
-                # whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole).mean(dim=1), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
-                # pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
-                # pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
-                # neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
-                # scores_reshaped = torch.cat([pos, neg], dim=1);
-                # hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
-                # loss += -args.hypo_lambda*hypo_loss;
-                # metric['whole_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()
-                # aux_loss_total += hypo_loss.item();
-
                 cls_acc += metric['part_acc'];
-                # metric['pos_score'] += pos.mean().item();
-                # metric['neg_score'] += neg.mean().item();
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -572,12 +550,9 @@ if __name__ == "__main__":
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(image); # --> N x n_slot x C
-                image_whole = image_whole_model(image_slot); # --> N x n_slot x C
-
                 examples_slot = image_part_model(examples); # --> N x n_ex x n_slot x C
-                examples_whole = image_whole_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, 64); # --> N x n_ex x n_slot x C
 
-                score = im_im_scorer_model.score(examples_whole.mean(dim=1), image_whole).squeeze();            
+                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);
@@ -620,12 +595,6 @@ if __name__ == "__main__":
                     scores_reshaped = torch.cat([pos, neg], dim=1);
                     hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
 
-                    # whole_scores = hype_whole_loss.score(whole_to_lang_matching(examples_whole.mean(dim=1)), hint_rep[torch.arange(batch_size), hint_length-1, :], get_diag=False);
-                    # pos_mask = (torch.diag(torch.ones(batch_size))>0.5).to(device);
-                    # pos = whole_scores.masked_select(pos_mask).reshape(batch_size, 1);
-                    # neg = whole_scores.masked_select(~pos_mask).reshape(batch_size, batch_size-1);
-                    # scores_reshaped = torch.cat([pos, neg], dim=1);
-                    # hypo_loss += F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
                     aux_metric_meter.update(hypo_loss.item(), batch_size*n_ex, raw_scores=None);
                 else:
                     raise ValueError("invalid auxiliary task name")

@@ -1049,14 +1049,22 @@ class SetCriterion(nn.Module):
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
-class TransformerAgg(nn.Module):
-    def __init__(self, hidden_size):
-        super(TransformerAgg, self).__init__();
+class TransformerScorer(Scorer):
+    def __init__(self, hidden_size, n_ex):
+        super(TransformerScorer, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
+        self.image_id = nn.Parameter(torch.randn(1, n_ex+1, 1, hidden_size)/(hidden_size**0.5));
+        self.fc = nn.Linear(hidden_size, 1);
 
-    def forward(self, x):
-        b, num_slots, h = x.shape;
-        x = x.transpose(0, 1);
-        x = self.model(x);
-        return x.mean(dim=0);
+    def score(self, x, y):
+        b, n_ex, num_slots, h = x.shape;
+        assert(y.shape==(b, num_slots, h));
+        id_embedding = torch.repeat_interleave(self.image_id, repeats=num_slots, dim=2);
+        x += id_embedding[:,:n_ex,:,:];
+        y += id_embedding[:,n_ex,:,:];
+        x = x.flatten(1, 2).transpose(0, 1);
+        y = y.transpose(0, 1);
+        whole_rep = self.model(torch.cat([self.seed.expand(1, b, h), x, y], dim=0))[0];
+        return self.fc(whole_rep);

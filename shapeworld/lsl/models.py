@@ -1050,19 +1050,19 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(nn.Module):
-    def __init__(self, hidden_size, n_ex):
+    def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
-        self.image_id = nn.Parameter(torch.randn(1, n_ex+1, 1, hidden_size)/(hidden_size**0.5));
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
+        self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
 
     def forward(self, x, y):
         b, n_ex, num_slots, h = x.shape;
         assert(y.shape==(b, num_slots, h));
-        id_embedding = torch.repeat_interleave(self.image_id, repeats=num_slots, dim=2);
-        x += id_embedding[:,:n_ex,:,:];
-        y += id_embedding[:,n_ex,:,:];
-        x = x.flatten(1, 2).transpose(0, 1);
+        x = x.flatten(1, 2)
+        x += self.image_id[:,0:1,:];
+        y += self.image_id[:,1:2,:];
+        x = x.transpose(0, 1);
         y = y.transpose(0, 1);
         whole_rep = self.model(torch.cat([x, y], dim=0));
         assert(whole_rep.shape==(num_slots*(n_ex+1), b, h));

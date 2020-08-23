@@ -270,7 +270,7 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_whole_model = TransformerAgg(64, 4).to(device);
+    image_whole_model = TransformerAgg(64).to(device);
     params_to_optimize.extend(image_whole_model.parameters());
     models_to_save.append(image_whole_model);
 

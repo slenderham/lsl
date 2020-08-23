@@ -323,10 +323,6 @@ if __name__ == "__main__":
         params_to_optimize.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
 
-        # hype_whole_loss = CosineScorer(temperature=args.temperature).to(device);
-        # params_to_optimize.extend(hype_whole_loss.parameters())
-        # models_to_save.append(hype_whole_loss)
-
     # optimizer
     optfunc = {
         'adam': optim.Adam,
@@ -334,8 +330,9 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
-    # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
-    # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs*100-10000)
+    scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=10000, after_scheduler=after_scheduler)
+
 
     print(sum([p.numel() for p in params_to_optimize]));
 
@@ -496,6 +493,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
             optimizer.step()
+            scheduler.step()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(

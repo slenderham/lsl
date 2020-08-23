@@ -23,9 +23,10 @@ class ExWrapper(nn.Module):
     (batch_size, n_ex, *img_dims)
     """
 
-    def __init__(self, model):
+    def __init__(self, model, freeze_model):
         super(ExWrapper, self).__init__()
         self.model = model
+        self.freeze_model = freeze_model; # whether or not to allow gradient to backprop through this step
 
     def forward(self, x, **kwargs):
         batch_size = x.shape[0]
@@ -41,6 +42,9 @@ class ExWrapper(nn.Module):
 
         if len(x.shape) == 5:
             x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
+
+        if (self.freeze_model):
+            x_enc = x_enc.detach();
 
         return x_enc
 

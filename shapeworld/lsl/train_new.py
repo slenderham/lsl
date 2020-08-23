@@ -45,6 +45,9 @@ if __name__ == "__main__":
                         choices=['dotp', 'cosine'],
                         default='dotp',
                         help='How to compare support to query reps')
+    parser.add_argument('--freeze_slots'
+                        action='store_true',
+                        help='If True, freeze slots.');
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -264,9 +267,9 @@ if __name__ == "__main__":
     if args.aux_task=='set_pred':
         labels_to_idx = train_dataset.label2idx
 
-    # vision
+    ''' vision '''
     backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));
-    image_part_model = ExWrapper(backbone_model).to(device);
+    image_part_model = ExWrapper(backbone_model, freeze_slots=args.freeze_slots).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
@@ -274,7 +277,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(image_whole_model.parameters());
     models_to_save.append(image_whole_model);
 
-    # scorer
+    ''' scorer '''
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
@@ -283,7 +286,7 @@ if __name__ == "__main__":
     params_to_optimize.extend(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
-    # projection
+    ''' aux task specific '''
     if args.aux_task=='set_pred':
         image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
         params_to_optimize.extend(image_cls_projection.parameters());
@@ -292,13 +295,14 @@ if __name__ == "__main__":
         image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
         params_to_optimize.extend(image_pos_projection.parameters());
         models_to_save.append(image_pos_projection)
+
     elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
-    # language
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         hint_model = TextProposalTransformer(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
+
     elif args.aux_task=='matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         hint_model = TextRepTransformer(embedding_model, hidden_size=args.hidden_size)
@@ -330,6 +334,7 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
+    models_to_save.append(optimizer);
     # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 
@@ -342,11 +347,6 @@ if __name__ == "__main__":
             print(m)
             print(m.load_state_dict(sd));
         print("loaded checkpoint");
-
-    # if args.visualize_attns and args.aux_task=='matching':
-    #     for k, v in train_w2i.items():
-    #         print(k, hype_loss.dustbin_scores_lang.weight[:, v]);
-
 
     def train(epoch, n_steps=100):
         for m in models_to_save:
@@ -412,7 +412,7 @@ if __name__ == "__main__":
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
 
-            loss = args.concept_lambda*epoch/args.epochs*pred_loss
+            loss = args.concept_lambda*pred_loss
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);

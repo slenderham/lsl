@@ -24,7 +24,7 @@ from datasets import ShapeWorld, extract_features, extract_objects, extract_obje
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, TextProposalTransformer
 from models import SANet
-from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerScorer
+from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerAgg
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
 from utils import GradualWarmupScheduler
@@ -270,11 +270,14 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
+    image_whole_model = TransformerAgg(64, 4).to(device);
+    params_to_optimize.extend(image_whole_model.parameters());
+    models_to_save.append(image_whole_model);
+
     # scorer
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
-        'transformer': TransformerScorer(64, 4), 
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -407,7 +410,8 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
+            examples_whole, image_whole = image_whole_model(examples_slot, image_slot);
+            score = im_im_scorer_model.score(examples_whole.mean(dim=(1,2)), image_whole.mean(dim=1)).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -463,8 +467,8 @@ if __name__ == "__main__":
                 cls_acc += metric['acc'];
             elif args.aux_task=='matching':
                 hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
-                examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                examples_whole = slot_to_lang_matching(examples_whole).flatten(0, 1);
+                matching, scores = hype_loss.score(x=examples_whole, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
@@ -472,7 +476,7 @@ if __name__ == "__main__":
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     plt.show()
-                 
+                
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                 pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                 neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);

@@ -416,7 +416,7 @@ if __name__ == "__main__":
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
 
-            loss = args.concept_lambda*pred_loss
+            loss = args.concept_lambda*epoch/args.epochs*pred_loss
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);

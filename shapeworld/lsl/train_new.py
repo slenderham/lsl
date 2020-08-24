@@ -345,6 +345,7 @@ if __name__ == "__main__":
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m, sd in zip(models_to_save, sds):
             print(m)
+            print(sd.keys())
             print(m.load_state_dict(sd));
         print("loaded checkpoint");
 
@@ -468,7 +469,7 @@ if __name__ == "__main__":
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    ax.imshow(matching[2][0].detach(), vmin=0)
+                    ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     plt.show()

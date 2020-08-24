@@ -577,7 +577,7 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None, num_iters = None):
+    def forward(self, inputs, num_slots = None, num_iters = 5):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         n_it = num_iters if num_iters is not None else self.iters
@@ -829,7 +829,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=50, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
@@ -845,8 +845,8 @@ class SinkhornScorer(Scorer):
             self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
         else:
             self.base_scorer = DotPScorer();
-        self.dustbin_scores_im = nn.Parameter(-torch.ones(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(-torch.ones(1, 1, 1));
+        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
+        self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;
@@ -895,7 +895,8 @@ class SinkhornScorer(Scorer):
         log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
         log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
-        Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
+        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
+        Z = Z-norm.reshape(b, 1, 1);
         Z = Z.exp() 
         return Z, (couplings*Z).sum(dim=(1,2))
 
@@ -1073,8 +1074,8 @@ class SetCriterion(nn.Module):
 class TransformerAgg(nn.Module):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=2*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=3);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
 
     def forward(self, x, y):

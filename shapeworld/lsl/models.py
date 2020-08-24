@@ -158,7 +158,7 @@ class TextRep(nn.Module):
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size):
         super(TextRepTransformer, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
@@ -829,18 +829,24 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, num_embedding, iters=50, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
         if (comparison=='im_lang'):
             self.base_scorer = CosineScorer(temperature=self.temperature);
-            self.dustbin_scores_lang = nn.Embedding(num_embedding, 1); # each word token is given a dustbin score
-            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
+            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
+            freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
+            assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
+            freqs = torch.tensor(freqs);
+            freqs = torch.log(freqs/(freqs.sum()));
+            freqs -= freqs.max();
+            freqs[freqs == -float("Inf")] = -1/self.temperature
+            self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
         else:
             self.base_scorer = DotPScorer();
-        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
+        self.dustbin_scores_im = nn.Parameter(-torch.ones(1, 1, 1));
+        self.dustbin_scores_both = nn.Parameter(-torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;
@@ -888,9 +894,23 @@ class SinkhornScorer(Scorer):
         log_mu = -(ms+1).log()[None,None].expand(b, m+1); # batch size x num_obj_x+1
         log_nu = -(ns+1).log()[:, None].expand(b, n+1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
-        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
+        Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z.exp()  # multiply probabilities by M+N
         return Z, (couplings*Z).sum(dim=(1,2))
+
+    def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
+        v = log_nu;
+        T = torch.zeros_like(Z);
+        A = Z/self.reg;
+        T = T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
+        A = A.masked_fill(scores_mask, torch.finfo(A.dtype).min);
+        for _ in range(self.iters):
+            Q = A + T;
+            u = log_mu - self.lse(Q + v.unsqueeze(1), dim=2)
+            v = log_nu - self.lse(Q + u.unsqueeze(2), dim=1)
+            T = Q + u.unsqueeze(2) + v.unsqueeze(1)
+            T = T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
+        return T;
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""

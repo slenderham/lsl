@@ -407,7 +407,7 @@ class ShapeWorld(data.Dataset):
             w2i[w] = len(w2i)
 
         assert len(w2i) == len(i2w)
-        vocab = dict(w2i=w2i, i2w=i2w)
+        vocab = dict(w2i=w2i, i2w=i2w, w2c=w2c)
         self.vocab = vocab
 
         logging.info('Created vocab with %d words.' % len(w2c))

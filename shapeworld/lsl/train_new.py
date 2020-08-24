@@ -45,7 +45,7 @@ if __name__ == "__main__":
                         choices=['dotp', 'cosine'],
                         default='dotp',
                         help='How to compare support to query reps')
-    parser.add_argument('--freeze_slots'
+    parser.add_argument('--freeze_slots',
                         action='store_true',
                         help='If True, freeze slots.');
     parser.add_argument('--max_train',
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     train_vocab = train_dataset.vocab
     train_vocab_size = train_dataset.vocab_size
     train_max_length = train_dataset.max_length
-    train_w2i, train_i2w = train_vocab['w2i'], train_vocab['i2w']
+    train_w2i, train_i2w, train_w2c = train_vocab['w2i'], train_vocab['i2w'], train_vocab['w2c'];
     pad_index = train_w2i[PAD_TOKEN]
     sos_index = train_w2i[SOS_TOKEN]
     eos_index = train_w2i[EOS_TOKEN]
@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     ''' vision '''
     backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));
-    image_part_model = ExWrapper(backbone_model, freeze_slots=args.freeze_slots).to(device);
+    image_part_model = ExWrapper(backbone_model, freeze_model=args.freeze_slots).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
@@ -323,7 +323,7 @@ if __name__ == "__main__":
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
     elif args.aux_task=='matching':
-        hype_loss = SinkhornScorer(num_embedding=train_vocab_size, temperature=args.temperature).to(device);
+        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device);
         params_to_optimize.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
 
@@ -468,7 +468,7 @@ if __name__ == "__main__":
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
+                    ax.imshow(matching[2][0].detach(), vmin=0)
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     plt.show()

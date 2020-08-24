@@ -840,7 +840,7 @@ class SinkhornScorer(Scorer):
             assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
             freqs = torch.tensor(freqs);
             freqs = torch.log(freqs/(freqs.sum()));
-            freqs -= freqs.max();
+            freqs -= (freqs[freqs != -float("Inf")].max()+freqs[freqs != -float("Inf")].min())/2;
             freqs[freqs == -float("Inf")] = -1/self.temperature
             self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
         else:
@@ -888,44 +888,41 @@ class SinkhornScorer(Scorer):
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
-        mask_val = torch.finfo(scores.dtype).min
+        mask_val = -1e6
         couplings = couplings.masked_fill(scores_mask, mask_val);
         
-        log_mu = -(ms+1).log()[None,None].expand(b, m+1); # batch size x num_obj_x+1
-        log_nu = -(ns+1).log()[:, None].expand(b, n+1); # batch size x num_obj_y+1
+        norm = - (ms + ns).log().unsqueeze(-1); # --> batch size x 1
+        log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
+        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
-        Z = Z.exp()  # multiply probabilities by M+N
+        Z = Z.exp() 
         return Z, (couplings*Z).sum(dim=(1,2))
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu;
         T = torch.zeros_like(Z);
         A = Z/self.reg;
-        T = T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
-        A = A.masked_fill(scores_mask, torch.finfo(A.dtype).min);
+        T = T.masked_fill(scores_mask, -1e6);
+        A = A.masked_fill(scores_mask, -1e6);
         for _ in range(self.iters):
             Q = A + T;
-            u = log_mu - self.lse(Q + v.unsqueeze(1), dim=2)
-            v = log_nu - self.lse(Q + u.unsqueeze(2), dim=1)
+            u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
+            v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
             T = Q + u.unsqueeze(2) + v.unsqueeze(1)
-            T = T.masked_fill(scores_mask, torch.finfo(T.dtype).min);
+            T = T.masked_fill(scores_mask, -1e6);
         return T;
 
-    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters: int):
+    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
         for i in range(iters):
-            u += self.reg * (log_mu - self.lse(self.M(Z, u, v), dim=2))
-            v += self.reg * (log_nu - self.lse(self.M(Z, u, v), dim=1))
+            u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
+            v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):
         return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg;
-
-    def lse(self, A, dim):
-        "log-sum-exp, add 1e-6 to prevent underflow in the "
-        return torch.log(torch.exp(A).sum(dim) + 1e-6)
 
 class SetCriterion(nn.Module):
     """

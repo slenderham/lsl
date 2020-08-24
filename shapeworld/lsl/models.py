@@ -692,6 +692,8 @@ class SANet(nn.Module):
                 axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1));
                 axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu());
+                axes1[i][j].axis('off')
+                axes2[i][j].axis('off')
 
         fig, axes = plt.subplots(1, num_iters);
         for i in range(num_iters):
@@ -836,17 +838,18 @@ class SinkhornScorer(Scorer):
         if (comparison=='im_lang'):
             self.base_scorer = CosineScorer(temperature=self.temperature);
             self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
-            freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
-            assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
-            freqs = torch.tensor(freqs);
-            freqs = torch.log(freqs/(freqs.sum()));
-            freqs -= (freqs[freqs != -float("Inf")].max()+freqs[freqs != -float("Inf")].min())/2;
-            freqs[freqs == -float("Inf")] = -1/self.temperature
-            self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
+            # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
+            # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
+            # freqs = torch.tensor(freqs);
+            # freqs = torch.log(freqs/(freqs.sum()));
+            # freqs -= (freqs[freqs != -float("Inf")].max()+freqs[freqs != -float("Inf")].min())/2;
+            # freqs[freqs == -float("Inf")] = -1/self.temperature
+            # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
+            torch.nn.init.uniform_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
-        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
+        self.dustbin_scores_im = nn.Parameter(torch.ones(1, 1, 1));
+        self.dustbin_scores_both = nn.Parameter(torch.ones(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;

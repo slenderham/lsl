@@ -313,6 +313,7 @@ if __name__ == "__main__":
         slot_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
         params_to_optimize.extend(slot_to_lang_matching.parameters())
         models_to_save.append(slot_to_lang_matching)
+
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -322,6 +323,8 @@ if __name__ == "__main__":
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
+        params_to_optimize.extend(hype_loss.parameters())
+        models_to_save.append(hype_loss)
     elif args.aux_task=='matching':
         hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device);
         params_to_optimize.extend(hype_loss.parameters())

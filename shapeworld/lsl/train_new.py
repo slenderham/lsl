@@ -364,6 +364,8 @@ if __name__ == "__main__":
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train();
+            if (args.freeze_slots and isinstance(m, SANet)):
+                m.eval();
 
         pred_loss_total = 0;
         aux_loss_total = 0;

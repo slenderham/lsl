@@ -577,7 +577,7 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None, num_iters = 5):
+    def forward(self, inputs, num_slots = None, num_iters = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         n_it = num_iters if num_iters is not None else self.iters
@@ -713,15 +713,7 @@ class ImagePositionalEmbedding(nn.Module):
         y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width);
         y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width);
 
-        self.coords = torch.cat([
-            x_coord_pos,
-            x_coord_neg,
-            y_coord_pos,
-            y_coord_neg
-        ], dim=0).unsqueeze(0);
-
-        if torch.cuda.is_available():
-            self.coords = self.coords.cuda();
+        self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0));
 
         self.pos_emb = nn.Conv2d(4, hidden_size, 1);
 
@@ -831,7 +823,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=10, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];

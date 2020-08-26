@@ -50,7 +50,7 @@ if __name__ == "__main__":
                         help='If True, freeze slots.');
     parser.add_argument('--hypo_model',
                         choices=['uni_gru, bi_gru, transformer'],
-                        default='bi_gru',
+                        default='transformer',
                         help='Which language model to use for ')
     parser.add_argument('--max_train',
                         type=int,

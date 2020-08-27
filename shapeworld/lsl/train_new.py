@@ -603,8 +603,8 @@ if __name__ == "__main__":
                     non_pad_total = (hint_seq_2d!=pad_index).float().sum()-hyp_batch_size; # total number of tokens, len-1 for each sample
                     aux_metric_meter.update(hypo_loss.item(), non_pad_total.item(), raw_scores=None);
                 elif args.aux_task=='matching':
-                    if (args.hypo_model=='transformer'):
-                        hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
+                    if ('transformer' in args.hypo_model):
+                        hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index); 
                     else:
                         hint_rep = hint_model(hint_seq, hint_length); 
                     examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);

@@ -156,24 +156,31 @@ class TextRep(nn.Module):
         return hidden
 
 class TextRepTransformer(nn.Module):
-    def __init__(self, embedding_module, hidden_size):
+    def __init__(self, embedding_module, hidden_size, bidirectional=True):
         super(TextRepTransformer, self).__init__()
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
+        if not bidirectional:
+            self.register_buffer("mask", torch.tril(torch.ones(16, 16))<0.5)
+        else:
+            self.mask = None;
 
-    def forward(self, seq, src_key_padding_mask):
+    def forward(self, seq, seq_len, src_key_padding_mask):
         batch_size = seq.size(0)
 
         # reorder from (B,L,D) to (L,B,D)
         seq = seq.transpose(0, 1)
+        max_len = seq_len.max();
 
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask);
+        hidden = self.model(embed_seq, \
+                            src_key_padding_mask=src_key_padding_mask,\
+                            mask=self.mask[:max_len, :max_len]);
 
         # reorder back to (B,L,D)
         hidden = hidden.transpose(0, 1)
@@ -823,26 +830,26 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
         if (comparison=='im_lang'):
             self.base_scorer = CosineScorer(temperature=self.temperature);
-            # self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
-            # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
-            # print([(idx_to_word[i], freq.get(idx_to_word[i], 0.0)*1.0) for i in range(len(idx_to_word))])
-            # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
-            # freqs = torch.tensor(freqs);
-            # freqs = torch.log(freqs/(freqs.sum()));
-            # freqs -= freqs[freqs != -float("Inf")].min();
-            # freqs /= freqs[freqs != -float("Inf")].max();
-            # freqs = freqs*2-1
-            # freqs[freqs == -float("Inf")] = 1/self.temperature
-            # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
+            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
+            freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
+            assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
+            freqs = torch.tensor(freqs);
+            freqs = torch.log(freqs/(freqs.sum()));
+            freqs -= freqs[freqs != -float("Inf")].min();
+            freqs /= freqs[freqs != -float("Inf")].max();
+            freqs = freqs*2-1
+            freqs[freqs == -float("Inf")] = 1/self.temperature
+            self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
             # torch.nn.init.uniform_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
+        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
         self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;
@@ -858,16 +865,18 @@ class SinkhornScorer(Scorer):
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False);
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}";
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1); # the similarity of each image to special language token is -inf
-        # y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
+        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1); # the similarity of each image to special language token is -inf
+        y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2); # append dustbin dimension as FALSE
         word_idx = word_idx.repeat(n*n_ex, 1);
-        matching, scores = self.log_optimal_transport(scores, y_mask, self.iters);
-        assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"{matching.shape}";
+        matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
+                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters);
+        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
         scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
-        matching = matching.reshape(n*n_ex, n, x.shape[1], y.shape[1])
+        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
         return matching, scores;
     
-    def log_optimal_transport(self, scores, scores_mask, iters: int):
+    def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -875,22 +884,24 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores);
         ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1; # -> batch size
 
-        # assert(alpha_lang.shape==(b, n, 1)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
-        # bins = alpha_lang.transpose(1, 2)
+        assert(alpha_lang.shape==(b, n, 1)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
+        bins0 = alpha_img.expand(b, m, 1)
+        bins1 = alpha_lang.transpose(1, 2)
+        alpha = alpha_both.expand(b, 1, 1)
 
-        couplings = scores
+        couplings = torch.cat([torch.cat([scores, bins0], -1),
+                            torch.cat([bins1, alpha], -1)], 1)
         mask_val = -1e6
         couplings = couplings.masked_fill(scores_mask, mask_val);
         
         norm = - (ms + ns).log().unsqueeze(-1); # --> batch size x 1
-        # log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
-        log_mu = norm.expand(b, m)
-        log_nu = norm.expand(b, n); # batch size x num_obj_y+1
+        log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
+        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1);
         Z = Z.exp() 
-        return Z, (couplings*Z).sum(dim=(1,2))
+        return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu;

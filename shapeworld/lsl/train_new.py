@@ -49,8 +49,8 @@ if __name__ == "__main__":
                         action='store_true',
                         help='If True, freeze slots.');
     parser.add_argument('--hypo_model',
-                        choices=['uni_gru, bi_gru, transformer'],
-                        default='transformer',
+                        choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer'],
+                        default='bi_transformer',
                         help='Which language model to use for ')
     parser.add_argument('--max_train',
                         type=int,
@@ -312,7 +312,8 @@ if __name__ == "__main__":
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False),
                         'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True),
-                        'transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size)
+                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False),
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True)
                      }[args.hypo_model];
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
@@ -476,8 +477,8 @@ if __name__ == "__main__":
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc'];
             elif args.aux_task=='matching':
-                if (args.hypo_model=='transformer'):
-                    hint_rep = hint_model(hint_seq, hint_seq==pad_index); 
+                if ('transformer' in args.hypo_model):
+                    hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index); 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);

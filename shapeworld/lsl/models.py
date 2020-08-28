@@ -928,7 +928,7 @@ class SinkhornScorer(Scorer):
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1);
         Z = Z.exp() 
-        return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
+        return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu;

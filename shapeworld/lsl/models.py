@@ -158,8 +158,8 @@ class TextRep(nn.Module):
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size, bidirectional=True):
         super(TextRepTransformer, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
@@ -731,6 +731,29 @@ class ImagePositionalEmbedding(nn.Module):
     def forward(self, x):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords);
+
+class RelationalNet(nn.Module):
+    def __init__(self, in_dim, out_dim, append=True):
+        super(RelationalNet, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(2*in_dim, out_dim),
+            nn.ReLU(),
+            nn.Linear(out_dim, out_dim)
+        );
+        self.append = append;
+
+    def forward(self, x):
+        b, n_s, h = x.shape;
+        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. 1, n_s, h
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
+        x_j = x_j.expand(b, n_s, n_s, h)  # (64x25x25x26+18)
+        x_full = torch.cat([x_i, x_j], dim=3);
+        x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
+        if self.append:
+            return torch.cat([x, x_full], dim=1)
+        else:
+            return x_full;
 """
 Similarity Scores
 """
@@ -834,7 +857,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=50, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=50, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
@@ -850,7 +873,7 @@ class SinkhornScorer(Scorer):
             # freqs = freqs*0.2-0.1
             # freqs[freqs == -float("Inf")] = 1
             # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
-            torch.nn.init.constant_(self.dustbin_scores_lang.weight, -1)
+            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
@@ -1082,8 +1105,8 @@ class SetCriterion(nn.Module):
 class TransformerAgg(nn.Module):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
 
     def forward(self, x, y):

@@ -23,7 +23,7 @@ from utils import (
 from datasets import ShapeWorld, extract_features, extract_objects, extract_objects_and_positions
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN, COLORS, SHAPES
 from models import ImageRep, TextRep, TextProposalWithAttn, ExWrapper, Identity, TextRepTransformer, TextProposalTransformer
-from models import SANet
+from models import SANet, RelationalNet
 from models import DotPScorer, BilinearScorer, CosineScorer, MLP, SinkhornScorer, SetCriterion, TransformerAgg
 from vision import Conv4NP, ResNet18, Conv4NP
 from loss import ContrastiveLoss
@@ -323,6 +323,10 @@ if __name__ == "__main__":
         params_to_optimize.extend(slot_to_lang_matching.parameters())
         models_to_save.append(slot_to_lang_matching)
 
+        image_relation_model = RelationalNet(args.hidden_size, args.hidden_size, append=True).to(device);
+        params_to_optimize.extend(image_relation_model.parameters())
+        models_to_save.append(image_relation_model)
+
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -482,13 +486,16 @@ if __name__ == "__main__":
                 else:
                     hint_rep = hint_model(hint_seq, hint_length); 
                 examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                examples_full = image_relation_model(examples_slot);
+                matching, scores = hype_loss.score(x=examples_full, y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
                     ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
+                    
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
+                    ax.set_aspect('auto')
                     plt.show()
                 
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)

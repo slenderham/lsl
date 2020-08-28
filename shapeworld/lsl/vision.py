@@ -117,7 +117,6 @@ class Conv2d_fw(nn.Conv2d):  # used in MAML to forward input with fast weight
 
         return out
 
-
 # used in MAML to forward input with fast weight
 class BatchNorm2d_fw(nn.BatchNorm2d):
     def __init__(self, num_features):
@@ -147,7 +146,6 @@ class BatchNorm2d_fw(nn.BatchNorm2d):
                                training=True,
                                momentum=1)
         return out
-
 
 # Simple Conv Block
 class ConvBlock(nn.Module):
@@ -216,7 +214,6 @@ class ConvBlockPosAware(nn.Module):
         ], dim=1);
         out = self.trunk(x)
         return out
-
 
 # Simple ResNet Block
 class SimpleBlock(nn.Module):
@@ -299,7 +296,6 @@ class SimpleBlock(nn.Module):
         out = out + short_out
         out = self.relu2(out)
         return out
-
 
 # Bottleneck block
 class BottleneckBlock(nn.Module):

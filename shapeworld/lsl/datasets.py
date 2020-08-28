@@ -406,7 +406,7 @@ class ShapeWorld(data.Dataset):
             i2w[len(w2i)] = w
             w2i[w] = len(w2i)
 
-        assert len(w2i) == len(i2w)
+        assert len(w2i) == len(i2w) == len(w2c)+len(special_tokens)
         vocab = dict(w2i=w2i, i2w=i2w, w2c=w2c)
         self.vocab = vocab
 

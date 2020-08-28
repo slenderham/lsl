@@ -834,12 +834,12 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=50, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
         if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=self.temperature);
+            self.base_scorer = CosineScorer(temperature=1);
             self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
             # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
             # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
@@ -847,14 +847,14 @@ class SinkhornScorer(Scorer):
             # freqs = torch.log(freqs/(freqs.sum()));
             # freqs -= freqs[freqs != -float("Inf")].min();
             # freqs /= freqs[freqs != -float("Inf")].max();
-            # freqs = freqs*2-1
-            # freqs[freqs == -float("Inf")] = 1/self.temperature
+            # freqs = freqs*0.2-0.1
+            # freqs[freqs == -float("Inf")] = 1
             # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1));
-            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
+            torch.nn.init.constant_(self.dustbin_scores_lang.weight, -1)
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
-        self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
+        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1);
         self.iters = iters;
         self.reg = reg;
 
@@ -902,10 +902,10 @@ class SinkhornScorer(Scorer):
         log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1); # batch size x num_obj_x+1
         log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1); # batch size x num_obj_y+1
         log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val);
-        Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
+        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1);
         Z = Z.exp() 
-        return Z, (couplings*Z).sum(dim=(1,2))
+        return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu;
@@ -927,6 +927,7 @@ class SinkhornScorer(Scorer):
         for i in range(iters):
             u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
             v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
+            v = v.masked_fill(scores_mask[:,0,:], -1e6);
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):

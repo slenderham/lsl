@@ -346,7 +346,7 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
-    models_to_save.append(optimizer);
+    # models_to_save.append(optimizer);
     # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
     # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
 

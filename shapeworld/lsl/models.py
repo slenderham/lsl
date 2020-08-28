@@ -834,12 +834,12 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=50, reg=1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=10, reg=1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
         if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=1);
+            self.base_scorer = CosineScorer(temperature=self.temperature);
             self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1); # each word token is given a dustbin score
             # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
             # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
@@ -854,8 +854,7 @@ class SinkhornScorer(Scorer):
         else:
             self.base_scorer = DotPScorer();
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1));
-        self.dustbin_scores_both = nn.Parameter(torch.zeros(1, 1, 1));
-        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1);
+        self.clip_dustbin = lambda x: torch.clamp(x, -1/self.temperature, 1/self.temperature);
         self.iters = iters;
         self.reg = reg;
 
@@ -875,7 +874,7 @@ class SinkhornScorer(Scorer):
         word_idx = word_idx.repeat(n*n_ex, 1);
         matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                self.clip_dustbin(self.dustbin_scores_both), y_mask, self.iters);
+                                                self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
         scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
@@ -906,7 +905,7 @@ class SinkhornScorer(Scorer):
         Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1);
         Z = Z.exp() 
-        return Z, (couplings*Z).sum(dim=(1,2))/self.temperature
+        return Z, (couplings*Z).sum(dim=(1,2))
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu;

@@ -1108,7 +1108,6 @@ class TransformerAgg(Scorer):
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
-        self.gate = nn.Linear(hidden_size, hidden_size);
 
     def score(self, x, y):
         b, n_ex, num_rel, h = x.shape;
@@ -1119,7 +1118,6 @@ class TransformerAgg(Scorer):
         x = x.transpose(0, 1);
         y = y.transpose(0, 1);
         whole_rep = self.model(torch.cat([x, y], dim=0));
-        whole_rep = torch.sigmoid(self.gate(whole_rep))*whole_rep;
         assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)

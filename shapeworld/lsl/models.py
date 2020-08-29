@@ -745,9 +745,9 @@ class RelationalNet(nn.Module):
     def forward(self, x):
         b, n_s, h = x.shape;
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. 1, n_s, h
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # (64x25x25x26+18)
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, n_s, h
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
         x_full = torch.cat([x_i, x_j], dim=3);
         x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
         if self.append:
@@ -1121,4 +1121,4 @@ class TransformerAgg(Scorer):
         assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return (x.mean(1)*y.mean(1)).sum(1);
+        return (x.mean(1)*y.mean(1)).mean(1);

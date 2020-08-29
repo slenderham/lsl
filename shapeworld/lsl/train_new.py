@@ -272,12 +272,12 @@ if __name__ == "__main__":
         labels_to_idx = train_dataset.label2idx
 
     ''' vision '''
-    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));
+    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=2, slot_model=('slot_mlp' if args.aux_task=='caption_image' else 'slot_attn'));
     image_part_model = ExWrapper(backbone_model, freeze_model=args.freeze_slots).to(device);
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_relation_model = RelationalNet(64, args.hidden_size, append=False).to(device);
+    image_relation_model = RelationalNet(2, args.hidden_size, append=False).to(device);
     params_to_optimize.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
 
@@ -356,8 +356,6 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m, sd in zip(models_to_save, sds):
-            print(m)
-            print(sd.keys())
             print(m.load_state_dict(sd));
         print("loaded checkpoint");
 
@@ -365,7 +363,7 @@ if __name__ == "__main__":
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train();
-            if (args.freeze_slots and isinstance(m, SANet)):
+            if (args.freeze_slots and (isinstance(m, ExWrapper) or isinstance(m, RelationalNet))):
                 m.eval();
 
         pred_loss_total = 0;

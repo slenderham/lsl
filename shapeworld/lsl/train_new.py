@@ -364,6 +364,7 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.train();
             if (args.freeze_slots and (isinstance(m, ExWrapper) or isinstance(m, RelationalNet))):
+                print(m);
                 m.eval();
 
         pred_loss_total = 0;

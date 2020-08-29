@@ -1121,4 +1121,4 @@ class TransformerAgg(Scorer):
         assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return (x.mean(1)*y.mean(1)).mean(1);
+        return (x.mean(1)*y.mean(1)).sum(1);

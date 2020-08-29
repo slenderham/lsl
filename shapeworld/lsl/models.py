@@ -1102,23 +1102,25 @@ class SetCriterion(nn.Module):
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))];
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
-class TransformerAgg(nn.Module):
+class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=hidden_size, dropout=0.0);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
+        self.gate = nn.Linear(hidden_size, hidden_size);
 
-    def forward(self, x, y):
-        b, n_ex, num_slots, h = x.shape;
-        assert(y.shape==(b, num_slots, h));
+    def score(self, x, y):
+        b, n_ex, num_rel, h = x.shape;
+        assert(y.shape==(b, num_rel, h));
         x = x.flatten(1, 2)
         x += self.image_id[:,0:1,:];
         y += self.image_id[:,1:2,:];
         x = x.transpose(0, 1);
         y = y.transpose(0, 1);
         whole_rep = self.model(torch.cat([x, y], dim=0));
-        assert(whole_rep.shape==(num_slots*(n_ex+1), b, h));
-        x = whole_rep[:n_ex*num_slots].transpose(0, 1).reshape(b, n_ex, num_slots, h)
-        y = whole_rep[n_ex*num_slots:].transpose(0, 1)
-        return x, y;
+        whole_rep = torch.sigmoid(self.gate(whole_rep))*whole_rep;
+        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
+        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
+        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
+        return (x.mean(1)*y.mean(1)).sum(1);

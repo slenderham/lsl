@@ -42,8 +42,8 @@ if __name__ == "__main__":
                         default=6,
                         help='Number of slots')
     parser.add_argument('--comparison',
-                        choices=['dotp', 'cosine'],
-                        default='dotp',
+                        choices=['dotp', 'cosine', 'transformer'],
+                        default='transformer',
                         help='How to compare support to query reps')
     parser.add_argument('--freeze_slots',
                         action='store_true',
@@ -277,14 +277,19 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_whole_model = TransformerAgg(64).to(device);
-    params_to_optimize.extend(image_whole_model.parameters());
-    models_to_save.append(image_whole_model);
+    image_relation_model = RelationalNet(64, args.hidden_size, append=False).to(device);
+    params_to_optimize.extend(image_relation_model.parameters())
+    models_to_save.append(image_relation_model)
+
+    # image_whole_model = TransformerAgg(64).to(device);
+    # params_to_optimize.extend(image_whole_model.parameters());
+    # models_to_save.append(image_whole_model);
 
     ''' scorer '''
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
+        'transformer': TransformerAgg(args.hidden_size)
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -318,15 +323,6 @@ if __name__ == "__main__":
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
-        
-        slot_to_lang_matching = MLP(64, args.hidden_size, args.hidden_size).to(device);
-        params_to_optimize.extend(slot_to_lang_matching.parameters())
-        models_to_save.append(slot_to_lang_matching)
-
-        image_relation_model = RelationalNet(args.hidden_size, args.hidden_size, append=True).to(device);
-        params_to_optimize.extend(image_relation_model.parameters())
-        models_to_save.append(image_relation_model)
-
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -425,8 +421,9 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            examples_whole, image_whole = image_whole_model(examples_slot, image_slot);
-            score = im_im_scorer_model.score(examples_whole.mean(dim=(1,2)), image_whole.mean(dim=1)).squeeze();
+            image_full = image_relation_model(image_slot)
+            examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
+            score = im_im_scorer_model.score(examples_full, image_full).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -485,16 +482,17 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index); 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length); 
-                examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                examples_full = image_relation_model(examples_slot);
-                matching, scores = hype_loss.score(x=examples_full, y=hint_rep, word_idx=hint_seq, \
+                matching, scores = hype_loss.score(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
                     ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
-                    
+                    ylabels = list(range(args.num_slots))
+                    ylabels = [str(y1)+' x '+str(y2) if y1!=y2 else str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
+                    ax.set_yticks(np.arange(len(ylabels)))
+                    ax.set_yticklabels(ylabels);
                     ax.set_aspect('auto')
                     plt.show()
                 
@@ -576,8 +574,9 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
                 examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-                examples_whole, image_whole = image_whole_model(examples_slot, image_slot);
-                score = im_im_scorer_model.score(examples_whole.mean(dim=(1,2)), image_whole.mean(dim=1)).squeeze();
+                image_full = image_relation_model(image_slot)
+                examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
+                score = im_im_scorer_model.score(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);
@@ -614,8 +613,7 @@ if __name__ == "__main__":
                         hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index); 
                     else:
                         hint_rep = hint_model(hint_seq, hint_length); 
-                    examples_slot = slot_to_lang_matching(examples_slot).flatten(0, 1);
-                    matching, scores = hype_loss.score(x=examples_slot, y=hint_rep, word_idx=hint_seq, \
+                    matching, scores = hype_loss.score(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                         y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                     pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
                     pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);

@@ -289,7 +289,7 @@ if __name__ == "__main__":
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
-        'transformer': TransformerAgg(args.hidden_size)
+        'transformer': TransformerAgg(64)
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -363,8 +363,7 @@ if __name__ == "__main__":
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train();
-            if (args.freeze_slots and (isinstance(m, ExWrapper) or isinstance(m, RelationalNet))):
-                print(m);
+            if (args.freeze_slots and (isinstance(m, ExWrapper))):
                 m.eval();
 
         pred_loss_total = 0;
@@ -422,7 +421,7 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot)
             examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
-            score = im_im_scorer_model.score(examples_full, image_full).squeeze();
+            score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -575,7 +574,7 @@ if __name__ == "__main__":
                 examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot)
                 examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
-                score = im_im_scorer_model.score(examples_full, image_full).squeeze();
+                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);

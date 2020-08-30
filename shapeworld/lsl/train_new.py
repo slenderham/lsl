@@ -642,7 +642,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch, 1);
+        train_loss = train(epoch);
         if args.skip_eval:
             if args.save_checkpoint:
                 save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);

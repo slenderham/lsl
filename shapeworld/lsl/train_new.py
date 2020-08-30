@@ -675,7 +675,7 @@ if __name__ == "__main__":
             best_test_acc_ci = test_acc_ci
 
         if args.save_checkpoint:
-            save_checkpoint([m.state_dict() for m in models_to_save], is_best=is_best_epoch, folder=args.exp_dir);
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

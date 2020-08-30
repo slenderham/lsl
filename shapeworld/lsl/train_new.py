@@ -577,7 +577,7 @@ if __name__ == "__main__":
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
-                score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
+                score = im_im_scorer_model.score(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);

@@ -277,7 +277,8 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    image_relation_model = RelationalNet(64, args.hidden_size, append=False).to(device);
+    relation_backbone = RelationalNet(64, args.hidden_size, append=False).to(device);
+    image_relation_model = ExWrapper(relation_backbone, freeze_model=args.freeze_slots).to(device);
     params_to_optimize.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
 
@@ -289,7 +290,7 @@ if __name__ == "__main__":
     im_im_scorer_model = {
         'dotp': DotPScorer(),
         'cosine': CosineScorer(temperature=1),
-        'transformer': TransformerAgg(64)
+        'transformer': TransformerAgg(args.hidden_size)
     }[args.comparison]
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_optimize.extend(im_im_scorer_model.parameters())
@@ -323,6 +324,7 @@ if __name__ == "__main__":
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
         models_to_save.append(hint_model)
+    
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -355,8 +357,9 @@ if __name__ == "__main__":
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
-        for m, sd in zip(models_to_save, sds):
-            print(m.load_state_dict(sd));
+        for m in models_to_save:
+            print(repr(m))
+            print(m.load_state_dict(sds[repr(m)]));
         print("loaded checkpoint");
 
     def train(epoch, n_steps=100):
@@ -417,11 +420,11 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
-            examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-            image_full = image_relation_model(image_slot)
-            examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
-            score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
+            image_slot = image_part_model(image, is_ex=False, visualize_attns=False); # --> N x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
+            image_full = image_relation_model(image_slot, is_ex=False)
+            examples_full = image_relation_model(examples_slot, is_ex=True)
+            score = im_im_scorer_model.score(examples_full, image_full).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
             main_acc += ((score>0).long()==label).float().mean()
@@ -570,10 +573,10 @@ if __name__ == "__main__":
                     hint_seq = hint_seq[:, :max_hint_length]
 
                 # Learn representations of images and examples
-                image_slot = image_part_model(image, visualize_attns=False); # --> N x n_slot x C
-                examples_slot = image_part_model(examples, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
-                image_full = image_relation_model(image_slot)
-                examples_full = image_relation_model(examples_slot.flatten(0, 1)).reshape(batch_size, n_ex, args.num_slots**2, -1)
+                image_slot = image_part_model(image, is_ex=False, visualize_attns=False); # --> N x n_slot x C
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
+                image_full = image_relation_model(image_slot, is_ex=False)
+                examples_full = image_relation_model(examples_slot, is_ex=True)
                 score = im_im_scorer_model.score(examples_slot, image_slot).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
@@ -617,7 +620,7 @@ if __name__ == "__main__":
                     pos = scores.masked_select(pos_mask).reshape(batch_size*n_ex, 1);
                     neg = scores.masked_select(~pos_mask).reshape(batch_size*n_ex, batch_size-1);
                     scores_reshaped = torch.cat([pos, neg], dim=1);
-                    hypo_loss = F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+                    hypo_loss = -F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
 
                     aux_metric_meter.update(hypo_loss.item(), batch_size*n_ex, raw_scores=None);
                 else:
@@ -639,10 +642,10 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch);
+        train_loss = train(epoch, 1);
         if args.skip_eval:
             if args.save_checkpoint:
-                save_checkpoint([m.state_dict() for m in models_to_save], is_best=True, folder=args.exp_dir);
+                save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);
             continue
         train_acc, train_aux_metric, _ = test(epoch, 'train')
         val_acc, val_aux_metric, _ = test(epoch, 'val')

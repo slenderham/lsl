@@ -28,9 +28,9 @@ class ExWrapper(nn.Module):
         self.model = model
         self.freeze_model = freeze_model; # whether or not to allow gradient to backprop through this step
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, is_ex, **kwargs):
         batch_size = x.shape[0]
-        if len(x.shape) == 5:
+        if is_ex:
             n_ex = x.shape[1]
             img_dim = x.shape[2:]
             # Flatten out examples first
@@ -40,7 +40,7 @@ class ExWrapper(nn.Module):
 
         x_enc = self.model(x_flat, **kwargs)
 
-        if len(x.shape) == 5:
+        if is_ex:
             x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
 
         if (self.freeze_model):
@@ -746,7 +746,7 @@ class RelationalNet(nn.Module):
         b, n_s, h = x.shape;
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
         x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, n_s, h
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
         x_full = torch.cat([x_i, x_j], dim=3);
         x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
@@ -857,7 +857,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=50, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq, iters=10, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__();
         assert(comparison in ['im_im', 'im_lang']);
         self.temperature = kwargs['temperature'];
@@ -947,6 +947,7 @@ class SinkhornScorer(Scorer):
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
+        v = v.masked_fill(scores_mask[:,0,:], -1e6);
         for i in range(iters):
             u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
             v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
@@ -1105,8 +1106,8 @@ class SetCriterion(nn.Module):
 class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
 
     def score(self, x, y):

@@ -50,7 +50,7 @@ if __name__ == "__main__":
                         help='If True, freeze slots.');
     parser.add_argument('--hypo_model',
                         choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer'],
-                        default='bi_transformer',
+                        default='bi_gru',
                         help='Which language model to use for ')
     parser.add_argument('--max_train',
                         type=int,
@@ -354,11 +354,10 @@ if __name__ == "__main__":
 
     print(sum([p.numel() for p in params_to_optimize]));
 
-    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
-        ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
+    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint_rel_tf.pth.tar')):
+        ckpt_path = os.path.join(args.exp_dir, 'checkpoint_rel_tf.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m in models_to_save:
-            print(repr(m))
             print(m.load_state_dict(sds[repr(m)]));
         print("loaded checkpoint");
 
@@ -487,7 +486,7 @@ if __name__ == "__main__":
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
                     ylabels = [str(y1)+' x '+str(y2) if y1!=y2 else str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
@@ -495,6 +494,7 @@ if __name__ == "__main__":
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels);
                     ax.set_aspect('auto')
+                    plt.colorbar(im, ax=ax)
                     plt.show()
                 
                 pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*batch_size))>0.5).to(device)
@@ -642,7 +642,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch);
+        train_loss = train(epoch, 1);
         if args.skip_eval:
             if args.save_checkpoint:
                 save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);

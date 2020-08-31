@@ -576,8 +576,6 @@ class SlotAttention(nn.Module):
 
         self.gru = nn.GRUCell(dim, dim)
 
-        hidden_dim = max(dim, hidden_dim)
-
         self.mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
             nn.ReLU(inplace = True),
@@ -594,8 +592,8 @@ class SlotAttention(nn.Module):
         n_it = num_iters if num_iters is not None else self.iters
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = self.slots_sigma.expand(b, n_s, -1)
-        slots = torch.normal(mu, sigma)
+        sigma = self.slots_sigma.expand(b, n_s, -1);
+        slots = mu + torch.randn_like(mu)*sigma;
 
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs)
@@ -725,7 +723,6 @@ class ImagePositionalEmbedding(nn.Module):
         y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width);
 
         self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0));
-
         self.pos_emb = nn.Conv2d(4, hidden_size, 1);
 
     def forward(self, x):

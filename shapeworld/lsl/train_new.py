@@ -277,7 +277,7 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    relation_backbone = RelationalNet(64, args.hidden_size, append=False).to(device);
+    relation_backbone = RelationalNet(64, args.hidden_size, 4, append=False).to(device);
     image_relation_model = ExWrapper(relation_backbone, freeze_model=args.freeze_slots).to(device);
     params_to_optimize.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)

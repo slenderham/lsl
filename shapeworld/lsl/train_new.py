@@ -277,7 +277,7 @@ if __name__ == "__main__":
     params_to_optimize = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
-    relation_backbone = RelationalNet(64, args.hidden_size, append=False).to(device);
+    relation_backbone = RelationalNet(64, args.hidden_size, 4, append=False).to(device);
     image_relation_model = ExWrapper(relation_backbone, freeze_model=args.freeze_slots).to(device);
     params_to_optimize.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
@@ -354,8 +354,8 @@ if __name__ == "__main__":
 
     print(sum([p.numel() for p in params_to_optimize]));
 
-    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint_rel_tf.pth.tar')):
-        ckpt_path = os.path.join(args.exp_dir, 'checkpoint_rel_tf.pth.tar');
+    if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
+        ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m in models_to_save:
             print(m.load_state_dict(sds[repr(m)]));
@@ -642,7 +642,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch, 1);
+        train_loss = train(epoch);
         if args.skip_eval:
             if args.save_checkpoint:
                 save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);

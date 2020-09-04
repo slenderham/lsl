@@ -730,13 +730,12 @@ class ImagePositionalEmbedding(nn.Module):
         return x+self.pos_emb(self.coords);
 
 class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim, append=True):
+    def __init__(self, in_dim, out_dim, bil_dim, append=True):
         super(RelationalNet, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(2*in_dim, out_dim),
-            nn.ReLU(),
-            nn.Linear(out_dim, out_dim)
-        );
+        self.concatW = nn.Linear(2*in_dim, out_dim);
+        self.bilinearV = nn.Bilinear(in_dim, in_dim, bil_dim);
+        self.rel_emb = nn.Linear(bil_dim, out_dim);
+        self.u = nn.Linear(out_dim, out_dim);
         self.append = append;
 
     def forward(self, x):
@@ -745,8 +744,10 @@ class RelationalNet(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
-        x_full = torch.cat([x_i, x_j], dim=3);
-        x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
+        x_cat = torch.cat([x_i, x_j], dim=3);
+        x_cat = self.concatW(x_cat);
+        x_bil = self.rel_emb(F.softmax(self.bilinearV(x_i.contiguous(), x_j.contiguous()), dim=-1));
+        x_full = self.u(torch.relu(x_bil+x_cat)).flatten(1, 2);
         if self.append:
             return torch.cat([x, x_full], dim=1)
         else:

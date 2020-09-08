@@ -12,7 +12,7 @@ python lsl/train_new.py --cuda \
     --aux_task matching_slot\
     --save_checkpoint\
     --freeze_slots\
-    --data_dir /data/cw9951/easy_sw
+    --data_dir /data/cw9951/easy_sw\
     exp/matching_slot
 
 python lsl/train_new.py --cuda \
@@ -26,7 +26,7 @@ python lsl/train_new.py --cuda \
     --hypo_model bi_gru\
     --aux_task matching_image\
     --freeze_slots\
-    --data_dir /data/cw9951/easy_sw
+    --data_dir /data/cw9951/easy_sw\
     exp/matching_image
 
 python lsl/train_new.py --cuda \
@@ -41,7 +41,7 @@ python lsl/train_new.py --cuda \
     --hypo_model uni_gru\
     --aux_task caption_slot\
     --freeze_slots\
-    --data_dir /data/cw9951/easy_sw
+    --data_dir /data/cw9951/easy_sw\
     exp/caption_slot
 
 python lsl/train_new.py --cuda \
@@ -56,6 +56,6 @@ python lsl/train_new.py --cuda \
     --aux_task caption_image\
     --save_checkpoint\
     --freeze_slots\
-    --data_dir /data/cw9951/easy_sw
+    --data_dir /data/cw9951/easy_sw\
     exp/caption_image
 

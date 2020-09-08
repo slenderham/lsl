@@ -278,7 +278,7 @@ if __name__ == "__main__":
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
-        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size));
+        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
     params_to_optimize.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
 

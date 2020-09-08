@@ -275,12 +275,13 @@ if __name__ == "__main__":
     if (args.use_relational_model and "_slot" in args.aux_task):
         relation_backbone = RelationalNet(64, args.hidden_size, 5, append=False).to(device);
         image_relation_model = ExWrapper(relation_backbone).to(device);
-        params_to_optimize.extend(image_relation_model.parameters())
-        models_to_save.append(image_relation_model)
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
         image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size));
+    params_to_optimize.extend(image_relation_model.parameters())
+    models_to_save.append(image_relation_model)
+
         # abuse of variable name here. This is just to project to the correct dimension
 
 

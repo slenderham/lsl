@@ -370,7 +370,7 @@ if __name__ == "__main__":
             print(m.load_state_dict(sds[repr(m)]));
         print("loaded checkpoint");
 
-    def pretrain(epoch, n_steps=1):
+    def pretrain(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train();
@@ -534,7 +534,7 @@ if __name__ == "__main__":
         print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc));
         return loss, metric
 
-    def finetune(epoch, n_steps=1):
+    def finetune(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train();

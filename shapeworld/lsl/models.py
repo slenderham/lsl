@@ -23,7 +23,7 @@ class ExWrapper(nn.Module):
     (batch_size, n_ex, *img_dims)
     """
 
-    def __init__(self, model, freeze_model):
+    def __init__(self, model, freeze_model=False):
         super(ExWrapper, self).__init__()
         self.model = model
         self.freeze_model = freeze_model; # whether or not to allow gradient to backprop through this step
@@ -75,8 +75,9 @@ class ImageRep(nn.Module):
             self.model = nn.Identity();
         else:
             self.model = nn.Sequential(
-                nn.Linear(self.backbone.final_feat_dim, hidden_size), nn.ReLU(),
-                nn.Linear(hidden_size, hidden_size))
+                            nn.Linear(self.backbone.final_feat_dim, hidden_size), 
+                            nn.ReLU(),
+                            nn.Linear(hidden_size, hidden_size))
 
     def forward(self, x):
         x_enc = self.backbone(x)
@@ -116,12 +117,13 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module, hidden_size, bidirectional=False):
+    def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=False):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.bidirectional = bidirectional
         self.hidden_size = hidden_size
+        self.return_agg = return_agg
         self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional);
 
     def forward(self, seq, length):
@@ -142,27 +144,36 @@ class TextRep(nn.Module):
             sorted_lengths.data.tolist()
             if batch_size > 1 else length.data.tolist())
 
-        hidden, _ = self.gru(packed); 
-        hidden, _ = rnn_utils.pad_packed_sequence(hidden)
+        hidden, final_hidden = self.gru(packed); 
 
-        if batch_size > 1:
-            _, reversed_idx = torch.sort(sorted_idx)
-            hidden = hidden[:,reversed_idx,:]
-        
-        hidden = hidden.transpose(0, 1)
-        if self.bidirectional:
-            hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2;
+        if self.return_agg:
+            if self.bidirectional:
+                hidden = (final_hidden[0]+hidden[0,:,:self.hidden_size])/2; # for forward layer, get final; for backward, get first
+            else:
+                hidden = final_hidden[0];
+            if batch_size > 1:
+                _, reversed_idx = torch.sort(sorted_idx)
+                hidden = hidden[reversed_idx,:]
+        else:
+            hidden, _ = rnn_utils.pad_packed_sequence(hidden)
+            if batch_size > 1:
+                _, reversed_idx = torch.sort(sorted_idx)
+                hidden = hidden[:,reversed_idx,:]
+            hidden = hidden.transpose(0, 1)
+            if self.bidirectional:
+                hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2;
 
         return hidden
 
 class TextRepTransformer(nn.Module):
-    def __init__(self, embedding_module, hidden_size, bidirectional=True):
+    def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=True):
         super(TextRepTransformer, self).__init__()
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
+        self.return_agg = return_agg
         if not bidirectional:
             self.register_buffer("mask", torch.tril(torch.ones(16, 16))<0.5)
         else:
@@ -188,6 +199,9 @@ class TextRepTransformer(nn.Module):
 
         # reorder back to (B,L,D)
         hidden = hidden.transpose(0, 1)
+        
+        if (self.return_agg):
+            hidden = hidden[torch.arange(batch_size), seq_len-1, :]; # return last hidden state
 
         return hidden
 
@@ -532,13 +546,13 @@ class TextProposalTransformer(nn.Module):
         self.embedding_dim = embedding_module.embedding_dim
         self.vocab_size = embedding_module.num_embeddings
         decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0);
-        self.model = nn.TransformerDecoder(encoder_layer, num_layers=1);
+        self.model = nn.TransformerDecoder(decoder_layer, num_layers=1);
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16);
         self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size)
         self.hidden_size = hidden_size
         self.register_buffer("mask", torch.tril(torch.ones(16, 16)).view(1, 1, 16, 16)<0.5)
 
-    def forward(self, feats, seq, tgt_key_padding_mask):
+    def forward(self, feats, seq, length, tgt_key_padding_mask):
         # feats is from example images
         batch_size = seq.size(0)
         # reorder from (B,L,D) to (L,B,D)
@@ -547,6 +561,7 @@ class TextProposalTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
+        max_len = length.max()
         
         # shape = (seq_len, batch, hidden_dim)
         output = self.model(embed_seq, feats, \
@@ -626,60 +641,79 @@ class SlotAttention(nn.Module):
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn'):
         super(SANet, self).__init__()
-        assert(slot_model in ['slot_attn', 'slot_mlp']);
+        assert(slot_model in ['slot_attn', 'conv']);
         self.slot_model = slot_model;
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, dim, 3),
-            nn.ReLU(inplace=True),
-            nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 3),
-            nn.ReLU(inplace=True), 
-            nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 3),
-            nn.ReLU(inplace=True), 
-            nn.BatchNorm2d(dim),
-            nn.Conv2d(dim, dim, 3),
-            nn.ReLU(inplace=True),
-            nn.BatchNorm2d(dim),
-            ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
-        );
 
-        self.post_mlp = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, dim),
-            nn.ReLU(),
-            nn.Linear(dim, dim)
-        )
-
-        self.final_feat_dim=dim;
         self.iters = iters;
         self.num_slots = num_slots;
 
         if (slot_model=='slot_attn'):
-            self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
-        elif (slot_model=='slot_mlp'):
-            self.slot_mlp = nn.Sequential(
-                nn.Linear(64, 512),
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, dim, 3),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
+            );
+
+            self.post_mlp = nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, dim),
                 nn.ReLU(),
-                nn.Linear(512, 64),
-            ); # for the attentional decoder with attention over all image location. use 1x1 conv to balance (approximately) the number of params
+                nn.Linear(dim, dim)
+            )
+            self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+            self.final_feat_dim=dim;
+        elif (slot_model=='conv'):
+            final_size = im_size;
+            for i in range(4):
+                final_size = (final_size-1)//2+1
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                ImagePositionalEmbedding(final_size, final_size, dim),
+                nn.Flatten(),
+            );
+            self.final_feat_dim = final_size*final_size*dim
 
     def forward(self, img, **kwargs):
         visualize_attns=kwargs.get('visualize_attns', False);
         num_iters=kwargs.get('num_iters');
         num_slots=kwargs.get('num_slots');
-        x = self.encoder(img);
-        n, c, h, w = x.shape;
-        x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
-        x = self.post_mlp(x);
         if (self.slot_model=='slot_attn'):
+            x = self.encoder(img);
+            n, c, h, w = x.shape;
+            x = x.permute(0, 2, 3, 1).reshape(n, h*w, c);
+            x = self.post_mlp(x);
             x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots); # --> N * num slots * feature size
             if visualize_attns:
                 self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots));
         elif (self.slot_model=='slot_mlp'):
             x = self.slot_mlp(x);
             if visualize_attns:
-                plt.imshow(img[4].permute(1, 2, 0).detach().cpu());
+                plt.imshow(img[2].permute(1, 2, 0).detach().cpu());
+        elif (self.slot_model=='conv'):
+            x = self.encoder(img);
+            if visualize_attns:
+                plt.imshow(img[2].permute(1, 2, 0).detach().cpu());
         return x;
 
     def _visualize_attns(self, img, attns, num_iters, num_slots):
@@ -732,9 +766,9 @@ class ImagePositionalEmbedding(nn.Module):
 class RelationalNet(nn.Module):
     def __init__(self, in_dim, out_dim, bil_dim, append=True):
         super(RelationalNet, self).__init__()
-        self.concatW = nn.Linear(2*in_dim, out_dim);
+        self.concatW = nn.Linear(3*in_dim, out_dim);
         self.bilinearV = nn.Bilinear(in_dim, in_dim, bil_dim);
-        self.rel_emb = nn.Linear(bil_dim, out_dim);
+        self.rel_emb = nn.Linear(bil_dim, in_dim);
         self.u = nn.Linear(out_dim, out_dim);
         self.append = append;
 
@@ -744,14 +778,15 @@ class RelationalNet(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
-        x_cat = torch.cat([x_i, x_j], dim=3);
-        x_cat = self.concatW(x_cat);
         x_bil = self.rel_emb(F.softmax(self.bilinearV(x_i.contiguous(), x_j.contiguous()), dim=-1));
-        x_full = self.u(torch.relu(x_bil+x_cat)).flatten(1, 2);
+        x_cat = torch.cat([x_i, x_j, x_bil], dim=3);
+        x_cat = self.concatW(x_cat);
+        x_full = self.u(torch.relu(x_cat)).flatten(1, 2);
         if self.append:
             return torch.cat([x, x_full], dim=1)
         else:
             return x_full;
+
 """
 Similarity Scores
 """
@@ -899,7 +934,17 @@ class SinkhornScorer(Scorer):
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
         scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
-        return matching, scores;
+        
+        metric = {};
+        pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask).reshape(n*n_ex, 1);
+        neg = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1);
+        scores_reshaped = torch.cat([pos, neg], dim=1);
+        loss = -F.log_softmax(scores_reshaped, dim=1)[:,0].mean();
+        metric['part_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()
+        metric['pos_score'] = pos.mean().item();
+        metric['neg_score'] = neg.mean().item();
+        return matching, loss, metric;
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
@@ -1121,3 +1166,56 @@ class TransformerAgg(Scorer):
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
         return (x.mean(1)*y.mean(1)).sum(1);
+
+class ContrastiveLoss(Scorer):
+    """
+    Compute contrastive loss
+    """
+
+    def __init__(self, temperature=0.1):
+        super(ContrastiveLoss, self).__init__()
+        self.sim = CosineScorer(temperature);
+
+    def score(self, im, s):
+        # compute image-sentence score matrix
+
+        N = im.shape[0];
+        n_ex = im.shape[1];
+
+        scores_im_lang = self.sim.score_im_s(im, s); #--> N x N x n_ex
+        mask = torch.block_diag(*([torch.ones(n_ex, 1)]*N))
+        pos_mask = mask > .5;
+        neg_mask = ~pos_mask;
+        if torch.cuda.is_available():
+            pos_mask = pos_mask.cuda();
+            neg_mask = neg_mask.cuda();
+
+        positive_scores_im_lang = scores_im_lang.masked_select(pos_mask); # --> N X n_ex, positive pairs 
+        negative_scores_im_lang = scores_im_lang.masked_select(neg_mask); # --> (N-1) x N x n_ex, 
+        assert(positive_scores_im_lang.shape[0]==N*n_ex);
+        assert(negative_scores_im_lang.shape[0]==N*(N-1)*n_ex);
+
+        negative_scores_im_lang = negative_scores_im_lang.reshape(N*n_ex, N-1);
+
+        all_scores_im_lang_by_lang = torch.cat([positive_scores_im_lang.unsqueeze(1), negative_scores_im_lang], dim=1);
+
+        # normalize by hint dimension (push away negative hints from image) and/or normalize by image dimension (push away negative images from hint)
+        loss = -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean();
+
+        metric = {};
+        metric['pos_score'] = positive_scores_im_lang.mean().item();
+        metric['neg_score'] = negative_scores_im_lang.mean().item();
+        metric['part_acc'] = (torch.argmax(all_scores_im_lang_by_lang, dim=1)==0).float().mean().item();
+
+        return loss, metric;
+
+class MLPMeanScore(Scorer):
+    def __init__(self, input_dize, output_size):
+        super(MLPMeanScore, self).__init__();
+        self.mlp = MLP(input_dize, output_size, output_size);
+
+    def score(self, x, y):
+        x = self.mlp(x).mean(dim=(1));
+        y = self.mlp(y);
+        assert(x.shape==y.shape)
+        return (x*y).sum(dim=1)

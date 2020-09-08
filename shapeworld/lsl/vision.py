@@ -410,7 +410,6 @@ class ConvNet(nn.Module):
         out = self.trunk(x)
         return out
 
-
 class ConvNetNopool(nn.Module):
     # Relation net use a 4 layer conv with pooling in only first two layers,
     # else no pooling
@@ -595,8 +594,10 @@ def Conv6():
 def Conv4NP():
     return ConvNetNopool(4, flatten=True)
 
+
 def Conv4NPPosAware():
     return ConvNetNopoolPosAware(4, flatten=True);
+
 
 def Conv6NP():
     return ConvNetNopool(6)

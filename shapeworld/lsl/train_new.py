@@ -688,11 +688,6 @@ if __name__ == "__main__":
         metrics['test_acc'].append(test_acc)
         metrics['test_same_acc'].append(test_same_acc)
         metrics['test_acc_ci'].append(test_acc_ci)
-        metrics['train_aux_metric'].append(train_aux_metric)
-        metrics['val_aux_metric'].append(val_aux_metric)
-        metrics['test_aux_metric'].append(test_aux_metric)
-        metrics['val_same_aux_metric'].append(val_same_aux_metric)
-        metrics['test_same_aux_metric'].append(test_same_aux_metric)
 
         metrics = dict(metrics)
         # Assign best accs

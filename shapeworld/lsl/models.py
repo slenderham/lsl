@@ -16,6 +16,9 @@ from sklearn.metrics import f1_score
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))]);
 
+def normalize_feats(x):
+    return F.normalize(x, p=2, dim=-1);
+
 class ExWrapper(nn.Module):
     """
     Wrap around a model and allow training on examples

@@ -281,9 +281,7 @@ if __name__ == "__main__":
         image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
     params_to_pretrain.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
-
-        # abuse of variable name here. This is just to project to the correct dimension
-
+    # abuse of variable name here. This is just to project to the correct dimension
 
     ''' scorer '''
     # im_im_scorer_model = {
@@ -291,10 +289,7 @@ if __name__ == "__main__":
     #     'cosine': CosineScorer(temperature=args.temperature),
     #     'transformer': TransformerAgg(args.hidden_size)
     # }[args.comparison]
-    if "_slot" in args.aux_task:
-        im_im_scorer_model = TransformerAgg(args.hidden_size)
-    elif "_image" in args.aux_task:
-        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
+    im_im_scorer_model = TransformerAgg(args.hidden_size)
     im_im_scorer_model = im_im_scorer_model.to(device)
     params_to_finetune = im_im_scorer_model.parameters()
     models_to_save.append(im_im_scorer_model)
@@ -563,6 +558,12 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
+            if ("_image" in args.aux_task):
+                examples_full = examples_full.unsqueeze(2);
+                image_full = image_full.unsqueeze(1)
+            if ("matching" not in args.aux_task):
+                examples_full = normalize_feats(examples_full);
+                image_full = normalize_feats(image_full);
             score = im_im_scorer_model.score(examples_full, image_full).squeeze();
             pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += pred_loss
@@ -606,6 +607,12 @@ if __name__ == "__main__":
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
+                if ("_image" in args.aux_task):
+                    examples_full = examples_full.unsqueeze(2);
+                    image_full = image_full.unsqueeze(1);
+                if ("matching" not in args.aux_task):
+                    examples_full = normalize_feats(examples_full);
+                    image_full = normalize_feats(image_full);
                 score = im_im_scorer_model.score(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
@@ -629,7 +636,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch);
+        train_loss, pt_metric = pretrain(epoch, 1);
         for k, v in pt_metric.items():
             metrics[k].append(v);
         metrics = dict(metrics);
@@ -645,7 +652,8 @@ if __name__ == "__main__":
                 m.eval();
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch);
+        train_loss = finetune(epoch, 1);
+        continue;
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

@@ -355,7 +355,7 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.lr)
     # models_to_save.append(optimizer);
-    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 2e4, 0.1);
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.1);
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]));
 
@@ -639,7 +639,6 @@ if __name__ == "__main__":
         train_loss, pt_metric = pretrain(epoch);
         for k, v in pt_metric.items():
             metrics[k].append(v);
-        metrics = dict(metrics);
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
         if args.save_checkpoint:

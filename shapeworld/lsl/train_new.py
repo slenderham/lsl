@@ -269,7 +269,7 @@ if __name__ == "__main__":
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn';
     backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model);
     image_part_model = ExWrapper(backbone_model).to(device);
-    params_to_optimize = list(image_part_model.parameters())
+    params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
     if (args.use_relational_model and "_slot" in args.aux_task):
@@ -279,7 +279,7 @@ if __name__ == "__main__":
         raise ValueError("can't have relational model if not using slots")
     else:
         image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
-    params_to_optimize.extend(image_relation_model.parameters())
+    params_to_pretrain.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
 
         # abuse of variable name here. This is just to project to the correct dimension
@@ -296,17 +296,17 @@ if __name__ == "__main__":
     elif "_image" in args.aux_task:
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
     im_im_scorer_model = im_im_scorer_model.to(device)
-    params_to_optimize.extend(im_im_scorer_model.parameters())
+    params_to_finetune = im_im_scorer_model.parameters()
     models_to_save.append(im_im_scorer_model)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
         image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
-        params_to_optimize.extend(image_cls_projection.parameters());
+        params_to_pretrain.extend(image_cls_projection.parameters());
         models_to_save.append(image_cls_projection)
 
         image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
-        params_to_optimize.extend(image_pos_projection.parameters());
+        params_to_pretrain.extend(image_pos_projection.parameters());
         models_to_save.append(image_pos_projection)
 
     elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
@@ -316,7 +316,7 @@ if __name__ == "__main__":
         else:
             hint_model = TextProposal(embedding_model, hidden_size=args.hidden_size);
         hint_model = hint_model.to(device)
-        params_to_optimize.extend(hint_model.parameters())
+        params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
 
     elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
@@ -328,7 +328,7 @@ if __name__ == "__main__":
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image')
                      }[args.hypo_model];
         hint_model = hint_model.to(device)
-        params_to_optimize.extend(hint_model.parameters())
+        params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
     
     else:
@@ -340,15 +340,15 @@ if __name__ == "__main__":
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device);
-        params_to_optimize.extend(hype_loss.parameters())
+        params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_slot':
         hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device);
-        params_to_optimize.extend(hype_loss.parameters())
+        params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
-        params_to_optimize.extend(hype_loss.parameters())
+        params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
 
     # optimizer
@@ -357,11 +357,12 @@ if __name__ == "__main__":
         'rmsprop': optim.RMSprop,
         'sgd': optim.SGD
     }[args.optimizer]
-    optimizer = optfunc(params_to_optimize, lr=args.lr)
+    pretrain_optimizer = optfunc(params_to_pretrain, lr=args.lr)
+    finetune_optimizer = optfunc(params_to_finetune, lr=args.lr)
     # models_to_save.append(optimizer);
-    # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=49000)
-    # scheduler = GradualWarmupScheduler(optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
-    print(sum([p.numel() for p in params_to_optimize]));
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 2e4, 0.1);
+    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    print(sum([p.numel() for p in params_to_pretrain]));
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
@@ -520,10 +521,12 @@ if __name__ == "__main__":
             else:
                 raise ValueError("invalid auxiliary task name")
 
-            optimizer.zero_grad()
+            pretrain_optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
-            optimizer.step()
+            torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
+            pretrain_optimizer.step()
+            scheduler.step()
+
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(
@@ -567,10 +570,10 @@ if __name__ == "__main__":
 
             loss = pred_loss
 
-            optimizer.zero_grad()
+            finetune_optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, 1.0)
-            optimizer.step()
+            torch.nn.utils.clip_grad_norm_(params_to_finetune, 1.0)
+            finetune_optimizer.step()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f}'.format(
@@ -612,7 +615,7 @@ if __name__ == "__main__":
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))
 
-        return concept_avg_meter.avg, aux_metric_meter.avg, concept_avg_meter.raw_scores
+        return concept_avg_meter.avg, concept_avg_meter.raw_scores
 
     best_epoch = 0
     best_epoch_acc = 0
@@ -643,13 +646,12 @@ if __name__ == "__main__":
 
     for epoch in range(1, args.ft_epochs+1):
         train_loss = finetune(epoch);
-        continue;
-        train_acc, train_aux_metric, _ = test(epoch, 'train')
-        val_acc, val_aux_metric, _ = test(epoch, 'val')
-        test_acc, test_aux_metric, test_raw_scores = test(epoch, 'test')
+        train_acc, _ = test(epoch, 'train')
+        val_acc, _ = test(epoch, 'val')
+        test_acc, test_raw_scores = test(epoch, 'test')
         if has_same:
-            val_same_acc, val_same_aux_metric, _ = test(epoch, 'val_same')
-            test_same_acc, test_same_aux_metric, test_same_raw_scores = test(epoch, 'test_same')
+            val_same_acc, _ = test(epoch, 'val_same')
+            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc

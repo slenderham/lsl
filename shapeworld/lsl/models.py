@@ -147,6 +147,7 @@ class TextRep(nn.Module):
         hidden, final_hidden = self.gru(packed); 
 
         if self.return_agg:
+            hidden, _ = rnn_utils.pad_packed_sequence(hidden)
             if self.bidirectional:
                 hidden = (final_hidden[0]+hidden[0,:,:self.hidden_size])/2; # for forward layer, get final; for backward, get first
             else:

@@ -540,6 +540,7 @@ if __name__ == "__main__":
                 m.eval();
 
         main_acc = 0;
+        pred_loss_total = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -561,6 +562,7 @@ if __name__ == "__main__":
                 image_full = image_full.unsqueeze(1)
             score = im_im_scorer_model.score(examples_full, image_full).squeeze();
             loss = F.binary_cross_entropy_with_logits(score, label.float());
+            pred_loss_total += loss;
             main_acc += ((score>0).long()==label).float().mean()
 
             loss.backward()

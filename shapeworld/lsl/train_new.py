@@ -355,7 +355,7 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.lr)
     # models_to_save.append(optimizer);
-    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.1);
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]));
 
@@ -493,7 +493,7 @@ if __name__ == "__main__":
                     matching, hypo_loss, metric = hype_loss.score(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 else:
-                    assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
+                    assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(batch_size, args.hidden_size))
                     hypo_loss, metric = hype_loss.score(im=examples_full, s=hint_rep);
                 
@@ -516,12 +516,11 @@ if __name__ == "__main__":
             else:
                 raise ValueError("invalid auxiliary task name")
 
-            pretrain_optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
             pretrain_optimizer.step()
             scheduler.step()
-
+            pretrain_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(
@@ -540,7 +539,6 @@ if __name__ == "__main__":
             if (args.freeze_slots and (isinstance(m, ExWrapper))):
                 m.eval();
 
-        pred_loss_total = 0;
         main_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
@@ -561,20 +559,14 @@ if __name__ == "__main__":
             if ("_image" in args.aux_task):
                 examples_full = examples_full.unsqueeze(2);
                 image_full = image_full.unsqueeze(1)
-            if ("matching" not in args.aux_task):
-                examples_full = normalize_feats(examples_full);
-                image_full = normalize_feats(image_full);
             score = im_im_scorer_model.score(examples_full, image_full).squeeze();
-            pred_loss = F.binary_cross_entropy_with_logits(score, label.float());
-            pred_loss_total += pred_loss
+            loss = F.binary_cross_entropy_with_logits(score, label.float());
             main_acc += ((score>0).long()==label).float().mean()
 
-            loss = pred_loss
-
-            finetune_optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_finetune, 1.0)
             finetune_optimizer.step()
+            finetune_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f}'.format(
@@ -610,9 +602,6 @@ if __name__ == "__main__":
                 if ("_image" in args.aux_task):
                     examples_full = examples_full.unsqueeze(2);
                     image_full = image_full.unsqueeze(1);
-                if ("matching" not in args.aux_task):
-                    examples_full = normalize_feats(examples_full);
-                    image_full = normalize_feats(image_full);
                 score = im_im_scorer_model.score(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()

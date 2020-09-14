@@ -115,10 +115,14 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir',
                         default=None,
                         help='Specify custom data directory (must have shapeworld folder)')
-    parser.add_argument('--lr',
+    parser.add_argument('--pt_lr',
                         type=float,
                         default=0.001,
-                        help='Learning rate')
+                        help='Pretrain Learning rate')
+    parser.add_argument('--ft_lr',
+                        type=float,
+                        default=0.001,
+                        help='Finetuning Learning rate')
     parser.add_argument('--optimizer',
                         choices=['adam', 'rmsprop', 'sgd'],
                         default='adam',
@@ -372,8 +376,8 @@ if __name__ == "__main__":
         'rmsprop': optim.RMSprop,
         'sgd': optim.SGD
     }[args.optimizer]
-    pretrain_optimizer = optfunc(params_to_pretrain, lr=args.lr)
-    finetune_optimizer = optfunc(params_to_finetune, lr=args.lr)
+    pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
+    finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer);
     after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
@@ -382,8 +386,8 @@ if __name__ == "__main__":
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
-        print(sds.keys())
         for m in models_to_save:
+            print(m)
             print(m.load_state_dict(sds[repr(m)]));
         print("loaded checkpoint");
 

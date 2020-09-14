@@ -746,7 +746,7 @@ class SANet(nn.Module):
                 axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
                 axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1));
-                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu());
+                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu(), vmin=0, vmax=1);
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
 
@@ -778,8 +778,8 @@ class ImagePositionalEmbedding(nn.Module):
 class RelationalNet(nn.Module):
     def __init__(self, in_dim, out_dim, rel_dim):
         super(RelationalNet, self).__init__()
-        self.bilinearV = nn.Bilinear(in_dim, in_dim, rel_dim);
-        self.rel_emb = nn.Linear(rel_dim, out_dim);
+        self.left = nn.Linear(in_dim, out_dim);
+        self.right = nn.Linear(in_dim, out_dim);
         self.obj_mlp = nn.Linear(in_dim, out_dim);
 
     def forward(self, x):
@@ -790,9 +790,8 @@ class RelationalNet(nn.Module):
         x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
         x = self.obj_mlp(x);
 
-        # get relations through bilinear
-        x_rel = self.bilinearV(x_i.contiguous(), x_j.contiguous());
-        x_rel = self.rel_emb(F.softmax(x_rel, dim=-1)).flatten(1, 2);
+        # get relations through hadamard, allows for multiplactive interaction
+        x_rel = (self.left(x_i)*self.right(x_j)).flatten(1, 2);
         assert (x_rel.shape[:-1]==(b, n_s**2));
 
         # get triplet representation through concat

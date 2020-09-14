@@ -266,15 +266,19 @@ if __name__ == "__main__":
         labels_to_idx = train_dataset.label2idx
 
     ''' vision '''
+    # if _image in task name, get vector for each image with conv net; else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn';
     backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model);
     image_part_model = ExWrapper(backbone_model).to(device);
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model];
 
+    # if use relational model and use slots, add relational net structure;
+    # if use relational and not slots, return error
+    # if not use relational and use slots, relation model is MLP to approximately balance number of params
+    # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        relation_backbone = RelationalNet(64, args.hidden_size, 5, append=False).to(device);
-        image_relation_model = ExWrapper(relation_backbone).to(device);
+        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size, 5)).to(device);
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
@@ -289,10 +293,26 @@ if __name__ == "__main__":
     #     'cosine': CosineScorer(temperature=args.temperature),
     #     'transformer': TransformerAgg(args.hidden_size)
     # }[args.comparison]
-    im_im_scorer_model = TransformerAgg(args.hidden_size)
-    im_im_scorer_model = im_im_scorer_model.to(device)
-    params_to_finetune = im_im_scorer_model.parameters()
-    models_to_save.append(im_im_scorer_model)
+    # if use slots, use transformer scorer
+    # if use conv, use mlp then average
+    if ('_slot' in args.aux_task):
+        if (args.use_relational_model):
+            proj = MLP(3*args.hidden_size, args.hidden_size, args.hidden_size).to(device);
+            scorer = TransformerAgg(args.hidden_size).to(device);
+            params_to_finetune = list(proj.parameters()) + list(scorer.parameters())
+            models_to_save.append(proj)
+            models_to_save.append(scorer)
+            im_im_scorer_model = lambda x,y: scorer(proj(x), proj(y));
+        else:
+            im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+            params_to_finetune = list(im_im_scorer_model.parameters())
+            models_to_save.append(im_im_scorer_model)
+
+    elif ('_image' in args.aux_task):
+        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size);
+        im_im_scorer_model = im_im_scorer_model.to(device)
+        params_to_finetune = list(im_im_scorer_model.parameters())
+        models_to_save.append(im_im_scorer_model)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
@@ -372,10 +392,8 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.train();
 
-        pred_loss_total = 0;
         aux_loss_total = 0;
         cls_acc = 0;
-        main_acc = 0;
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -427,6 +445,10 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
+
+            if (args.use_relational_model):
+                image_full = image_full['relation']
+                examples_full = examples_full['relation']
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
@@ -490,18 +512,18 @@ if __name__ == "__main__":
                 if (args.aux_task=='matching_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss.score(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
+                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
                 else:
                     assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(batch_size, args.hidden_size))
-                    hypo_loss, metric = hype_loss.score(im=examples_full, s=hint_rep);
+                    hypo_loss, metric = hype_loss(im=examples_full, s=hint_rep);
                 
                 if args.visualize_attns:
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
-                    ylabels = [str(y1)+' x '+str(y2) if y1!=y2 else str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
+                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots) if y1!=y2]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     ax.set_yticks(np.arange(len(ylabels)))
@@ -509,7 +531,7 @@ if __name__ == "__main__":
                     ax.set_aspect('auto')
                     plt.colorbar(im, ax=ax)
                     plt.show()
-            
+
                 loss = hypo_loss;
                 aux_loss_total += hypo_loss.item();
                 cls_acc += metric['part_acc'];
@@ -557,10 +579,12 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
-            if ("_image" in args.aux_task):
-                examples_full = examples_full.unsqueeze(2);
-                image_full = image_full.unsqueeze(1)
-            score = im_im_scorer_model.score(examples_full, image_full).squeeze();
+
+            if (args.use_relational_model):
+                image_full = image_full['triplet']
+                examples_full = examples_full['triplet']
+
+            score = im_im_scorer_model(examples_full, image_full).squeeze();
             loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += loss;
             main_acc += ((score>0).long()==label).float().mean()
@@ -601,10 +625,12 @@ if __name__ == "__main__":
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
-                if ("_image" in args.aux_task):
-                    examples_full = examples_full.unsqueeze(2);
-                    image_full = image_full.unsqueeze(1);
-                score = im_im_scorer_model.score(examples_full, image_full).squeeze();
+
+                if (args.use_relational_model):
+                    image_full = image_full['triplet']
+                    examples_full = examples_full['triplet']
+
+                score = im_im_scorer_model(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat);

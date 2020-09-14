@@ -44,10 +44,18 @@ class ExWrapper(nn.Module):
         x_enc = self.model(x_flat, **kwargs)
 
         if is_ex:
-            x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
+            if (isinstance(x_enc, dict)):
+                for k in x_enc.keys():
+                    x_enc[k] = x_enc[k].reshape(batch_size, n_ex, *x_enc[k].shape[1:])
+            else:
+                x_enc = x_enc.reshape(batch_size, n_ex, *x_enc.shape[1:]);
 
         if (self.freeze_model):
-            x_enc = x_enc.detach();
+            if (isinstance(x_enc, dict)):
+                for k in x_enc.keys():
+                    x_enc[k] = x_enc[k].detach();
+            else:
+                x_enc = x_enc.detach();
 
         return x_enc
 
@@ -768,28 +776,40 @@ class ImagePositionalEmbedding(nn.Module):
         return x+self.pos_emb(self.coords);
 
 class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim, bil_dim, append=True):
+    def __init__(self, in_dim, out_dim, rel_dim):
         super(RelationalNet, self).__init__()
-        self.concatW = nn.Linear(3*in_dim, out_dim);
-        self.bilinearV = nn.Bilinear(in_dim, in_dim, bil_dim);
-        self.rel_emb = nn.Linear(bil_dim, in_dim);
-        self.u = nn.Linear(out_dim, out_dim);
-        self.append = append;
+        self.bilinearV = nn.Bilinear(in_dim, in_dim, rel_dim);
+        self.rel_emb = nn.Linear(rel_dim, out_dim);
+        self.obj_mlp = nn.Linear(in_dim, out_dim);
 
     def forward(self, x):
         b, n_s, h = x.shape;
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
-        x_bil = self.rel_emb(F.softmax(self.bilinearV(x_i.contiguous(), x_j.contiguous()), dim=-1));
-        x_cat = torch.cat([x_i, x_j, x_bil], dim=3);
-        x_cat = self.concatW(x_cat);
-        x_full = self.u(torch.relu(x_cat)).flatten(1, 2);
-        if self.append:
-            return torch.cat([x, x_full], dim=1)
-        else:
-            return x_full;
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x = self.obj_mlp(x);
+
+        # get relations through bilinear
+        x_rel = self.bilinearV(x_i.contiguous(), x_j.contiguous());
+        x_rel = self.rel_emb(F.softmax(x_rel, dim=-1)).flatten(1, 2);
+        assert (x_rel.shape[:-1]==(b, n_s**2));
+
+        # get triplet representation through concat
+        x_i = x_i.flatten(1, 2)
+        x_j = x_j.flatten(1, 2)
+        x_tri = torch.cat([self.obj_mlp(x_i), self.obj_mlp(x_j), x_rel], dim=-1);
+        assert (x_tri.shape[:-1]==(b, n_s**2));
+        
+        # get rid of self to self pairings
+        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])); # remove self to self pairs
+        x_rel = x_rel[:, non_diag_idx, :]
+        x_tri = x_tri[:, non_diag_idx, :]
+
+        # concat relations with objects for matching
+        x_rel = torch.cat([x, x_rel], dim=1)
+
+        return {"relation":x_rel, "triplet":x_tri}
 
 """
 Similarity Scores
@@ -918,7 +938,7 @@ class SinkhornScorer(Scorer):
         self.iters = iters;
         self.reg = reg;
 
-    def score(self, x, y, word_idx, y_mask):
+    def forward(self, x, y, word_idx, y_mask):
         # x.shape = nxn_ex, num_obj_x, h; y.shape = n, num_obj_y, h; word_idx.shape = n, num_obj_y
         n = y.shape[0];
         n_ex = x.shape[0]//n; 
@@ -1154,10 +1174,12 @@ class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5));
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
+        self.score_w = nn.Linear(hidden_size, 1);
 
-    def score(self, x, y):
+    def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape;
         assert(y.shape==(b, num_rel, h));
         x = x.flatten(1, 2)
@@ -1165,11 +1187,9 @@ class TransformerAgg(Scorer):
         y += self.image_id[:,1:2,:];
         x = x.transpose(0, 1);
         y = y.transpose(0, 1);
-        whole_rep = self.model(torch.cat([x, y], dim=0));
-        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
-        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
-        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return (x.mean(1)*y.mean(1)).sum(1);
+        whole_rep = self.model(torch.cat([self.seed.expand(1, b, h), x, y], dim=0))[0];
+        assert(whole_rep.shape==(b, h));
+        return self.score_w(whole_rep);
 
 class ContrastiveLoss(Scorer):
     """
@@ -1180,7 +1200,7 @@ class ContrastiveLoss(Scorer):
         super(ContrastiveLoss, self).__init__()
         self.sim = CosineScorer(temperature);
 
-    def score(self, im, s):
+    def forward(self, im, s):
         # compute image-sentence score matrix
 
         N = im.shape[0];
@@ -1218,7 +1238,10 @@ class MLPMeanScore(Scorer):
         super(MLPMeanScore, self).__init__();
         self.mlp = MLP(input_dize, output_size, output_size);
 
-    def score(self, x, y):
+    def forward(self, x, y):
+        assert(len(x.shape)==3), "x should be of shape batch size X n_ex X dim"
+        assert(len(y.shape)==2), "y should be of shape batch size X dim"
+        assert(x.shape[0]==y.shape[0] and x.shape[-1]==y.shape[-1])
         x = self.mlp(x).mean(dim=(1));
         y = self.mlp(y);
         assert(x.shape==y.shape)

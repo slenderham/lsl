@@ -586,8 +586,8 @@ if __name__ == "__main__":
 
             score = im_im_scorer_model(examples_full, image_full).squeeze();
             loss = F.binary_cross_entropy_with_logits(score, label.float());
-            pred_loss_total += loss;
-            main_acc += ((score>0).long()==label).float().mean()
+            pred_loss_total += loss.item();
+            main_acc += ((score>0).long()==label).float().mean().item()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_finetune, 1.0)

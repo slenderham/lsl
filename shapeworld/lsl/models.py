@@ -1171,7 +1171,7 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
-    def __init__(self, hidden_size, input_size):
+    def __init__(self, hidden_size, input_size=None):
         super(TransformerAgg, self).__init__();
         
         self.hidden_size = hidden_size

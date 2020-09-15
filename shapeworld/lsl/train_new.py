@@ -653,7 +653,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch, 1);
+        train_loss, pt_metric = pretrain(epoch);
         for k, v in pt_metric.items():
             metrics[k].append(v);
         save_defaultdict_to_fs(metrics,

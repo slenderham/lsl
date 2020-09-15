@@ -282,7 +282,7 @@ if __name__ == "__main__":
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size, 16)).to(device);
+        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size)).to(device);
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
@@ -301,7 +301,7 @@ if __name__ == "__main__":
     # if use conv, use mlp then average
     if ('_slot' in args.aux_task):
         if (args.use_relational_model):
-            im_im_scorer_model = TransformerAgg(args.hidden_size, 3*args.hidden_size).to(device);
+            im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
             params_to_finetune = list(im_im_scorer_model.parameters())
             models_to_save.append(im_im_scorer_model)
         else:
@@ -375,8 +375,8 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer);
-    # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
-    # scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
+    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]));
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
@@ -445,10 +445,6 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
-
-            if (args.use_relational_model):
-                image_full = image_full['relation']
-                examples_full = examples_full['relation']
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
@@ -541,7 +537,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
             pretrain_optimizer.step()
-            # scheduler.step()
+            scheduler.step()
             pretrain_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:
@@ -579,10 +575,6 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False); # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
-
-            if (args.use_relational_model):
-                image_full = image_full['triplet']
-                examples_full = examples_full['triplet']
 
             score = im_im_scorer_model(examples_full, image_full).squeeze();
             loss = F.binary_cross_entropy_with_logits(score, label.float());
@@ -626,10 +618,6 @@ if __name__ == "__main__":
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
 
-                if (args.use_relational_model):
-                    image_full = image_full['triplet']
-                    examples_full = examples_full['triplet']
-
                 score = im_im_scorer_model(examples_full, image_full).squeeze();
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
@@ -653,7 +641,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch);
+        train_loss, pt_metric = pretrain(epoch, 1);
         for k, v in pt_metric.items():
             metrics[k].append(v);
         save_defaultdict_to_fs(metrics,
@@ -662,13 +650,16 @@ if __name__ == "__main__":
             save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);
 
     if args.freeze_slots:
-        for m in models_to_save:
-            if (isinstance(m, ExWrapper)):
-                setattr(m, 'freeze_model', True);
-                m.eval();
+        # for m in models_to_save:
+        #     if (isinstance(m, ExWrapper)):
+        #         setattr(m, 'freeze_model', True);
+        #         m.eval();
+        for p in params_to_pretrain:
+            p.requires_grad = False;
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch);
+        train_loss = finetune(epoch, 1);
+        continue;
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

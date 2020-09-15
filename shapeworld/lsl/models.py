@@ -776,40 +776,27 @@ class ImagePositionalEmbedding(nn.Module):
         return x+self.pos_emb(self.coords);
 
 class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim, rel_dim):
+    def __init__(self, in_dim, out_dim, append=False):
         super(RelationalNet, self).__init__()
-        self.bilinearV = nn.Bilinear(in_dim, in_dim, rel_dim);
-        self.rel_emb = nn.Linear(rel_dim, out_dim);
-        self.obj_mlp = nn.Linear(in_dim, out_dim);
+        self.mlp = nn.Sequential(
+            nn.Linear(2*in_dim, out_dim),
+            nn.ReLU(),
+            nn.Linear(out_dim, out_dim)
+        );
+        self.append = append;
 
     def forward(self, x):
         b, n_s, h = x.shape;
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
-        x = self.obj_mlp(x);
-
-        # get relations through bilinear
-        x_rel = self.bilinearV(x_i.contiguous(), x_j.contiguous());
-        x_rel = self.rel_emb(F.relu(x_rel)).flatten(1, 2);
-        assert (x_rel.shape[:-1]==(b, n_s**2));
-
-        # get triplet representation through concat
-        x_i = x_i.flatten(1, 2)
-        x_j = x_j.flatten(1, 2)
-        x_tri = torch.cat([self.obj_mlp(x_i), self.obj_mlp(x_j), x_rel], dim=-1);
-        assert (x_tri.shape[:-1]==(b, n_s**2));
-        
-        # get rid of self to self pairings
-        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])); # remove self to self pairs
-        x_rel = x_rel[:, non_diag_idx, :]
-        x_tri = x_tri[:, non_diag_idx, :]
-
-        # concat relations with objects for matching
-        x_rel = torch.cat([x, x_rel], dim=1)
-
-        return {"relation":x_rel, "triplet":x_tri}
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
+        x_full = torch.cat([x_i, x_j], dim=3);
+        x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
+        if self.append:
+            return torch.cat([x, x_full], dim=1)
+        else:
+            return x_full;
 
 """
 Similarity Scores

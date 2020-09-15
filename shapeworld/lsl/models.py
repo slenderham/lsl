@@ -778,8 +778,8 @@ class ImagePositionalEmbedding(nn.Module):
 class RelationalNet(nn.Module):
     def __init__(self, in_dim, out_dim, rel_dim):
         super(RelationalNet, self).__init__()
-        self.left = nn.Linear(in_dim, out_dim);
-        self.right = nn.Linear(in_dim, out_dim);
+        self.bilinearV = nn.Bilinear(in_dim, in_dim, rel_dim);
+        self.rel_emb = nn.Linear(rel_dim, out_dim);
         self.obj_mlp = nn.Linear(in_dim, out_dim);
 
     def forward(self, x):
@@ -790,8 +790,9 @@ class RelationalNet(nn.Module):
         x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
         x = self.obj_mlp(x);
 
-        # get relations through hadamard, allows for multiplactive interaction
-        x_rel = (self.left(x_i)*self.right(x_j)).flatten(1, 2);
+        # get relations through bilinear
+        x_rel = self.bilinearV(x_i.contiguous(), x_j.contiguous());
+        x_rel = self.rel_emb(F.relu(x_rel)).flatten(1, 2);
         assert (x_rel.shape[:-1]==(b, n_s**2));
 
         # get triplet representation through concat
@@ -955,7 +956,7 @@ class SinkhornScorer(Scorer):
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters);
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}";
-        scores = scores.reshape(n*n_ex, n); # elementwise product to produce final scores
+        scores = scores.reshape(n*n_ex, n);
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {};
@@ -1170,24 +1171,35 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, input_size):
         super(TransformerAgg, self).__init__();
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
+        
+        self.hidden_size = hidden_size
+        self.input_size = input_size
+
+        if (input_size is not None):
+            self.proj = nn.Linear(input_size, hidden_size);
+        else:
+            self.proj = nn.Identity();
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
         self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5));
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
         self.score_w = nn.Linear(hidden_size, 1);
 
     def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape;
+        assert(self.input_size==None or h==self.input_size)
         assert(y.shape==(b, num_rel, h));
+        x = self.proj(x);
+        y = self.proj(y);
         x = x.flatten(1, 2)
         x += self.image_id[:,0:1,:];
         y += self.image_id[:,1:2,:];
         x = x.transpose(0, 1);
         y = y.transpose(0, 1);
-        whole_rep = self.model(torch.cat([self.seed.expand(1, b, h), x, y], dim=0))[0];
-        assert(whole_rep.shape==(b, h));
+        whole_rep = self.model(torch.cat([self.seed.expand(1, b, self.hidden_size), x, y], dim=0))[0];
+        assert(whole_rep.shape==(b, self.hidden_size));
         return self.score_w(whole_rep);
 
 class ContrastiveLoss(Scorer):

@@ -282,7 +282,7 @@ if __name__ == "__main__":
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size, 5)).to(device);
+        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size, 16)).to(device);
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
@@ -301,17 +301,13 @@ if __name__ == "__main__":
     # if use conv, use mlp then average
     if ('_slot' in args.aux_task):
         if (args.use_relational_model):
-            proj = MLP(3*args.hidden_size, args.hidden_size, args.hidden_size).to(device);
-            scorer = TransformerAgg(args.hidden_size).to(device);
-            params_to_finetune = list(proj.parameters()) + list(scorer.parameters())
-            models_to_save.append(proj)
-            models_to_save.append(scorer)
-            im_im_scorer_model = lambda x,y: scorer(proj(x), proj(y));
+            im_im_scorer_model = TransformerAgg(args.hidden_size, 3*args.hidden_size).to(device);
+            params_to_finetune = list(im_im_scorer_model.parameters())
+            models_to_save.append(im_im_scorer_model)
         else:
             im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
             params_to_finetune = list(im_im_scorer_model.parameters())
             models_to_save.append(im_im_scorer_model)
-
     elif ('_image' in args.aux_task):
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size);
         im_im_scorer_model = im_im_scorer_model.to(device)
@@ -379,8 +375,8 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer);
-    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
-    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
+    # scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]));
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
@@ -545,7 +541,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
             pretrain_optimizer.step()
-            scheduler.step()
+            # scheduler.step()
             pretrain_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:
@@ -657,7 +653,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch);
+        train_loss, pt_metric = pretrain(epoch, 1);
         for k, v in pt_metric.items():
             metrics[k].append(v);
         save_defaultdict_to_fs(metrics,

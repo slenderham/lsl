@@ -299,20 +299,24 @@ if __name__ == "__main__":
     # }[args.comparison]
     # if use slots, use transformer scorer
     # if use conv, use mlp then average
-    if ('_slot' in args.aux_task):
-        if (args.use_relational_model):
-            im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
-            params_to_finetune = list(im_im_scorer_model.parameters())
-            models_to_save.append(im_im_scorer_model)
-        else:
-            im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
-            params_to_finetune = list(im_im_scorer_model.parameters())
-            models_to_save.append(im_im_scorer_model)
-    elif ('_image' in args.aux_task):
-        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size);
-        im_im_scorer_model = im_im_scorer_model.to(device)
-        params_to_finetune = list(im_im_scorer_model.parameters())
-        models_to_save.append(im_im_scorer_model)
+    # if ('_slot' in args.aux_task):
+    #     if (args.use_relational_model):
+    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    #         params_to_finetune = list(im_im_scorer_model.parameters())
+    #         models_to_save.append(im_im_scorer_model)
+    #     else:
+    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    #         params_to_finetune = list(im_im_scorer_model.parameters())
+    #         models_to_save.append(im_im_scorer_model)
+    # elif ('_image' in args.aux_task):
+    #     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size);
+    #     im_im_scorer_model = im_im_scorer_model.to(device)
+    #     params_to_finetune = list(im_im_scorer_model.parameters())
+    #     models_to_save.append(im_im_scorer_model)
+
+    im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    params_to_finetune = list(im_im_scorer_model.parameters())
+    models_to_save.append(im_im_scorer_model)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
@@ -520,6 +524,8 @@ if __name__ == "__main__":
                     im = ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
                     ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots) if y1!=y2]
+                    # ylabels = list(range(args.num_slots))
+                    # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     ax.set_yticks(np.arange(len(ylabels)))
@@ -576,6 +582,10 @@ if __name__ == "__main__":
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
 
+            if "_image" in args.aux_task:
+                examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
+                image_full = image_full.reshape(batch_size, 1, args.hidden_size)
+
             score = im_im_scorer_model(examples_full, image_full).squeeze();
             loss = F.binary_cross_entropy_with_logits(score, label.float());
             pred_loss_total += loss.item();
@@ -617,6 +627,10 @@ if __name__ == "__main__":
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
+
+                if "_image" in args.aux_task:
+                    examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
+                    image_full = image_full.reshape(batch_size, 1, args.hidden_size)
 
                 score = im_im_scorer_model(examples_full, image_full).squeeze();
                 label_hat = score > 0

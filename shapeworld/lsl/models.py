@@ -776,27 +776,33 @@ class ImagePositionalEmbedding(nn.Module):
         return x+self.pos_emb(self.coords);
 
 class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim, append=False):
+    def __init__(self, in_dim, out_dim):
         super(RelationalNet, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(2*in_dim, out_dim),
-            nn.ReLU(),
-            nn.Linear(out_dim, out_dim)
-        );
-        self.append = append;
+        self.leftV = nn.Linear(in_dim, out_dim);
+        self.rightV = nn.Linear(in_dim, out_dim);
+        self.rel_emb = nn.Linear(out_dim, out_dim);
+        self.obj_mlp = nn.Linear(in_dim, out_dim);
 
     def forward(self, x):
         b, n_s, h = x.shape;
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h
-        x_full = torch.cat([x_i, x_j], dim=3);
-        x_full = self.mlp(x_full).flatten(1, 2); # b, n_s*n_s, h
-        if self.append:
-            return torch.cat([x, x_full], dim=1)
-        else:
-            return x_full;
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x = self.obj_mlp(x);
+
+        # get pair-wise rep through multiplicative integration
+        x_rel = self.rel_emb(F.relu(self.leftV(x_i)*self.rightV(x_j))).flatten(1,2);
+        assert (x_rel.shape[:-1]==(b, n_s**2));
+        
+        # get rid of self to self pairings
+        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])); # remove self to self pairs
+        x_rel = x_rel[:, non_diag_idx, :]
+
+        # concat relations with objects
+        x_rel = torch.cat([x, x_rel], dim=1)
+
+        return x_rel
 
 """
 Similarity Scores
@@ -1169,7 +1175,7 @@ class TransformerAgg(Scorer):
         else:
             self.proj = nn.Identity();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0);
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1);
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
 
     def forward(self, x, y):

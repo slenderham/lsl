@@ -641,7 +641,7 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch, 1);
+        train_loss, pt_metric = pretrain(epoch);
         for k, v in pt_metric.items():
             metrics[k].append(v);
         save_defaultdict_to_fs(metrics,
@@ -658,7 +658,7 @@ if __name__ == "__main__":
             p.requires_grad = False;
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch, 1);
+        train_loss = finetune(epoch);
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

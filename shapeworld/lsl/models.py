@@ -1170,9 +1170,7 @@ class TransformerAgg(Scorer):
             self.proj = nn.Identity();
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0);
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2);
-        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5));
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5));
-        self.score_w = nn.Linear(hidden_size, 1);
 
     def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape;
@@ -1185,9 +1183,11 @@ class TransformerAgg(Scorer):
         y += self.image_id[:,1:2,:];
         x = x.transpose(0, 1);
         y = y.transpose(0, 1);
-        whole_rep = self.model(torch.cat([self.seed.expand(1, b, self.hidden_size), x, y], dim=0))[0];
-        assert(whole_rep.shape==(b, self.hidden_size));
-        return self.score_w(whole_rep);
+        whole_rep = self.model(torch.cat([x, y], dim=0));
+        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h));
+        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
+        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
+        return (x.mean(1)*y.mean(1)).sum(1);
 
 class ContrastiveLoss(Scorer):
     """

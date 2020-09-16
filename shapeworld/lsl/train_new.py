@@ -383,8 +383,8 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
         sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
         for m in models_to_save:
-            print(m)
-            print(m.load_state_dict(sds[repr(m)]));
+            if (not isinstance(m, TransformerAgg)):
+                print(m.load_state_dict(sds[repr(m)]));
         print("loaded checkpoint");
 
     def pretrain(epoch, n_steps=100):
@@ -659,7 +659,6 @@ if __name__ == "__main__":
 
     for epoch in range(1, args.ft_epochs+1):
         train_loss = finetune(epoch, 1);
-        continue;
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

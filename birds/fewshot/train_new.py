@@ -184,7 +184,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=128, slot_model=image_model)
+    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=args.hidden_size, slot_model=image_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(128, args.hidden_size)).to(device)
+        image_relation_model = ExWrapper(RelationalNet(args.hidden_size, args.hidden_size)).to(device)
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:

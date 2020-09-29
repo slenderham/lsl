@@ -664,7 +664,7 @@ class SANet(nn.Module):
             backbone = ResNetTiny(dim, flatten=False)
             self.encoder = nn.Sequential(
                 backbone, 
-                ImagePositionalEmbedding(backbone.final_feat_dim[1], backbone.final_feat_dim[2], dim)
+                ImagePositionalEmbedding(backbone[0].final_feat_dim[1], backbone[0].final_feat_dim[2], dim)
             )
 
             self.post_mlp = nn.Sequential(

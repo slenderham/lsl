@@ -184,11 +184,11 @@ class SimpleBlock(nn.Module):
                 outdim,
                 kernel_size=3,
                 stride=2 if half_res else 1,
-                padding=1,
+                padding=2,
                 bias=False,
             )
             self.BN1 = nn.BatchNorm2d(outdim)
-            self.C2 = nn.Conv2d(outdim, outdim, kernel_size=3, padding=1, bias=False)
+            self.C2 = nn.Conv2d(outdim, outdim, kernel_size=3, padding=2, bias=False)
             self.BN2 = nn.BatchNorm2d(outdim)
         self.relu1 = nn.ReLU(inplace=True)
         self.relu2 = nn.ReLU(inplace=True)
@@ -430,19 +430,16 @@ class ResNet(nn.Module):
             bn1 = nn.BatchNorm2d(64)
 
         relu = nn.ReLU()
-        pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         init_layer(conv1)
         init_layer(bn1)
 
-        trunk = [conv1, bn1, relu, pool1]
+        trunk = [conv1, bn1, relu]
 
         indim = 64
         for i in range(4):
-
             for j in range(list_of_num_layers[i]):
-                half_res = (i >= 1) and (j == 0)
-                B = block(indim, list_of_out_dims[i], half_res)
+                B = block(indim, list_of_out_dims[i], False)
                 trunk.append(B)
                 indim = list_of_out_dims[i]
 
@@ -452,7 +449,7 @@ class ResNet(nn.Module):
             trunk.append(Flatten())
             self.final_feat_dim = indim
         else:
-            self.final_feat_dim = [indim, 7, 7]
+            self.final_feat_dim = [indim, 42, 42]
 
         self.trunk = nn.Sequential(*trunk)
 
@@ -484,9 +481,11 @@ def Conv4S():
 def Conv4SNP():
     return ConvNetSNopool(4)
 
+
 def ResNetTiny(final_dim, flatten=False):
     backbone = ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten);
     return nn.Sequential(backbone, nn.Conv2d(512, final_dim, 1));
+
 
 def ResNet10(flatten=True):
     return ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten)

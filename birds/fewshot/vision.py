@@ -184,11 +184,11 @@ class SimpleBlock(nn.Module):
                 outdim,
                 kernel_size=3,
                 stride=2 if half_res else 1,
-                padding=2,
+                padding=1,
                 bias=False,
             )
             self.BN1 = nn.BatchNorm2d(outdim)
-            self.C2 = nn.Conv2d(outdim, outdim, kernel_size=3, padding=2, bias=False)
+            self.C2 = nn.Conv2d(outdim, outdim, kernel_size=3, padding=1, bias=False)
             self.BN2 = nn.BatchNorm2d(outdim)
         self.relu1 = nn.ReLU(inplace=True)
         self.relu2 = nn.ReLU(inplace=True)

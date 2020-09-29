@@ -416,7 +416,7 @@ if __name__ == "__main__":
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(
-                    epoch, loss.item(), metric))
+                    epoch, loss.item(), [(k, "{:.6f}".format(v)) for k,v in metric.items()]))
                 pbar.refresh()
 
             pbar.update()

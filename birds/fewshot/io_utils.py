@@ -9,7 +9,7 @@ import os
 
 import numpy as np
 
-import backbone
+import vision as backbone
 
 
 model_dict = dict(
@@ -24,7 +24,6 @@ model_dict = dict(
     ResNet50=backbone.ResNet50,
     ResNet101=backbone.ResNet101,
 )
-
 
 def parse_args(script):
     parser = argparse.ArgumentParser(

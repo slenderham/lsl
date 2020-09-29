@@ -64,10 +64,6 @@ if __name__ == "__main__":
                         default=0.5,
                         type=float,
                         help='Temperature parameter used in contrastive loss')
-    parser.add_argument('--batch_size',
-                        type=int,
-                        default=100,
-                        help='Train batch size')
     parser.add_argument('--pt_epochs', type=int, default=150, help='Pretrain epochs')
     parser.add_argument('--ft_epochs', type=int, default=20, help='Finetune epochs')
     parser.add_argument('--debug_example', 
@@ -193,7 +189,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model)
+    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=64, slot_model=image_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -307,7 +303,7 @@ if __name__ == "__main__":
             hint_mask = hint_mask.to(device)
 
             if args.debug_example:
-                rand_idx = np.random.randint(0, args.batch_size) # sample a random index from current batch
+                rand_idx = np.random.randint(0, x.size(1)) # sample a random index from current batch
                 print([train_i2w[k.item()] for k in lang[rand_idx]]) # get hint in words
                 print(target[rand_idx])
                 fig, axes = plt.subplots(5)

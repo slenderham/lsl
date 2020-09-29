@@ -118,12 +118,7 @@ if __name__ == "__main__":
     parser.add_argument("--lang_emb_size", type=int, default=300)
     parser.add_argument("--lang_hidden_size", type=int, default=200)
     parser.add_argument("--n_way", type=int, default=5)
-    parser.add_argument(
-        "--test_n_way",
-        type=int,
-        default=5,
-        help="Specify to change n_way eval at test",
-    )
+    parser.add_argument("--test_n_way", type=int, default=5, help="Specify to change n_way eval at test")
     parser.add_argument("--n_shot", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=600)
     parser.add_argument("--n_workers", type=int, default=4)
@@ -371,9 +366,9 @@ if __name__ == "__main__":
                 cls_acc += metric['acc']
             elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
                 n_total = image_full.shape[1]
-                hint_seq = hint_seq.reshape(n_way * n_total, max_hint_length);
-                hint_mask = hint_mask.reshape(n_way * n_total, max_hint_length);
-                hint_length = hint_length.reshape(n_way * n_total);
+                hint_seq = hint_seq.flatten(0, 1);
+                hint_mask = hint_mask.flatten(0, 1);
+                hint_length = hint_length.flatten(0, 1);
                 if ('transformer' in args.hypo_model):
                     hint_rep = hint_model(hint_seq, hint_length, hint_mask) 
                 else:

@@ -41,9 +41,6 @@ if __name__ == "__main__":
     parser.add_argument('--freeze_slots',
                         action='store_true',
                         help='If True, freeze slots.')
-    parser.add_argument('--use_relational_model',
-                        action='store_true',
-                        help='Use relational model on top of slots or only slots.')
     parser.add_argument('--hypo_model',
                         choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer'],
                         default='bi_gru',
@@ -189,18 +186,6 @@ if __name__ == "__main__":
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
 
-    # if use relational model and use slots, add relational net structure
-    # if use relational and not slots, return error
-    # if not use relational and use slots, relation model is MLP to approximately balance number of params
-    # if not use relational and not use slots, relational model is MLP as well
-    if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(args.hidden_size, args.hidden_size)).to(device)
-    elif (args.use_relational_model):
-        raise ValueError("can't have relational model if not using slots")
-    else:
-        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device)
-    params_to_pretrain.extend(image_relation_model.parameters())
-    models_to_save.append(image_relation_model)
     # abuse of variable name here. This is just to project to the correct dimension
 
     ''' scorer '''
@@ -312,21 +297,20 @@ if __name__ == "__main__":
             # Learn representations of images
             # flatten the n_way and n_support+n_query dimensions
             image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
-            image_full = image_relation_model(image_slot, is_ex=True)
             
             if args.aux_task=='caption_slot' or args.aux_task=='caption_image':
-                n_total = image_full.shape[1]
+                n_total = image_slot.shape[1]
                 hint_seq = hint_seq.reshape(n_way * n_total, max_hint_length);
                 hint_mask = hint_mask.reshape(n_way * n_total, -1)
                 hint_length = hint_length.reshape(n_way * n_total)
                 if (args.aux_task=='caption_slot'):
-                    assert(len(image_full.shape)==4), "The examples_full should have shape: n_way X (n_support+n_query) X num_slots X dim"
-                    image_full = image_full.reshape(n_way * n_total, args.num_slots, args.hidden_size);
-                    hypo_out, attns = hint_model(image_full, hint_seq, hint_length)
+                    assert(len(image_slot.shape)==4), "The examples_full should have shape: n_way X (n_support+n_query) X num_slots X dim"
+                    image_slot = image_slot.reshape(n_way * n_total, args.num_slots, args.hidden_size);
+                    hypo_out, attns = hint_model(image_slot, hint_seq, hint_length)
                 else:
-                    assert(len(image_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
-                    image_full = image_full.reshape(n_way * n_total, args.hidden_size);
-                    hypo_out, attns = hint_model(image_full, hint_seq, hint_length)
+                    assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
+                    image_slot = image_slot.reshape(n_way * n_total, args.hidden_size);
+                    hypo_out, attns = hint_model(image_slot, hint_seq, hint_length)
 
                 seq_len = hint_seq.size(1)
                 
@@ -365,7 +349,7 @@ if __name__ == "__main__":
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
             elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
-                n_total = image_full.shape[1]
+                n_total = image_slot.shape[1]
                 hint_seq = hint_seq.flatten(0, 1);
                 hint_mask = hint_mask.flatten(0, 1);
                 hint_length = hint_length.flatten(0, 1);
@@ -375,16 +359,16 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length) 
 
                 if (args.aux_task=='matching_slot'):
-                    assert(len(image_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
+                    assert(len(image_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(n_way * n_total, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=image_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
+                    matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==special_idx["sos_index"]) | \
                                             (hint_seq==special_idx["eos_index"]) | \
                                             (hint_seq==special_idx["pad_index"])));
                 else:
-                    assert(len(image_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
+                    assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(n_way * n_total, args.hidden_size))
-                    hypo_loss, metric = hype_loss(im=image_full, s=hint_rep)
+                    hypo_loss, metric = hype_loss(im=image_slot, s=hint_rep)
                 
                 if args.visualize_attns:
                     raise NotImplementedError
@@ -443,13 +427,12 @@ if __name__ == "__main__":
 
             # Learn representations of images and examples
             image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
-            image_full = image_relation_model(image_slot, is_ex=True)
 
             if "_image" in args.aux_task:
-                image_full = image_full.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
+                image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
-            support_full = image_full[:,:args.n_shot]
-            query_full = image_full[:,args.n_shot:]
+            support_full = image_slot[:,:args.n_shot]
+            query_full = image_slot[:,args.n_shot:]
 
             score = im_im_scorer_model(support_full, query_full).squeeze() # this will be of size (n_way*n_query, n_way)
             y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)
@@ -489,13 +472,12 @@ if __name__ == "__main__":
 
                 # Learn representations of images and examples
                 image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
-                image_full = image_relation_model(image_slot, is_ex=True)
 
                 if "_image" in args.aux_task:
-                    image_full = image_full.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
+                    image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
-                support_full = image_full[:,:args.n_shot]
-                query_full = image_full[:,args.n_shot:]
+                support_full = image_slot[:,:args.n_shot]
+                query_full = image_slot[:,args.n_shot:]
 
                 score = im_im_scorer_model(support_full, query_full).squeeze() # this will be of size (n_way*n_query, n_way)
                 y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)

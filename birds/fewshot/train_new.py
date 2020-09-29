@@ -125,13 +125,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--test_n_way",
         type=int,
-        default=None,
+        default=5,
         help="Specify to change n_way eval at test",
     )
     parser.add_argument("--n_shot", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=600)
     parser.add_argument("--n_workers", type=int, default=4)
-    parser.add_argument("--seed", default=None, type=int)
     args = parser.parse_args()
 
     if not os.path.isdir(args.exp_dir):
@@ -154,11 +153,11 @@ if __name__ == "__main__":
     vocab = lang_utils.load_vocab(constants.LANG_DIR)
     special_idx = lang_utils.get_special_indices(vocab)
     train_i2w = lang_utils.load_idx_to_word(vocab)
-    train_vocab_size = vocab.values().max()+1 # get largest token index value as size of vocab
+    train_vocab_size = len(vocab) # get largest token index value as size of vocab
 
-    n_query = max(1, int(16 * args.test_n_way / args.train_n_way))
+    n_query = max(1, int(16 * args.test_n_way / args.n_way))
 
-    train_few_shot_args = dict(n_way=args.train_n_way, n_support=args.n_shot)
+    train_few_shot_args = dict(n_way=args.n_way, n_support=args.n_shot)
     base_datamgr = SetDataManager(
         "CUB", 84, n_query=n_query, **train_few_shot_args, args=args
     )

@@ -239,9 +239,9 @@ class ShapeWorld(data.Dataset):
         try:
             with open(os.path.join(split_dir, 'worlds.json')) as fp:
                 worlds = json.load(fp)
-            self.create_labels(worlds);
+            self.create_labels(worlds)
         except FileNotFoundError:
-            worlds = None;
+            worlds = None
 
         test_hints = os.path.join(split_dir, 'test_hints.json')
         if self.fixed_noise_colors is not None:
@@ -366,12 +366,12 @@ class ShapeWorld(data.Dataset):
                 thl = hint_lengths[test_hint_i]
             if self.worlds!=None:
                 world = worlds[i]
-                len_world = [];
+                len_world = []
                 for concept in world:
-                    num_obj = len(concept);
-                    len_world.append(num_obj);
-                    concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj));
-                len_world = np.array(len_world);
+                    num_obj = len(concept)
+                    len_world.append(num_obj)
+                    concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj))
+                len_world = np.array(len_world)
             else:
                 world = np.array([hints[test_hint_i]]*(N_EX+1))
                 len_world = np.array([hint_lengths[test_hint_i]]*(N_EX+1))
@@ -413,18 +413,18 @@ class ShapeWorld(data.Dataset):
         logging.info('Created vocab with %d words.' % len(w2c))
 
     def create_labels(self, worlds):
-        colorset = set();
-        shapeset = set();
+        colorset = set()
+        shapeset = set()
         if worlds is not None:
             for concept in worlds:
                 for inst in concept:
                     for col_n_shape_n_pos in inst:
-                        colorset.add(col_n_shape_n_pos['color']);
-                        shapeset.add(col_n_shape_n_pos['shape']);
-        color2idx = dict(zip(colorset, range(len(colorset))));
-        shape2idx = dict(zip(shapeset, range(len(shapeset))));
-        color2idx['*'] = len(color2idx);
-        shape2idx['*'] = len(shape2idx);
+                        colorset.add(col_n_shape_n_pos['color'])
+                        shapeset.add(col_n_shape_n_pos['shape'])
+        color2idx = dict(zip(colorset, range(len(colorset))))
+        shape2idx = dict(zip(shapeset, range(len(shapeset))))
+        color2idx['*'] = len(color2idx)
+        shape2idx['*'] = len(shape2idx)
         self.label2idx = {
             'color': color2idx,
             'shape': shape2idx
@@ -441,8 +441,8 @@ class ShapeWorld(data.Dataset):
         batch_label = []
         batch_hint = []
         batch_hint_length = []
-        batch_worlds = [];
-        batch_world_lens = [];
+        batch_worlds = []
+        batch_world_lens = []
         if self.test_hints is not None:
             batch_test_hint = []
             batch_test_hint_length = []
@@ -459,7 +459,7 @@ class ShapeWorld(data.Dataset):
             batch_hint_length.append(hint_length)
             if self.worlds is not None:
                 batch_worlds.append(world)
-                batch_world_lens.append(world_len);
+                batch_world_lens.append(world_len)
             if self.test_hints is not None:
                 batch_test_hint.append(test_hint)
                 batch_test_hint_length.append(test_hint_length)
@@ -481,7 +481,7 @@ class ShapeWorld(data.Dataset):
         if self.worlds is not None: 
             batch_world_lens = torch.from_numpy(np.array(batch_world_lens)).long()
         else:
-            batch_worlds = None;
+            batch_worlds = None
             batch_world_lens = None
         return (
             batch_examples, batch_image, batch_label, batch_hint,
@@ -557,8 +557,8 @@ class ShapeWorld(data.Dataset):
             support)
         # Instance noise
         if (self.noise==0.0):
-            support_instance_noise = torch.FloatTensor(*support.shape).zero_();
-            query_instance_noise = torch.FloatTensor(*query.shape).zero_();
+            support_instance_noise = torch.FloatTensor(*support.shape).zero_()
+            query_instance_noise = torch.FloatTensor(*query.shape).zero_()
         else:
             if self.noise_type == 'gaussian':
                 support_instance_noise = torch.FloatTensor(*support.shape).normal_(
@@ -592,7 +592,7 @@ class ShapeWorld(data.Dataset):
             examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = self.data[
                 index]
 
-            # tie a language to a concept; convert to pytorch.
+            # tie a language to a concept convert to pytorch.
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
 
@@ -784,7 +784,7 @@ def extract_objects(hints):
     """
     all_feats = []
     for hint in hints:
-        feats = {};
+        feats = {}
         for maybe_rel in ['above', 'below', 'left', 'right']:
             if maybe_rel in hint:
                 rel = maybe_rel
@@ -814,8 +814,8 @@ def extract_objects(hints):
                     elif feat == 'shape':
                         feats['shape'] = '*'
             elif (len(fragment)==1):
-                assert(fragment[0] in SHAPES), fragment;
-                feats['color'] = '*';
+                assert(fragment[0] in SHAPES), fragment
+                feats['color'] = '*'
             else:
                 raise RuntimeError('Each fragment should be size 1 or 2, you have {}'.format(fragment))
     return all_feats
@@ -823,11 +823,11 @@ def extract_objects(hints):
 def extract_objects_and_positions(world, world_len, labels_to_idx):
     # make sure the to pad the null states with the last index
     objects = []
-    positions = [];
+    positions = []
     for i, concept in enumerate(world):
         for j, inst in enumerate(concept):
             objects.append(one_hot(inst, world_len[i][j], labels_to_idx))
-            positions.append(torch.tensor([shape['pos'] for shape in inst[:world_len[i][j]]], dtype=torch.float));
+            positions.append(torch.tensor([shape['pos'] for shape in inst[:world_len[i][j]]], dtype=torch.float))
     return objects, positions
 
 def one_hot(inst, world_len, labels_to_idx):
@@ -835,9 +835,9 @@ def one_hot(inst, world_len, labels_to_idx):
     shape_len = len(labels_to_idx['shape'])
     # get the number of objects in that instance. The padded object will have None in 
 
-    color_onehot = torch.zeros(world_len, color_len);
-    shape_onehot = torch.zeros(world_len, shape_len);
+    color_onehot = torch.zeros(world_len, color_len)
+    shape_onehot = torch.zeros(world_len, shape_len)
     color_onehot[range(world_len), [labels_to_idx['color'][shape['color']] for shape in inst[:world_len]]] = 1
     shape_onehot[range(world_len), [labels_to_idx['shape'][shape['shape']] for shape in inst[:world_len]]] = 1
-    total = torch.cat([color_onehot, shape_onehot], dim=1); # one hot encoding of color, shape, and presense of object
+    total = torch.cat([color_onehot, shape_onehot], dim=1) # one hot encoding of color, shape, and presense of object
     return total

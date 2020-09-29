@@ -661,19 +661,19 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3),
+                nn.Conv2d(3, dim, 5),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
+                nn.Conv2d(dim, dim, 5),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
+                nn.Conv2d(dim, dim, 5),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
+                nn.Conv2d(dim, dim, 5),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
+                ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim)
             )
 
             self.post_mlp = nn.Sequential(
@@ -687,18 +687,18 @@ class SANet(nn.Module):
         elif (slot_model=='conv'):
             final_size = im_size
             for i in range(4):
-                final_size = (final_size-1)//2+1
+                final_size = (final_size-4)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, 2, padding=1),
+                nn.Conv2d(3, dim, 5, 2),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),
@@ -907,7 +907,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']

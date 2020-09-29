@@ -327,6 +327,11 @@ def load_vocab(lang_dir):
     vocab[EOS_TOKEN] = eos_idx
     return vocab
 
+def load_idx_to_word(vocab):
+    idx2word = {};
+    for k, v in vocab.items():
+        idx2word[v] = k;
+    return idx2word;
 
 def glove_init(vocab, emb_size=300):
     """

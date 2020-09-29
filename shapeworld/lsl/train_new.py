@@ -44,7 +44,7 @@ if __name__ == "__main__":
                         help='How to compare support to query reps')
     parser.add_argument('--freeze_slots',
                         action='store_true',
-                        help='If True, freeze slots.');
+                        help='If True, freeze slots.')
     parser.add_argument('--use_relational_model',
                         action='store_true',
                         help='Use relational model on top of slots or only slots.')
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument('--ft_epochs', type=int, default=20, help='Finetune epochs')
     parser.add_argument('--debug_example', 
                         action="store_true",
-                        help="If true, print out example images and hint");
+                        help="If true, print out example images and hint")
     parser.add_argument('--skip_eval',
                         action="store_true",
                         help="If true, skip the zero shot evaluation and only save the pretrained features.")
@@ -162,15 +162,15 @@ if __name__ == "__main__":
         os.makedirs(args.exp_dir)
 
     if args.aux_task=='set_pred' and not args.oracle_world_config:
-        args.pos_weight = 0.0; # if not using oracle object info, can't use coordinates for supervision
+        args.pos_weight = 0.0 # if not using oracle object info, can't use coordinates for supervision
 
     # reproducibility
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    if (not torch.cuda.is_available()):
-        print("No CUDA available so not using it");
-        device = torch.device('cpu');
+    if not torch.cuda.is_available():
+        print("No CUDA available so not using it")
+        device = torch.device('cpu')
     else:
         device = torch.device('cuda' if args.cuda else 'cpu')
 
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     train_vocab = train_dataset.vocab
     train_vocab_size = train_dataset.vocab_size
     train_max_length = train_dataset.max_length
-    train_w2i, train_i2w, train_w2c = train_vocab['w2i'], train_vocab['i2w'], train_vocab['w2c'];
+    train_w2i, train_i2w, train_w2c = train_vocab['w2i'], train_vocab['i2w'], train_vocab['w2c']
     pad_index = train_w2i[PAD_TOKEN]
     sos_index = train_w2i[SOS_TOKEN]
     eos_index = train_w2i[EOS_TOKEN]
@@ -270,23 +270,23 @@ if __name__ == "__main__":
         labels_to_idx = train_dataset.label2idx
 
     ''' vision '''
-    # if _image in task name, get vector for each image with conv net; else get set of vectors with slots
-    image_model = 'conv' if '_image' in args.aux_task else 'slot_attn';
-    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model);
-    image_part_model = ExWrapper(backbone_model).to(device);
+    # if _image in task name, get vector for each image with conv net else get set of vectors with slots
+    image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
+    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model)
+    image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
-    models_to_save = [image_part_model];
+    models_to_save = [image_part_model]
 
-    # if use relational model and use slots, add relational net structure;
+    # if use relational model and use slots, add relational net structure
     # if use relational and not slots, return error
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size)).to(device);
+        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size)).to(device)
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
-        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device);
+        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device)
     params_to_pretrain.extend(image_relation_model.parameters())
     models_to_save.append(image_relation_model)
     # abuse of variable name here. This is just to project to the correct dimension
@@ -301,39 +301,39 @@ if __name__ == "__main__":
     # if use conv, use mlp then average
     # if ('_slot' in args.aux_task):
     #     if (args.use_relational_model):
-    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
     #         params_to_finetune = list(im_im_scorer_model.parameters())
     #         models_to_save.append(im_im_scorer_model)
     #     else:
-    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
     #         params_to_finetune = list(im_im_scorer_model.parameters())
     #         models_to_save.append(im_im_scorer_model)
     # elif ('_image' in args.aux_task):
-    #     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size);
+    #     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
     #     im_im_scorer_model = im_im_scorer_model.to(device)
     #     params_to_finetune = list(im_im_scorer_model.parameters())
     #     models_to_save.append(im_im_scorer_model)
 
-    im_im_scorer_model = TransformerAgg(args.hidden_size).to(device);
+    im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
-        image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device); # add one for no object
-        params_to_pretrain.extend(image_cls_projection.parameters());
+        image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device) # add one for no object
+        params_to_pretrain.extend(image_cls_projection.parameters())
         models_to_save.append(image_cls_projection)
 
-        image_pos_projection = MLP(64, args.hidden_size, 2).to(device);
-        params_to_pretrain.extend(image_pos_projection.parameters());
+        image_pos_projection = MLP(64, args.hidden_size, 2).to(device)
+        params_to_pretrain.extend(image_pos_projection.parameters())
         models_to_save.append(image_pos_projection)
 
     elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         if args.aux_task=='caption_slot':
-            hint_model = TextProposalWithAttn(embedding_model, encoder_dim=args.hidden_size, hidden_size=args.hidden_size, )
+            hint_model = TextProposalWithAttn(embedding_model, encoder_dim=args.hidden_size, hidden_size=args.hidden_size)
         else:
-            hint_model = TextProposal(embedding_model, hidden_size=args.hidden_size);
+            hint_model = TextProposal(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
@@ -345,11 +345,11 @@ if __name__ == "__main__":
                         'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
                         'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image')
-                     }[args.hypo_model];
+                     }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
-    
+
     else:
         raise ValueError('invalid auxiliary task name')
 
@@ -358,11 +358,11 @@ if __name__ == "__main__":
         hype_loss = SetCriterion(num_classes=[len(labels_to_idx['color']), len(labels_to_idx['shape'])], 
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
-                            target_type=args.target_type).to(device);
+                            target_type=args.target_type).to(device)
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_slot':
-        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device);
+        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device)
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
@@ -378,26 +378,27 @@ if __name__ == "__main__":
     }[args.optimizer]
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
-    # models_to_save.append(optimizer);
-    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5);
+    # models_to_save.append(optimizer)
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5)
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
-    print(sum([p.numel() for p in params_to_pretrain]));
+    print(sum([p.numel() for p in params_to_pretrain]))
+    print(sum([p.numel() for p in params_to_finetune]))
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
-        ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar');
-        sds = torch.load(ckpt_path, map_location=lambda storage, loc: storage);
+        ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar')
+        sds = torch.load(ckpt_path, map_location=device)
         for m in models_to_save:
             if (not isinstance(m, TransformerAgg)):
-                print(m.load_state_dict(sds[repr(m)]));
-        print("loaded checkpoint");
+                print(m.load_state_dict(sds[repr(m)]))
+        print("loaded checkpoint")
 
     def pretrain(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
-                m.train();
+                m.train()
 
-        aux_loss_total = 0;
-        cls_acc = 0;
+        aux_loss_total = 0
+        cls_acc = 0
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -410,31 +411,31 @@ if __name__ == "__main__":
             n_ex = examples.shape[1]
 
             if args.aux_task=='set_pred':
-                world = rest[-2]; # this should be a list of lists
-                world_len = rest[-1]; # batch size x n_ex, for how many objects each image contains
+                world = rest[-2] # this should be a list of lists
+                world_len = rest[-1] # batch size x n_ex, for how many objects each image contains
                 if args.oracle_world_config:
-                    objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx);
+                    objs, poses = extract_objects_and_positions(world, world_len, labels_to_idx)
                 else:
-                    objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq]);
-                    _, poses = extract_objects_and_positions(world, world_len, labels_to_idx); # this will not be used, but need to be here for set criterion to work
+                    objs = extract_objects([[train_i2w[token.item()] for token in h if token.item()!=pad_index] for h in hint_seq])
+                    _, poses = extract_objects_and_positions(world, world_len, labels_to_idx) # this will not be used, but need to be here for set criterion to work
 
             if args.debug_example:
-                rand_idx = np.random.randint(0, args.batch_size); # sample a random index from current batch
-                print([train_i2w[k.item()] for k in hint_seq[rand_idx]]); # get hint in words
+                rand_idx = np.random.randint(0, args.batch_size) # sample a random index from current batch
+                print([train_i2w[k.item()] for k in hint_seq[rand_idx]]) # get hint in words
                 print(label[rand_idx])
                 if (args.aux_task=='set_pred'):
                     for w in world[rand_idx]:
-                        print(w); 
-                    print(objs[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
-                    print(poses[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)]);
+                        print(w) 
+                    print(objs[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)])
+                    print(poses[(n_ex+1)*rand_idx:(n_ex+1)*(rand_idx+1)])
                 print(examples[rand_idx][0].shape)
-                fig, axes = plt.subplots(5);
+                fig, axes = plt.subplots(5)
                 for i in range(4):
-                    axes[i].imshow(examples[rand_idx][i].permute(1, 2, 0)); # plot examples, transpose to put channel in the last dim
-                    axes[i].axis('off');
-                axes[4].imshow(image[rand_idx].permute(1, 2, 0));
+                    axes[i].imshow(examples[rand_idx][i].permute(1, 2, 0)) # plot examples, transpose to put channel in the last dim
+                    axes[i].axis('off')
+                axes[4].imshow(image[rand_idx].permute(1, 2, 0))
                 axes[4].axis('off')
-                plt.show();
+                plt.show()
 
             # Load hint
             hint_seq = hint_seq.to(device)
@@ -445,45 +446,45 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image, is_ex=False, visualize_attns=False); # --> N x n_slot x C
-            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
+            image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
 
             if args.aux_task=='set_pred':
-                slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
-                slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1);
+                slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
+                slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
     
                 losses, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
-                                    {'labels': objs, 'poses': poses});
+                                    {'labels': objs, 'poses': poses})
 
                 # Hypothesis loss
                 loss = losses['class'] + args.pos_weight*losses['position']
 
                 aux_loss_total += losses['class'].item()
                 pos_loss_total += losses['position'].item()
-                cls_acc += metric['acc'];
+                cls_acc += metric['acc']
             elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
-                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0); 
+                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0) 
                 if (args.aux_task=='caption_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     hypo_out, attns = hint_model(examples_full.flatten(0, 1), hint_seq, \
-                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0));
+                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0))
                 else:
                     assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
                     hypo_out = hint_model(examples_full.flatten(0, 1), hint_seq, \
                         torch.repeat_interleave(hint_length, repeats=n_ex, dim=0))
                 seq_len = hint_seq.size(1)
-                
+
                 if (args.visualize_attns):
                     if (args.aux_task=='caption_slot'):
-                        plt.subplot(111).imshow(attns[2].detach().t());
+                        plt.subplot(111).imshow(attns[2].detach().t())
                     elif(args.aux_task=='caption_image'):
                         fig, axes = plt.subplots(2, 7)
                         for i, a in enumerate(attns[2].detach()):
-                            axes[i//7][i%7].imshow(a.reshape(56, 56));
-                    print([train_i2w[h.item()] for h in torch.argmax(hypo_out[2], dim=-1)]);
-                    print([train_i2w[h.item()] for h in hint_seq[2]]);
+                            axes[i//7][i%7].imshow(a.reshape(56, 56))
+                    print([train_i2w[h.item()] for h in torch.argmax(hypo_out[2], dim=-1)])
+                    print([train_i2w[h.item()] for h in hint_seq[2]])
                     plt.show()
 
                 hypo_out = hypo_out[:, :-1].contiguous()
@@ -495,48 +496,48 @@ if __name__ == "__main__":
                 hypo_loss = F.cross_entropy(hypo_out_2d,
                                             hint_seq_2d,
                                             reduction='mean',
-                                            ignore_index=pad_index); # switch to token-wise loss
-                loss = hypo_loss;
-                non_pad_mask = hint_seq_2d!=pad_index;
-                hypo_pred = torch.argmax(hypo_out_2d, dim=-1).masked_select(non_pad_mask);
-                hypo_gt = hint_seq_2d.masked_select(non_pad_mask);
-                metric = {'acc': (hypo_pred==hypo_gt).float().mean().item()}; 
+                                            ignore_index=pad_index) # switch to token-wise loss
+                loss = hypo_loss
+                non_pad_mask = hint_seq_2d!=pad_index
+                hypo_pred = torch.argmax(hypo_out_2d, dim=-1).masked_select(non_pad_mask)
+                hypo_gt = hint_seq_2d.masked_select(non_pad_mask)
+                metric = {'acc': (hypo_pred==hypo_gt).float().mean().item()} 
                 aux_loss_total += hypo_loss.item()
-                cls_acc += metric['acc'];
+                cls_acc += metric['acc']
             elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
                 if ('transformer' in args.hypo_model):
-                    hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index); 
+                    hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index) 
                 else:
-                    hint_rep = hint_model(hint_seq, hint_length); 
-                
+                    hint_rep = hint_model(hint_seq, hint_length) 
+
                 if (args.aux_task=='matching_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length, args.hidden_size))
                     matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
-                                    y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)));
+                                    y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)))
                 else:
                     assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(batch_size, args.hidden_size))
-                    hypo_loss, metric = hype_loss(im=examples_full, s=hint_rep);
+                    hypo_loss, metric = hype_loss(im=examples_full, s=hint_rep)
                 
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[2][0].detach().t(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
                     ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots) if y1!=y2]
                     # ylabels = list(range(args.num_slots))
                     # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
-                    ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
-                    ax.set_yticks(np.arange(len(ylabels)))
-                    ax.set_yticklabels(ylabels);
+                    ax.set_yticks(np.arange(len(hint_seq[0])))
+                    ax.set_yticklabels([train_i2w[h.item()] for h in hint_seq[0]])
+                    ax.set_xticks(np.arange(len(ylabels)))
+                    ax.set_xticklabels(ylabels, rotation=45)
                     ax.set_aspect('auto')
                     plt.colorbar(im, ax=ax)
                     plt.show()
 
-                loss = hypo_loss;
-                aux_loss_total += hypo_loss.item();
-                cls_acc += metric['part_acc'];
+                loss = hypo_loss
+                aux_loss_total += hypo_loss.item()
+                cls_acc += metric['part_acc']
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -553,18 +554,18 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc))
         return loss, metric
 
     def finetune(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
-                m.train();
+                m.train()
             if (args.freeze_slots and (isinstance(m, ExWrapper))):
-                m.eval();
+                m.eval()
 
-        main_acc = 0;
-        pred_loss_total = 0;
+        main_acc = 0
+        pred_loss_total = 0
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
@@ -577,8 +578,8 @@ if __name__ == "__main__":
             n_ex = examples.shape[1]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image, is_ex=False, visualize_attns=False); # --> N x n_slot x C
-            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False); # --> N x n_ex x n_slot x C
+            image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
             image_full = image_relation_model(image_slot, is_ex=False)
             examples_full = image_relation_model(examples_slot, is_ex=True)
 
@@ -586,9 +587,9 @@ if __name__ == "__main__":
                 examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
                 image_full = image_full.reshape(batch_size, 1, args.hidden_size)
 
-            score = im_im_scorer_model(examples_full, image_full).squeeze();
-            loss = F.binary_cross_entropy_with_logits(score, label.float());
-            pred_loss_total += loss.item();
+            score = im_im_scorer_model(examples_full, image_full).squeeze()
+            loss = F.binary_cross_entropy_with_logits(score, label.float())
+            pred_loss_total += loss.item()
             main_acc += ((score>0).long()==label).float().mean().item()
 
             loss.backward()
@@ -603,13 +604,13 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Concept Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, main_acc));
+        print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Concept Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, main_acc))
         return loss
 
     def test(epoch, split='train'):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
-                m.eval();
+                m.eval()
 
         concept_avg_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
@@ -623,8 +624,8 @@ if __name__ == "__main__":
                 batch_size = len(image)
                 n_ex = examples.shape[1]
                 # Learn representations of images and examples
-                image_slot = image_part_model(image, is_ex=False, visualize_attns=False); # --> N x n_slot x C
-                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns); # --> N x n_ex x n_slot x C
+                image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
                 image_full = image_relation_model(image_slot, is_ex=False)
                 examples_full = image_relation_model(examples_slot, is_ex=True)
 
@@ -632,10 +633,10 @@ if __name__ == "__main__":
                     examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
                     image_full = image_full.reshape(batch_size, 1, args.hidden_size)
 
-                score = im_im_scorer_model(examples_full, image_full).squeeze();
+                score = im_im_scorer_model(examples_full, image_full).squeeze()
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
-                accuracy = accuracy_score(label_np, label_hat);
+                accuracy = accuracy_score(label_np, label_hat)
                 concept_avg_meter.update(accuracy, batch_size, raw_scores=(label_hat == label_np))
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
@@ -655,24 +656,24 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch);
+        train_loss, pt_metric = pretrain(epoch, 1)
         for k, v in pt_metric.items():
-            metrics[k].append(v);
+            metrics[k].append(v)
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir)
 
     if args.freeze_slots:
         # for m in models_to_save:
         #     if (isinstance(m, ExWrapper)):
-        #         setattr(m, 'freeze_model', True);
-        #         m.eval();
+        #         setattr(m, 'freeze_model', True)
+        #         m.eval()
         for p in params_to_pretrain:
-            p.requires_grad = False;
+            p.requires_grad = False
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch);
+        train_loss = finetune(epoch, 1)
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')
@@ -701,7 +702,7 @@ if __name__ == "__main__":
             best_test_acc_ci = test_acc_ci
 
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir);
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

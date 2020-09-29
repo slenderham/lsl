@@ -146,7 +146,7 @@ if __name__ == "__main__":
     train_i2w = lang_utils.load_idx_to_word(vocab)
     train_vocab_size = len(vocab) # get largest token index value as size of vocab
 
-    n_query = max(1, int(16 * args.test_n_way / args.n_way))
+    n_query = max(1, int(8 * args.test_n_way / args.n_way))
 
     train_few_shot_args = dict(n_way=args.n_way, n_support=args.n_shot)
     base_datamgr = SetDataManager(

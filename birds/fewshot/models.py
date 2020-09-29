@@ -935,30 +935,32 @@ class SinkhornScorer(Scorer):
         self.reg = reg
 
     def forward(self, x, y, word_idx, y_mask):
-        # x.shape = nxn_ex, num_obj_x, h y.shape = n, num_obj_y, h word_idx.shape = n, num_obj_y
+        # x.shape = batch_size, num_obj_x, h 
+        # y.shape = batch_size, num_obj_y, h 
+        # word_idx.shape = batch_size, num_obj_y
+        # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
-        n_ex = x.shape[0]//n 
-        assert(x.shape[0]==n*n_ex)
-        assert(y_mask.shape==y.shape[:2])
+        assert(x.shape[0]==n)
+        assert(y_mask.shape==word_idx.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-        y_expand = y.repeat(n*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        y_expand = y.repeat(n, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==(n**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
-        y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        word_idx = word_idx.repeat(n*n_ex, 1)
+        y_mask = y_mask.unsqueeze(1).repeat(n, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
+        y_mask = torch.cat([y_mask, (torch.ones(n**2, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
+        word_idx = word_idx.repeat(n, 1)
         matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
                                                 self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters)
-        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
-        scores = scores.reshape(n*n_ex, n)
-        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
+        assert(matching.shape==(n**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
+        scores = scores.reshape(n, n)
+        matching = matching.reshape(n, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
-        pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask).reshape(n*n_ex, 1)
-        neg = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1)
+        pos_mask = (torch.block_diag(*([torch.ones(1, 1)]*n))>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask).reshape(n, 1)
+        neg = scores.masked_select(~pos_mask).reshape(n, n-1)
         scores_reshaped = torch.cat([pos, neg], dim=1)
         loss = -F.log_softmax(scores_reshaped, dim=1)[:,0].mean()
         metric['part_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()

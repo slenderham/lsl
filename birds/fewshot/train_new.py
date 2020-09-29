@@ -299,7 +299,7 @@ if __name__ == "__main__":
             hint_seq = lang[:, :, :max_hint_length]
             hint_mask = lang_mask[:, :, :max_hint_length]
             hint_seq = hint_seq.to(device)
-            hint_length = hint_length.to(device)
+            hint_length = lang_length.to(device)
             hint_mask = hint_mask.to(device)
 
             if args.debug_example:

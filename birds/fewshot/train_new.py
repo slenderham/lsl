@@ -174,7 +174,7 @@ if __name__ == "__main__":
         n_support=args.n_shot,
         args=args,
     )
-    print("Loading val data\n")
+    print("Loading val data")
     val_loader = val_datamgr.get_data_loader(
         val_file, aug=False, lang_dir=constants.LANG_DIR, normalize=True, vocab=vocab,
     )
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=64, slot_model=image_model)
+    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=128, slot_model=image_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size)).to(device)
+        image_relation_model = ExWrapper(RelationalNet(128, args.hidden_size)).to(device)
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:
@@ -288,6 +288,7 @@ if __name__ == "__main__":
             n_query = x.size(1) - args.n_shot
             x = x.to(device)
             target = target.to(device)
+            print("image loaded")
 
             # load hint, size [n_way, n_support + n_query, length] 
             max_hint_length = lang_length.max()
@@ -296,6 +297,7 @@ if __name__ == "__main__":
             hint_seq = hint_seq.to(device)
             hint_length = lang_length.to(device)
             hint_mask = hint_mask.to(device)
+            print("hint loaded")
 
             if args.debug_example:
                 rand_idx = np.random.randint(0, x.size(1)) # sample a random index from current batch
@@ -312,8 +314,10 @@ if __name__ == "__main__":
             # Learn representations of images
             # flatten the n_way and n_support+n_query dimensions
             image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
+            print("slots processed")
             image_full = image_relation_model(image_slot, is_ex=True)
-
+            print("relations processed")
+            
             if args.aux_task=='caption_slot' or args.aux_task=='caption_image':
                 n_total = image_full.shape[1]
                 hint_seq = hint_seq.reshape(n_way * n_total, max_hint_length);
@@ -373,6 +377,7 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length, hint_mask) 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length) 
+                print("hint processed")
 
                 if (args.aux_task=='matching_slot'):
                     assert(len(image_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
@@ -385,6 +390,7 @@ if __name__ == "__main__":
                     assert(len(image_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(n_way * n_total, args.hidden_size))
                     hypo_loss, metric = hype_loss(im=image_full, s=hint_rep)
+                print("matching processed")
                 
                 if args.visualize_attns:
                     ax = plt.subplot(111)

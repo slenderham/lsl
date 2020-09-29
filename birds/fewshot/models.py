@@ -661,10 +661,10 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             final_size = im_size
-            final_size = (final_size-4)//2+1
+            final_size = (final_size-3)//2+1
             final_size = final_size-3*2
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5, 2),
+                nn.Conv2d(3, dim, 3, 2),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
@@ -690,18 +690,18 @@ class SANet(nn.Module):
         elif (slot_model=='conv'):
             final_size = im_size
             for i in range(4):
-                final_size = (final_size-4)//2+1
+                final_size = (final_size-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5, 2),
+                nn.Conv2d(3, dim, 3, 2),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2),
+                nn.Conv2d(dim, dim, 3, 2),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2),
+                nn.Conv2d(dim, dim, 3, 2),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2),
+                nn.Conv2d(dim, dim, 3, 2),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),

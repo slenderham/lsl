@@ -371,6 +371,7 @@ if __name__ == "__main__":
                     hypo_loss, metric = hype_loss(im=image_slot, s=hint_rep)
                 
                 if args.visualize_attns:
+                    fig = plt.figure()
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
@@ -379,7 +380,7 @@ if __name__ == "__main__":
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels)
                     ax.set_aspect('auto')
-                    plt.colorbar(im, ax=ax)
+                    fig.colorbar(im, ax=ax)
                     plt.show()
 
                 loss = hypo_loss

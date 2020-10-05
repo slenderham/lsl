@@ -482,11 +482,6 @@ def Conv4SNP():
     return ConvNetSNopool(4)
 
 
-def ResNetTiny(final_dim, flatten=False):
-    backbone = ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten);
-    return nn.Sequential(backbone, nn.Conv2d(512, final_dim, 1));
-
-
 def ResNet10(flatten=True):
     return ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten)
 

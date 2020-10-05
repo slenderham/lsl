@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     base_loader = base_datamgr.get_data_loader(
         base_file,
-        aug=True,
+        aug=False,
         lang_dir=constants.LANG_DIR,
         normalize=True,
         vocab=vocab,

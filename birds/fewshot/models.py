@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-from vision import ResNetTiny
+from vision import ResNet18
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -661,10 +661,11 @@ class SANet(nn.Module):
         self.num_slots = num_slots
 
         if (slot_model=='slot_attn'):
-            backbone = ResNetTiny(dim, flatten=False)
+            backbone = ResNet18(flatten=False)
             self.encoder = nn.Sequential(
                 backbone, 
-                ImagePositionalEmbedding(backbone[0].final_feat_dim[1], backbone[0].final_feat_dim[2], dim)
+                nn.Conv2d(backbone.final_feat_dim[0], dim, 1),
+                ImagePositionalEmbedding(backbone.final_feat_dim[1], backbone.final_feat_dim[2], dim)
             )
 
             self.post_mlp = nn.Sequential(

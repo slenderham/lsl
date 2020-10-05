@@ -1157,36 +1157,24 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
-    def __init__(self, hidden_size, input_size=None):
+    def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__()
-        
         self.hidden_size = hidden_size
-        self.input_size = input_size
-
-        if (input_size is not None):
-            self.proj = nn.Linear(input_size, hidden_size)
-        else:
-            self.proj = nn.Identity()
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
-        self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
+        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
-    def forward(self, x, y):
-        b, n_ex, num_rel, h = x.shape
-        assert(self.input_size==None or h==self.input_size)
-        assert(y.shape==(b, num_rel, h))
-        x = self.proj(x)
-        y = self.proj(y)
-        x = x.flatten(1, 2)
-        x += self.image_id[:,0:1,:]
-        y += self.image_id[:,1:2,:]
-        x = x.transpose(0, 1)
-        y = y.transpose(0, 1)
-        whole_rep = self.model(torch.cat([x, y], dim=0))
-        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
-        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
-        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return (x.mean(1)*y.mean(1)).sum(1)
+    def forward(self, x, n_shot):
+        n_way, n_total, num_slot, h = x.shape
+        x = x.flatten(0, 1).transpose(0, 1);
+        assert(x.shape==(num_slot, n_way*n_total, h))
+        x = self.model(torch.cat([self.seed.expand(1, n_way*n_total, self.hidden_size), x], dim=0))[0]
+        # x.shape = n_way*n_total, h
+        x = x.reshape(n_way, n_total, self.hidden_size)
+        support = x[:, :n_shot].mean(1) # n_way, h
+        query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, h
+        # 0,0,...,0,1,1,...,1,...,4,4,4,...4
+        return torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
 
 class ContrastiveLoss(Scorer):
     """

@@ -371,17 +371,13 @@ if __name__ == "__main__":
                     hypo_loss, metric = hype_loss(im=image_slot, s=hint_rep)
                 
                 if args.visualize_attns:
-                    raise NotImplementedError
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach().t(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
-                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots) if y1!=y2]
-                    # ylabels = list(range(args.num_slots))
-                    # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
-                    ax.set_yticks(np.arange(len(hint_seq[0])))
-                    ax.set_yticklabels([train_i2w[h.item()] for h in hint_seq[0]])
-                    ax.set_xticks(np.arange(len(ylabels)))
-                    ax.set_xticklabels(ylabels, rotation=45)
+                    ax.set_xticks(np.arange(len(hint_seq[0])))
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
+                    ax.set_yticks(np.arange(len(ylabels)))
+                    ax.set_yticklabels(ylabels)
                     ax.set_aspect('auto')
                     plt.colorbar(im, ax=ax)
                     plt.show()
@@ -431,10 +427,7 @@ if __name__ == "__main__":
             if "_image" in args.aux_task:
                 image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
-            support_full = image_slot[:,:args.n_shot]
-            query_full = image_slot[:,args.n_shot:]
-
-            score = im_im_scorer_model(support_full, query_full).squeeze() # this will be of size (n_way*n_query, n_way)
+            score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
             y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)
             loss = F.cross_entropy(score, y_query)
             pred_loss_total += loss.item()
@@ -476,10 +469,7 @@ if __name__ == "__main__":
                 if "_image" in args.aux_task:
                     image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
-                support_full = image_slot[:,:args.n_shot]
-                query_full = image_slot[:,args.n_shot:]
-
-                score = im_im_scorer_model(support_full, query_full).squeeze() # this will be of size (n_way*n_query, n_way)
+                score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
                 y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)
                 accuracy = (torch.argmax(score, -1)==y_query).float().mean()
                 concept_avg_meter.update(accuracy, n_way*n_query, raw_scores=((torch.argmax(score, -1)==y_query).float().mean()))

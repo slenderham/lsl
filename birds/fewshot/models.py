@@ -740,6 +740,7 @@ class SANet(nn.Module):
                 axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
+        plt.show()
 
         fig, axes = plt.subplots(1, num_iters)
         for i in range(num_iters):
@@ -748,6 +749,7 @@ class SANet(nn.Module):
                 for w in range(W_k):
                     masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w])
             axes[i].imshow(masked_img, cmap=cmap, norm=norm)
+        plt.show()
 
         # plt.show()
 

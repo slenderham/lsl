@@ -730,6 +730,7 @@ class SANet(nn.Module):
         # rand_idx = torch.randint(0, N, size=(1,)).item()
         rand_idx = 2
         plt.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu())
+        plt.show()
         fig1, axes1 = plt.subplots(num_iters, num_slots)
         fig2, axes2 = plt.subplots(num_iters, num_slots)
         for i in range(num_iters):
@@ -750,8 +751,6 @@ class SANet(nn.Module):
                     masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w])
             axes[i].imshow(masked_img, cmap=cmap, norm=norm)
         plt.show()
-
-        # plt.show()
 
 class ImagePositionalEmbedding(nn.Module):
     def __init__(self, height, width, hidden_size):

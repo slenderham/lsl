@@ -372,7 +372,7 @@ if __name__ == "__main__":
                 
                 if args.visualize_attns:
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().t(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[2][0].detach().t().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)

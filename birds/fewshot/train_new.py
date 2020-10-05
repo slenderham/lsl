@@ -471,9 +471,10 @@ if __name__ == "__main__":
                     image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
                 score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
-                y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)
-                accuracy = (torch.argmax(score, -1)==y_query).float().mean()
-                concept_avg_meter.update(accuracy, n_way*n_query, raw_scores=(torch.argmax(score, -1)==y_query))
+                y_hat = torch.argmax(score, -1).cpu().numpy()
+                y_query = np.repeat(range(n_way), n_query).astype(np.uint8)
+                accuracy = accuracy_score(y_query, y_hat)
+                concept_avg_meter.update(accuracy, n_way*n_query, raw_scores=(y_hat==y_query))
         
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '(test)', epoch, concept_avg_meter.avg))

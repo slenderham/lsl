@@ -447,7 +447,7 @@ if __name__ == "__main__":
             pbar.update()
         pbar.close()
         print('====> {:>12}\tEpoch: {:>3}\tConcept Loss: {:.4f} Concept Acc: {:.4f}'.format('(train)', epoch, pred_loss_total, main_acc))
-        return loss
+        return loss.item()
 
     def test(epoch):
         for m in models_to_save:
@@ -496,8 +496,7 @@ if __name__ == "__main__":
         train_loss, pt_metric = pretrain(epoch)
         for k, v in pt_metric.items():
             metrics[k].append(v)
-        save_defaultdict_to_fs(metrics,
-                               os.path.join(args.exp_dir, 'metrics.json'))
+        save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
         if args.save_checkpoint:
             save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir)
 
@@ -536,8 +535,7 @@ if __name__ == "__main__":
         metrics['best_epoch'] = best_epoch
         metrics['best_test_acc'] = best_test_acc
         metrics['best_test_acc_ci'] = best_test_acc_ci
-        save_defaultdict_to_fs(metrics,
-                               os.path.join(args.exp_dir, 'metrics.json'))
+        save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
 
     print('====> DONE')
     print('====> BEST EPOCH: {}'.format(best_epoch))

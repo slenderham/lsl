@@ -737,7 +737,7 @@ class SANet(nn.Module):
                 axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
                 axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1))
-                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu(), vmin=0, vmax=1)
+                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
 

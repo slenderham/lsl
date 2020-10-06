@@ -902,7 +902,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.25, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.1, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']

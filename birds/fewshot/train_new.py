@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     base_loader = base_datamgr.get_data_loader(
         base_file,
-        aug=True,
+        aug=False,
         lang_dir=constants.LANG_DIR,
         normalize=True,
         vocab=vocab,
@@ -376,7 +376,7 @@ if __name__ == "__main__":
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_slots))
                     ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels)
                     ax.set_aspect('auto')

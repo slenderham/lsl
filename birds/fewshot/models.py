@@ -680,11 +680,7 @@ class SANet(nn.Module):
             final_size = im_size
             for i in range(4):
                 final_size = (final_size-3)//2+1
-            self.encoder = nn.Sequential(
-                ResNet10(flatten=True),
-                ImagePositionalEmbedding(final_size, final_size, dim),
-                nn.Flatten(),
-            )
+            self.encoder = ResNet18(flatten=True)
             self.final_feat_dim = final_size*final_size*dim
 
     def forward(self, img, **kwargs):
@@ -891,7 +887,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=0.75, **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=0.9, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']

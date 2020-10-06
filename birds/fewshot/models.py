@@ -891,7 +891,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.05, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=0.75, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
@@ -909,7 +909,7 @@ class SinkhornScorer(Scorer):
             # freqs = freqs*0.2-0.1
             # freqs[freqs == -float("Inf")] = 1
             # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1))
-            torch.nn.init.constant_(self.dustbin_scores_lang.weight, -0.1)
+            torch.nn.init.constant_(self.dustbin_scores_lang.weight, 0.0)
         else:
             self.base_scorer = DotPScorer()
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))

@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-from vision import ResNet18, ResNet50
+from vision import ResNet18, ResNet50, ResNet10
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -661,7 +661,7 @@ class SANet(nn.Module):
         self.num_slots = num_slots
 
         if (slot_model=='slot_attn'):
-            backbone = ResNet18(flatten=False)
+            backbone = ResNet10(flatten=False)
             self.encoder = nn.Sequential(
                 backbone, 
                 nn.Conv2d(backbone.final_feat_dim[0], dim, 1),
@@ -681,18 +681,7 @@ class SANet(nn.Module):
             for i in range(4):
                 final_size = (final_size-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, 2),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
+                ResNet10(flatten=True),
                 ImagePositionalEmbedding(final_size, final_size, dim),
                 nn.Flatten(),
             )
@@ -902,7 +891,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.1, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.05, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
@@ -920,7 +909,7 @@ class SinkhornScorer(Scorer):
             # freqs = freqs*0.2-0.1
             # freqs[freqs == -float("Inf")] = 1
             # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1))
-            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
+            torch.nn.init.constant_(self.dustbin_scores_lang.weight, -0.1)
         else:
             self.base_scorer = DotPScorer()
         self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))

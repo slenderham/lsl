@@ -143,11 +143,11 @@ if __name__ == "__main__":
     train_i2w = lang_utils.load_idx_to_word(vocab)
     train_vocab_size = len(vocab) # get largest token index value as size of vocab
 
-    n_query = max(1, int(16 * args.test_n_way / args.n_way))
+    n_query = max(1, int(8 * args.test_n_way / args.n_way))
 
     train_few_shot_args = dict(n_way=args.n_way, n_support=args.n_shot)
     base_datamgr = SetDataManager(
-        "CUB", 84, n_query=n_query, **train_few_shot_args, args=args
+        "CUB", 224, n_query=n_query, **train_few_shot_args, args=args
     )
     print("Loading train data")
 
@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
     val_datamgr = SetDataManager(
         "CUB",
-        84,
+        224,
         n_query=n_query,
         n_way=args.test_n_way,
         n_support=args.n_shot,
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=84, num_slots=args.num_slots, dim=args.hidden_size, slot_model=image_model)
+    backbone_model = SANet(im_size=224, num_slots=args.num_slots, dim=args.hidden_size, slot_model=image_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -471,7 +471,7 @@ if __name__ == "__main__":
                     image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
                 score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
-                y_hat = torch.argmax(score, -1).cpu().numpy()
+                y_hat = torch.argmax(score, dim=-1).cpu().numpy()
                 y_query = np.repeat(range(n_way), n_query).astype(np.uint8)
                 accuracy = accuracy_score(y_query, y_hat)
                 concept_avg_meter.update(accuracy, n_way*n_query, raw_scores=(y_hat==y_query))

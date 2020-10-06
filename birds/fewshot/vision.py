@@ -433,8 +433,9 @@ class ResNet(nn.Module):
 
         init_layer(conv1)
         init_layer(bn1)
+        pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
-        trunk = [conv1, bn1, relu]
+        trunk = [conv1, bn1, relu, pool1]
 
         indim = 64
         for i in range(4):
@@ -449,7 +450,7 @@ class ResNet(nn.Module):
             trunk.append(Flatten())
             self.final_feat_dim = indim
         else:
-            self.final_feat_dim = [indim, 42, 42]
+            self.final_feat_dim = [indim, 56, 56]
 
         self.trunk = nn.Sequential(*trunk)
 

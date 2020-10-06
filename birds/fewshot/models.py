@@ -949,7 +949,7 @@ class SinkhornScorer(Scorer):
         
         # average R@1 scores for image and text retrieval
         metric['part_acc_im_lang'] = (torch.argmax(scores, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
-        metric['part_acc_im_lang'] = (torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['part_acc_lang_im'] = (torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
         metric['pos_score'] = pos.mean().item()
         metric['neg_score'] = neg.mean().item()
         return matching, loss, metric

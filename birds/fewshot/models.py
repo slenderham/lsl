@@ -902,10 +902,12 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=20, reg=0.1, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
+        self.cross_domain_weight = cross_domain_weight
+        assert(self.cross_domain_weight<1 and self.cross_domain_weight>0)
         if (comparison=='im_lang'):
             self.base_scorer = CosineScorer(temperature=1)
             self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score
@@ -953,9 +955,12 @@ class SinkhornScorer(Scorer):
         pos_mask = (torch.block_diag(*([torch.ones(1, 1)]*n))>0.5).to(scores.device)
         pos = scores.masked_select(pos_mask).reshape(n, 1)
         neg = scores.masked_select(~pos_mask).reshape(n, n-1)
-        scores_reshaped = torch.cat([pos, neg], dim=1)
-        loss = -F.log_softmax(scores_reshaped, dim=1)[:,0].mean()
-        metric['part_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()
+        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores, dim=1)).mean() \
+               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores, dim=0)).mean()
+        
+        # average R@1 scores for image and text retrieval
+        metric['part_acc'] = 0.5*(torch.argmax(scores, dim=1)==torch.arange(n)).float().mean().item() + \
+                             0.5*(torch.argmax(scores, dim=0)==torch.arange(n)).float().mean().item()
         metric['pos_score'] = pos.mean().item()
         metric['neg_score'] = neg.mean().item()
         return matching, loss, metric
@@ -1178,7 +1183,9 @@ class TransformerAgg(Scorer):
         support = x[:, :n_shot].mean(1) # n_way, h
         query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, h
         # 0,0,...,0,1,1,...,1,...,4,4,4,...4
-        return torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
+        scores = torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
+        assert(scores.shape==(n_way*(n_total-n_shot), n_way))
+        return scores
 
 class ContrastiveLoss(Scorer):
     """

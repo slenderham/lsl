@@ -432,7 +432,7 @@ if __name__ == "__main__":
             y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)
             loss = F.cross_entropy(score, y_query)
             pred_loss_total += loss.item()
-            main_acc += (torch.argmax(score)==y_query).float().mean().item()
+            main_acc += (torch.argmax(score, dim=-1)==y_query).float().mean().item()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_finetune, 1.0)

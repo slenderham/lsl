@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-from vision import ResNet18
+from vision import ResNet18, ResNet50
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -902,7 +902,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.05, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']

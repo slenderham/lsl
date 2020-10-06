@@ -948,8 +948,8 @@ class SinkhornScorer(Scorer):
                -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores, dim=0)).mean()
         
         # average R@1 scores for image and text retrieval
-        metric['part_acc'] = 0.5*(torch.argmax(scores, dim=1)==torch.arange(n)).float().mean().item() + \
-                             0.5*(torch.argmax(scores, dim=0)==torch.arange(n)).float().mean().item()
+        metric['part_acc'] = 0.5*(torch.argmax(scores, dim=1)==torch.arange(n).to(scores.device)).float().mean().item() + \
+                             0.5*(torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
         metric['pos_score'] = pos.mean().item()
         metric['neg_score'] = neg.mean().item()
         return matching, loss, metric

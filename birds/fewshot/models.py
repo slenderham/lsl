@@ -892,7 +892,7 @@ class SinkhornScorer(Scorer):
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
         self.cross_domain_weight = cross_domain_weight
-        assert(self.cross_domain_weight<1 and self.cross_domain_weight>0)
+        assert(self.cross_domain_weight<=1 and self.cross_domain_weight>=0)
         if (comparison=='im_lang'):
             self.base_scorer = CosineScorer(temperature=1)
             self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score

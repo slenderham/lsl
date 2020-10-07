@@ -661,7 +661,7 @@ class SANet(nn.Module):
         self.num_slots = num_slots
 
         if (slot_model=='slot_attn'):
-            backbone = ResNet18(flatten=False)
+            backbone = ResNet10(flatten=False)
             self.encoder = nn.Sequential(
                 backbone, 
                 nn.Conv2d(backbone.final_feat_dim[0], dim, 1),
@@ -887,7 +887,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=0.9, **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=1.0, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']

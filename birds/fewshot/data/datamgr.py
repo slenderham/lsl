@@ -15,7 +15,7 @@ class TransformLoader:
         self,
         image_size,
         normalize_param=dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        jitter_param=dict(Brightness=0.4, Contrast=0.4, Color=0.4),
+        jitter_param=dict(Brightness=0.4, Contrast=0.4, Color=0.0),
     ):
         self.image_size = image_size
         self.normalize_param = normalize_param

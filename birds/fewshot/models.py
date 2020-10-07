@@ -661,7 +661,7 @@ class SANet(nn.Module):
         self.num_slots = num_slots
 
         if (slot_model=='slot_attn'):
-            backbone = ResNet10(flatten=False)
+            backbone = ResNet18(flatten=False)
             self.encoder = nn.Sequential(
                 backbone, 
                 nn.Conv2d(backbone.final_feat_dim[0], dim, 1),

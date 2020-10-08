@@ -364,7 +364,8 @@ if __name__ == "__main__":
                     matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                     y_mask=((hint_seq==special_idx["sos_index"]) | \
                                             (hint_seq==special_idx["eos_index"]) | \
-                                            (hint_seq==special_idx["pad_index"])));
+                                            (hint_seq==special_idx["pad_index"])), \
+                                    n_way=args.n_way, n_shot=n_total);
                 else:
                     assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(n_way * n_total, args.hidden_size))

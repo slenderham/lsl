@@ -20,6 +20,15 @@ def _cartesian_product(x, y):
 def normalize_feats(x):
     return F.normalize(x, p=2, dim=-1)
 
+def pair_block_diag(x, block_size, num_blocks):
+    pos_mask = (torch.block_diag(*([torch.ones(block_size, block_size)]*num_blocks))>0.5).to(x.device);
+    pos_scores = torch.masked_select(x, pos_mask).reshape(block_size*block_size*num_blocks, 1);
+    neg_scores = torch.masked_select(x, ~pos_mask).reshape(block_size*num_blocks, block_size*(num_blocks-1));
+    neg_scores = torch.repeat_interleave(x, repeats=block_size, dim=0);
+    assert(neg_scores.shape==(block_size**2*num_blocks, block_size*(num_blocks-1)))
+    total_scores = torch.cat([pos_scores, neg_scores], dim=1);
+    return total_scores, pos_scores.mean().item(), neg_scores.mean().item();
+
 class ExWrapper(nn.Module):
     """
     Wrap around a model and allow training on examples
@@ -913,13 +922,14 @@ class SinkhornScorer(Scorer):
         self.iters = iters
         self.reg = reg
 
-    def forward(self, x, y, word_idx, y_mask):
+    def forward(self, x, y, word_idx, y_mask, n_way, n_shot):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
         # word_idx.shape = batch_size, num_obj_y
         # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
         assert(x.shape[0]==n)
+        assert(n==n_way*n_shot)
         assert(y_mask.shape==word_idx.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
@@ -937,17 +947,16 @@ class SinkhornScorer(Scorer):
         matching = matching.reshape(n, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
-        pos_mask = (torch.block_diag(*([torch.ones(1, 1)]*n))>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask).reshape(n, 1)
-        neg = scores.masked_select(~pos_mask).reshape(n, n-1)
-        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores, dim=1)).mean() \
-               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores, dim=0)).mean()
+        scores_norm_lang, pos_score_mean, neg_score_mean = pair_block_diag(scores, block_size=n_shot, num_blocks=n_way)
+        scores_norm_vis, pos_score_mean, neg_score_mean = pair_block_diag(scores.t(), block_size=n_shot, num_blocks=n_way)
+        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores_norm_lang, dim=1)).mean() \
+               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores_norm_vis, dim=1)).mean()
         
         # average R@1 scores for image and text retrieval
-        metric['part_acc_im_lang'] = (torch.argmax(scores, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
-        metric['part_acc_lang_im'] = (torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
-        metric['pos_score'] = pos.mean().item()
-        metric['neg_score'] = neg.mean().item()
+        metric['part_acc_im_lang'] = (torch.argmax(scores_norm_lang, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['part_acc_lang_im'] = (torch.argmax(scores_norm_vis, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['pos_score'] = pos_score_mean
+        metric['neg_score'] = neg_score_mean
         return matching, loss, metric
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
@@ -1156,19 +1165,18 @@ class TransformerAgg(Scorer):
         self.hidden_size = hidden_size
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
-        self.seed = nn.Parameter(torch.randn(1, 1, hidden_size)/(hidden_size**0.5))
 
     def forward(self, x, n_shot):
         n_way, n_total, num_slot, h = x.shape
         x = x.flatten(0, 1).transpose(0, 1);
         assert(x.shape==(num_slot, n_way*n_total, h))
-        x = self.model(torch.cat([self.seed.expand(1, n_way*n_total, self.hidden_size), x], dim=0))[0]
+        x = self.model(x).mean(0)
         # x.shape = n_way*n_total, h
         x = x.reshape(n_way, n_total, self.hidden_size)
         support = x[:, :n_shot].mean(1) # n_way, h
         query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, h
         # 0,0,...,0,1,1,...,1,...,4,4,4,...4
-        scores = torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
+        scores = -torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
         assert(scores.shape==(n_way*(n_total-n_shot), n_way))
         return scores
 

@@ -24,7 +24,7 @@ def pair_block_diag(x, block_size, num_blocks):
     pos_mask = (torch.block_diag(*([torch.ones(block_size, block_size)]*num_blocks))>0.5).to(x.device);
     pos_scores = torch.masked_select(x, pos_mask).reshape(block_size*block_size*num_blocks, 1);
     neg_scores = torch.masked_select(x, ~pos_mask).reshape(block_size*num_blocks, block_size*(num_blocks-1));
-    neg_scores = torch.repeat_interleave(x, repeats=block_size, dim=0);
+    neg_scores = torch.repeat_interleave(neg_scores, repeats=block_size, dim=0);
     assert(neg_scores.shape==(block_size**2*num_blocks, block_size*(num_blocks-1)))
     total_scores = torch.cat([pos_scores, neg_scores], dim=1);
     return total_scores, pos_scores.mean().item(), neg_scores.mean().item();

@@ -515,7 +515,7 @@ if __name__ == "__main__":
                 if (args.aux_task=='matching_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
+                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, \
                                     y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)))
                 else:
                     assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"

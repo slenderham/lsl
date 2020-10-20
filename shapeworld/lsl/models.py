@@ -826,7 +826,7 @@ class DotPScorer(Scorer):
         super(DotPScorer, self).__init__()
 
     def score(self, x, y):
-        return torch.sum(x * y, dim=1)
+        return torch.sum(x * y, dim=-1)
 
     def batchwise_score(self, y, x):
         # REVERSED

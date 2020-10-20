@@ -673,7 +673,7 @@ class SANet(nn.Module):
             im_size = (im_size+2-3)//2+1
             im_size = (im_size+2-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, 64, 3, 1, 1),
+                nn.Conv2d(3, 64, 3, 1, 1, bias=False),
                 nn.BatchNorm2d(64),
                 nn.ReLU(inplace=True),
                 BottleneckBlock(64, 128, True),

@@ -51,7 +51,7 @@ if __name__ == "__main__":
                         help='Max number of training examples')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['caption_slot', 'caption_image', 'matching_slot', 'matching_image'],
+                        choices=['caption_slot', 'caption_image', 'matching_slot', 'matching_image', 'matching_oracle'],
                         default='matching',
                         help='Whether to predict caption or predict objects')
     parser.add_argument('--visualize_attns',
@@ -267,7 +267,7 @@ if __name__ == "__main__":
         aux_loss_total = 0
         cls_acc = 0
         pbar = tqdm(total=n_steps)
-        for batch_idx, (x, target, (lang, lang_length, lang_mask)) in enumerate(base_loader):
+        for batch_idx, (x, target, (lang, lang_length, lang_mask, attr_vec)) in enumerate(base_loader):
             # x size: [n_way, n_support + n_query, dim, w, h] 
             n_way = x.size(0)
             n_query = x.size(1) - args.n_shot
@@ -359,13 +359,12 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length) 
 
                 if (args.aux_task=='matching_slot'):
-                    assert(len(image_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
+                    assert(len(image_slot.shape)==4), "The examples_full should have shape: n_way X (n_shot+n_query) X num_slots X dim"
                     assert(hint_rep.shape==(n_way * n_total, max_hint_length, args.hidden_size))
                     matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
-                                    y_mask=((hint_seq==special_idx["sos_index"]) | \
-                                            (hint_seq==special_idx["eos_index"]) | \
-                                            (hint_seq==special_idx["pad_index"])), \
-                                    n_way=args.n_way, n_shot=n_total);
+                                                            y_mask=((hint_seq==special_idx["sos_index"]) | \
+                                                                    (hint_seq==special_idx["eos_index"]) | \
+                                                                    (hint_seq==special_idx["pad_index"])));
                 else:
                     assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(n_way * n_total, args.hidden_size))
@@ -416,7 +415,7 @@ if __name__ == "__main__":
         main_acc = 0
         pred_loss_total = 0
         pbar = tqdm(total=n_steps)
-        for batch_idx, (x, target, (lang, lang_length, lang_mask)) in enumerate(base_loader):
+        for batch_idx, (x, target, (lang, lang_length, lang_mask, _)) in enumerate(base_loader):
             # x size: [n_way, n_support + n_query, dim, w, h] 
             n_way = x.size(0)
             n_query = x.size(1) - args.n_shot
@@ -458,7 +457,7 @@ if __name__ == "__main__":
         concept_avg_meter = AverageMeter(raw=True)
 
         with torch.no_grad():
-            for batch_idx, (x, target, (lang, lang_length, lang_mask)) in enumerate(val_loader):
+            for batch_idx, (x, target, (lang, lang_length, lang_mask, _)) in enumerate(val_loader):
                 # x size: [n_way, n_support + n_query, dim, w, h] 
                 n_way = x.size(0)
                 n_query = x.size(1) - args.n_shot

@@ -309,7 +309,6 @@ def shuffle_all_class(lang, lang_length, lang_mask):
     assert all(len(new_lang[m]) == len(lang[m]) for m in lang.keys())
     return dict(new_lang), dict(new_lang_length), dict(new_lang_mask)
 
-
 def load_vocab(lang_dir):
     """
     Load torch-serialized vocabulary from the lang dir
@@ -386,7 +385,6 @@ def get_special_indices(vocab):
         ]
     }
 
-
 def recycle_lang(langs, max_lang):
     """
     Given a limited amount of language, reuse `max_lang` times
@@ -400,3 +398,12 @@ def recycle_lang(langs, max_lang):
     for i in range(len(langs)):
         new_langs.append(langs[i % max_lang])
     return new_langs
+
+def binary_to_int(attr_vec):
+    batch_size, num_attrs_total = attr_vec.shape
+    lengths = torch.sum(attr_vec, dim=1);
+    ind_targets = torch.zeros(lengths.max(), batch_size);
+    for i, a in attr_vec:
+        indices = torch.nonzero(a)+1; # the zero vector is reserved for padding
+        ind_targets[i] = indices;
+    return ind_targets

@@ -5,6 +5,7 @@ import glob
 import json
 import os
 
+
 import numpy as np
 import torch
 import torchvision.transforms as transforms
@@ -91,18 +92,21 @@ class SetDataset:
         self.sub_meta_lang_length = {}
         self.sub_meta_lang_mask = {}
         self.sub_meta = {}
+        self.sub_meta_attr = {}
 
         for cl in self.cl_list:
             self.sub_meta[cl] = []
             self.sub_meta_lang[cl] = []
             self.sub_meta_lang_length[cl] = []
             self.sub_meta_lang_mask[cl] = []
+            self.sub_meta_attr[cl] = []
 
         # Load language and mapping from image names -> lang idx
         self.lang = {}
         self.lang_lengths = {}
         self.lang_masks = {}
         self.image_name_idx = {}
+        self.attr_vecs = {}
         for cln, label_name in enumerate(self.meta["label_names"]):
             # Use the numeric class id instead of label name due to
             # inconsistencies
@@ -156,7 +160,7 @@ class SetDataset:
                 for i, img_fname in enumerate(sorted_imgs):
                     self.image_name_idx[img_fname] = i
 
-        for x, y in zip(self.meta["image_names"], self.meta["image_labels"]):
+        for x, y, z in zip(self.meta["image_names"], self.meta["image_labels"], self.meta["image_attributes"]):
             if y in self.sub_meta:
                 self.sub_meta[y].append(x)
                 label_name = self.meta["label_names"][y]
@@ -174,6 +178,11 @@ class SetDataset:
                 self.sub_meta_lang[y].append(captions)
                 self.sub_meta_lang_length[y].append(lengths)
                 self.sub_meta_lang_mask[y].append(masks)
+
+                attr_vec = list(z);
+                attr_vec = [int(a) for a in attr_vec];
+                attr_vec = torch.IntTensor(attr_vec);
+                self.sub_meta_attr[y].append(attr_vec);
             else:
                 assert self.max_class is not None
 
@@ -242,6 +251,7 @@ class SetDataset:
                 sub_meta_lang=self.sub_meta_lang[cl],
                 sub_meta_lang_length=self.sub_meta_lang_length[cl],
                 sub_meta_lang_mask=self.sub_meta_lang_mask[cl],
+                sub_meta_attr=self.sub_meta_attr[cl],
                 transform=transform,
                 n_caption=self.args.n_caption,
                 args=self.args,
@@ -267,6 +277,7 @@ class SubDataset:
         sub_meta_lang=None,
         sub_meta_lang_length=None,
         sub_meta_lang_mask=None,
+        sub_meta_attr=None,
         transform=transforms.ToTensor(),
         target_transform=identity,
         n_caption=10,
@@ -278,6 +289,7 @@ class SubDataset:
         self.sub_meta_lang = sub_meta_lang
         self.sub_meta_lang_length = sub_meta_lang_length
         self.sub_meta_lang_mask = sub_meta_lang_mask
+        self.sub_meta_attr = sub_meta_attr
         self.cl = cl
         self.transform = transform
         self.target_transform = target_transform
@@ -296,6 +308,8 @@ class SubDataset:
         img = self.img[image_path]
         img = self.transform(img)
         target = self.target_transform(self.cl)
+        attr = self.sub_meta_attr[i]
+
 
         if self.n_caption == 1:
             lang_idx = 0
@@ -316,7 +330,7 @@ class SubDataset:
         lang_length = self.sub_meta_lang_length[which_img_lang_i][lang_idx]
         lang_mask = self.sub_meta_lang_mask[which_img_lang_i][lang_idx]
 
-        return img, target, (lang, lang_length, lang_mask)
+        return img, target, (lang, lang_length, lang_mask, attr)
 
     def __len__(self):
         return len(self.sub_meta)

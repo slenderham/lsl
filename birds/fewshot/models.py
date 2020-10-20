@@ -670,11 +670,22 @@ class SANet(nn.Module):
         self.num_slots = num_slots
 
         if (slot_model=='slot_attn'):
-            backbone = ResNet18(flatten=False)
+            im_size = (im_size+2-3)//2+1
+            im_size = (im_size+2-3)//2+1
             self.encoder = nn.Sequential(
-                backbone, 
-                nn.Conv2d(backbone.final_feat_dim[0], dim, 1),
-                ImagePositionalEmbedding(backbone.final_feat_dim[1], backbone.final_feat_dim[2], dim)
+                nn.Conv2d(3, dim, 3, 1, 1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, 1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, 1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 1, 1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                ImagePositionalEmbedding(im_size, im_size, dim)
             )
 
             self.post_mlp = nn.Sequential(
@@ -896,7 +907,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=10, reg=0.1, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
+    def __init__(self, idx_to_word, freq=None, iters=100, reg=0.1, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
@@ -922,14 +933,13 @@ class SinkhornScorer(Scorer):
         self.iters = iters
         self.reg = reg
 
-    def forward(self, x, y, word_idx, y_mask, n_way, n_shot):
+    def forward(self, x, y, word_idx, y_mask):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
         # word_idx.shape = batch_size, num_obj_y
         # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
         assert(x.shape[0]==n)
-        assert(n==n_way*n_shot)
         assert(y_mask.shape==word_idx.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
@@ -947,16 +957,17 @@ class SinkhornScorer(Scorer):
         matching = matching.reshape(n, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
-        scores_norm_lang, pos_score_mean, neg_score_mean = pair_block_diag(scores, block_size=n_shot, num_blocks=n_way)
-        scores_norm_vis, pos_score_mean, neg_score_mean = pair_block_diag(scores.t(), block_size=n_shot, num_blocks=n_way)
-        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores_norm_lang, dim=1)).mean() \
-               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores_norm_vis, dim=1)).mean()
+        pos_mask = (torch.block_diag(*([torch.ones(1, 1)]*n))>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask).reshape(n, 1)
+        neg = scores.masked_select(~pos_mask).reshape(n, n-1)
+        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores, dim=1)).mean() \
+               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores, dim=0)).mean()
         
         # average R@1 scores for image and text retrieval
-        metric['part_acc_im_lang'] = (torch.argmax(scores_norm_lang, dim=1)==0).float().mean().item()
-        metric['part_acc_lang_im'] = (torch.argmax(scores_norm_vis, dim=1)==0).float().mean().item()
-        metric['pos_score'] = pos_score_mean
-        metric['neg_score'] = neg_score_mean
+        metric['part_acc_im_lang'] = (torch.argmax(scores, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['part_acc_lang_im'] = (torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['pos_score'] = pos.mean().item()
+        metric['neg_score'] = neg.mean().item()
         return matching, loss, metric
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):

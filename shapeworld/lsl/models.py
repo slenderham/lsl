@@ -916,9 +916,7 @@ class SinkhornScorer(Scorer):
             self.temperature = kwargs['temperature']
             self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
             self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
-            self.base_scorer = CosineScorer(temperature=1)
-        else:
-            self.base_scorer = DotPScorer()
+        self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
         self.reg = reg
@@ -1005,11 +1003,10 @@ class SinkhornScorer(Scorer):
         one = scores.new_tensor(1)
         ms = (m*one).to(scores)
         ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
-
+        
         bins0 = alpha_img.expand(b, m, 1)
-        bins1 = alpha_lang.expand(b, n, 1)
+        bins1 = alpha_lang.expand(b, 1, n)
         alpha = alpha_both.expand(b, 1, 1)
-
         couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
         mask_val = -1e6

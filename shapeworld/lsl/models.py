@@ -746,7 +746,7 @@ class SANet(nn.Module):
                 axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 255, dtype=torch.int), extent=(0, H, 0, W))
                 axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
                     F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1))
-                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu(), vmin=0, vmax=1)
+                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
 
@@ -907,32 +907,66 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq, iters=10, reg=0.1, comparison='im_lang', **kwargs):
+    def __init__(self, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.temperature = kwargs['temperature']
-        if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=1)
-            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score
-            # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
-            # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
-            # freqs = torch.tensor(freqs)
-            # freqs = torch.log(freqs/(freqs.sum()))
-            # freqs -= freqs[freqs != -float("Inf")].min()
-            # freqs /= freqs[freqs != -float("Inf")].max()
-            # freqs = freqs*0.2-0.1
-            # freqs[freqs == -float("Inf")] = 1
-            # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1))
-            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
-        else:
-            self.base_scorer = DotPScorer()
-        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
+        self.cross_domain_weight = cross_domain_weight
+        self.base_scorer = CosineScorer(temperature=1)
+        self.comparison = comparison
+        if (self.comparison=='im_lang'):
+            self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
+            self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
         self.reg = reg
 
-    def forward(self, x, y, word_idx, y_mask):
-        # x.shape = nxn_ex, num_obj_x, h y.shape = n, num_obj_y, h word_idx.shape = n, num_obj_y
+    def forward(self, *args, **kwargs):
+        if self.comparison=='im_lang':
+            return self.forward_(*args, **kwargs)
+        else:
+            return self.forward_im_im(*args, **kwargs)
+    
+    def forward_im_im(self, x, y):
+        b, n_ex, m, h = x.shape
+        assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
+        n = y.shape[1]
+        x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+        y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+        assert(scores.shape==(b**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        # pad the score matrix where language is special token
+        one = scores.new_tensor(1)
+        ms = (m*one).to(scores)
+        ns = (n*one).to(scores)
+        
+        norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
+        log_mu = torch.cat([norm.expand(b, m), ns.log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
+        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+        Z = self.log_ipot(scores, log_mu, log_nu, scores>1e6, self.iters)
+        Z = Z-norm.reshape(b, 1, 1)
+        matching = Z.exp() 
+        assert(matching.shape==(b**2*n_ex**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
+        scores = (scores*matching[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        scores = scores.reshape(b*n_ex, b*n_ex)
+        matching = matching.reshape(b*n_ex, b*n_ex, m+1, n+1)
+        
+        metric = {}
+        pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*n))>0.5).to(scores.device)
+        self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask & ~self_mask).reshape(n*n_ex, n_ex-1)
+        neg = scores.masked_select(~pos_mask).reshape(n*n_ex, (n-1)*n_ex)
+        # average R@1 scores for image and text retrieval
+        # metric['acc'] = 
+        # metric['pos_score'] = pos.mean().item()
+        # metric['neg_score'] = neg.mean().item()
+        return pos.mean(dim=-1)>neg.mean(dim=-1)
+
+    def forward_im_lang(self, x, y, y_mask):
+        # x.shape = batch_size, num_obj_x, h 
+        # y.shape = batch_size, num_obj_y, h 
+        # word_idx.shape = batch_size, num_obj_y
+        # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
         n_ex = x.shape[0]//n 
         assert(x.shape[0]==n*n_ex)
@@ -944,9 +978,8 @@ class SinkhornScorer(Scorer):
         # pad the score matrix where language is special token
         y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
         y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        word_idx = word_idx.repeat(n*n_ex, 1)
         matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
-                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                self.clip_dustbin(self.dustbin_scores_lang), \
                                                 self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters)
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
@@ -971,9 +1004,8 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores)
         ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
 
-        assert(alpha_lang.shape==(b, n, 1)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
         bins0 = alpha_img.expand(b, m, 1)
-        bins1 = alpha_lang.transpose(1, 2)
+        bins1 = alpha_lang.expand(b, n, 1)
         alpha = alpha_both.expand(b, 1, 1)
 
         couplings = torch.cat([torch.cat([scores, bins0], -1),

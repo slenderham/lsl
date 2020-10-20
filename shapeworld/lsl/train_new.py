@@ -318,6 +318,8 @@ if __name__ == "__main__":
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
+    simple_val_scorer = SinkhornScorer(comparison='im_im').to(device)
+
     ''' aux task specific '''
     if args.aux_task=='set_pred':
         image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device) # add one for no object
@@ -362,7 +364,7 @@ if __name__ == "__main__":
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_slot':
-        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature, freq=train_w2c).to(device)
+        hype_loss = SinkhornScorer(temperature=args.temperature).to(device)
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
@@ -377,12 +379,12 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
-    finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
+    # finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
     after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5)
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]))
-    print(sum([p.numel() for p in params_to_finetune]))
+    # print(sum([p.numel() for p in params_to_finetune]))
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar')
@@ -557,6 +559,36 @@ if __name__ == "__main__":
         print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc))
         return loss, metric
 
+    def simple_eval(epoch, split):
+        if ("_image" in args.aux_task):
+            raise NotImplementedError
+
+        for m in models_to_save:
+            if (isinstance(m, nn.Module)):
+                m.eval()
+
+        concept_avg_meter = AverageMeter()
+        data_loader = data_loader_dict[split]
+
+        with torch.no_grad():
+            for examples, image, label, hint_seq, hint_length, *rest in data_loader:
+                examples = examples.to(device)
+                image = image.to(device)
+                batch_size = len(image)
+                n_ex = examples.shape[1]
+                # Learn representations of images and examples
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
+                examples_full = image_relation_model(examples_slot, is_ex=True)
+                
+                # use max sum similarity
+                accuracy = simple_val_scorer(examples_full, examples_full)
+                concept_avg_meter.update(accuracy, batch_size)
+
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, concept_avg_meter.avg))
+
+        return concept_avg_meter.avg
+
     def finetune(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
@@ -651,18 +683,31 @@ if __name__ == "__main__":
     best_test_acc = 0
     best_test_same_acc = 0
     best_test_acc_ci = 0
+    best_simple_eval_acc = 0
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
     for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch, 1)
+        train_loss, pt_metric = pretrain(epoch)
         for k, v in pt_metric.items():
             metrics[k].append(v)
         save_defaultdict_to_fs(metrics,
                                os.path.join(args.exp_dir, 'metrics.json'))
+        simple_val_acc = simple_eval(epoch, 'val')
+        if has_same:
+            simpel_val_same_acc = simple_eval(epoch, 'val_same')
+            metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
+        else:
+            metrics['simple_val_acc'].append(simple_val_acc)
+
+        is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
+        if is_best_epoch:
+            best_simple_eval_acc = metrics['simple_val_acc'][-1]
+
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir)
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
+        
 
     if args.freeze_slots:
         # for m in models_to_save:

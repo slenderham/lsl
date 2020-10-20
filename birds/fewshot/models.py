@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-from vision import ResNet18, ResNet50, ResNet10
+from vision import ResNet18, ResNet50, ResNet10, BottleneckBlock
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -673,18 +673,13 @@ class SANet(nn.Module):
             im_size = (im_size+2-3)//2+1
             im_size = (im_size+2-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, 1, 1),
+                nn.Conv2d(3, 64, 3, 1, 1),
+                nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, 1),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, 1),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 1, 1),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
+                BottleneckBlock(64, 128, False),
+                BottleneckBlock(128, 256, False),
+                BottleneckBlock(256, 512, False),
+                nn.Conv2d(512, dim, 1),
                 ImagePositionalEmbedding(im_size, im_size, dim)
             )
 

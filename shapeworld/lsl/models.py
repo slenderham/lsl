@@ -931,6 +931,8 @@ class SinkhornScorer(Scorer):
         b, n_ex, m, h = x.shape
         assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
         n = y.shape[1]
+        x = x.flatten(0, 1)
+        y = y.flatten(0, 1)
         x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
@@ -987,13 +989,21 @@ class SinkhornScorer(Scorer):
         
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask).reshape(n*n_ex, 1)
-        neg = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1)
-        scores_reshaped = torch.cat([pos, neg], dim=1)
-        loss = -F.log_softmax(scores_reshaped, dim=1)[:,0].mean()
-        metric['part_acc'] = (torch.argmax(scores_reshaped, dim=1)==0).float().mean().item()
+        pos = scores.masked_select(pos_mask)
+        neg_by_lang = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1)
+        neg_by_im = (scores.t()).masked_select(~pos_mask.t()).reshape(n, (n-1)*n_ex)
+        neg_by_im = torch.repeat_interleave(neg_by_im, dim=0, repeats=n_ex)
+        scores_reshaped_by_lang = torch.cat([pos.reshape(n*n_ex, 1), neg_by_lang], dim=1)
+        scores_reshaped_by_im = torch.cat([pos.reshape(n*n_ex, 1), neg_by_im], dim=1)
+        loss = -self.cross_domain_weight*F.log_softmax(scores_reshaped_by_lang, dim=1)[:,0].mean()\
+               -(1-self.cross_domain_weight)*F.log_softmax(scores_reshaped_by_im, dim=1)[:,0].mean()
+
+        # average R@1 scores for image and text retrieval
+        metric['part_acc_im_lang'] = (torch.argmax(scores_reshaped_by_lang, dim=1)==0).float().mean().item()
+        metric['part_acc_lang_im'] = (torch.argmax(scores_reshaped_by_im, dim=0)==0).float().mean().item()
         metric['pos_score'] = pos.mean().item()
-        metric['neg_score'] = neg.mean().item()
+        assert(torch.isclose(neg_by_im.mean(), neg_by_lang.mean()))
+        metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
     def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):

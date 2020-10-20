@@ -384,7 +384,7 @@ if __name__ == "__main__":
                     fig.colorbar(im, ax=ax)
                     plt.show()
 
-                loss = hypo_loss + spread_loss(image_slot)
+                loss = hypo_loss + spread_loss(image_slot.flatten(0, 1))
                 aux_loss_total += hypo_loss.item()
                 cls_acc += (metric['part_acc_im_lang'] + metric['part_acc_lang_im'])/2
             else:

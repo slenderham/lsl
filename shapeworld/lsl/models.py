@@ -910,20 +910,22 @@ class SinkhornScorer(Scorer):
     def __init__(self, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
-        self.temperature = kwargs['temperature']
         self.cross_domain_weight = cross_domain_weight
-        self.base_scorer = CosineScorer(temperature=1)
         self.comparison = comparison
         if (self.comparison=='im_lang'):
+            self.temperature = kwargs['temperature']
             self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
             self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
+            self.base_scorer = CosineScorer(temperature=1)
+        else:
+            self.base_scorer = DotPScorer()
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
         self.reg = reg
 
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
-            return self.forward_(*args, **kwargs)
+            return self.forward_im_lang(*args, **kwargs)
         else:
             return self.forward_im_im(*args, **kwargs)
     

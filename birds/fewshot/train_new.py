@@ -230,6 +230,7 @@ if __name__ == "__main__":
     # loss
     if args.aux_task=='matching_slot':
         hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
+        spread_loss = NonlinearSpreadOut(0.5)
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
@@ -383,7 +384,7 @@ if __name__ == "__main__":
                     fig.colorbar(im, ax=ax)
                     plt.show()
 
-                loss = hypo_loss
+                loss = hypo_loss + spread_loss(image_slot)
                 aux_loss_total += hypo_loss.item()
                 cls_acc += (metric['part_acc_im_lang'] + metric['part_acc_lang_im'])/2
             else:

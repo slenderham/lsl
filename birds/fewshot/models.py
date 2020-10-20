@@ -799,6 +799,19 @@ class RelationalNet(nn.Module):
 
         return x_rel
 
+class NonlinearSpreadOut(nn.Module):
+    def __init__(self, margin=0.5):
+        super(NonlinearSpreadOut, self).__init__();
+        self.margin = margin;
+
+    def forward(self, x):
+        b, n, h = x.shape
+        x_norm = F.normalize(x, dim=-1)
+        gram = torch.matmul(x_norm, x_norm.t(-2, -1));
+        mask = (torch.eye(n)<0.5).unsqueeze(0).expand(b, n, n)
+        loss = F.relu(-self.margin+torch.masked_select(gram)).mean()
+        return loss
+        
 """
 Similarity Scores
 """

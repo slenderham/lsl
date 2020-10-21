@@ -943,8 +943,8 @@ class SinkhornScorer(Scorer):
         ns = (n*one).to(scores)
         
         norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-        log_mu = torch.cat([norm.expand(b, m), ns.log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
-        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+        log_mu = torch.cat([norm.expand(b, m), ns.log().reshape(1, 1) + norm], dim=1) # batch size x num_obj_x+1
+        log_nu = torch.cat([norm.expand(b, n), ms.log().reshape(1, 1) + norm], dim=1) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, scores>1e6, self.iters)
         Z = Z-norm.reshape(b, 1, 1)
         matching = Z.exp() 

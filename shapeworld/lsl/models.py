@@ -945,7 +945,7 @@ class SinkhornScorer(Scorer):
         norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
         log_mu = torch.cat([norm.expand(b, m), ns.log().reshape(1, 1) + norm.expand(b, m)], dim=1) # batch size x num_obj_x+1
         log_nu = torch.cat([norm.expand(b, n), ms.log().reshape(1, 1) + norm.expand(b, n)], dim=1) # batch size x num_obj_y+1
-        Z = self.log_ipot(scores, log_mu, log_nu, scores>1e6, self.iters)
+        Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         Z = Z-norm.reshape(b, 1, 1)
         matching = Z.exp() 
         assert(matching.shape==(b**2*n_ex**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
@@ -1031,7 +1031,7 @@ class SinkhornScorer(Scorer):
         Z = Z.exp() 
         return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
 
-    def log_ipot(self, Z, log_mu, log_nu, scores_mask=None, iters: int):
+    def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
         T = torch.zeros_like(Z)
         A = Z/self.reg

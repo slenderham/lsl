@@ -379,12 +379,12 @@ if __name__ == "__main__":
         'sgd': optim.SGD
     }[args.optimizer]
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
-    # finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
+    finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
     after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 5000, 0.5)
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]))
-    # print(sum([p.numel() for p in params_to_finetune]))
+    print(sum([p.numel() for p in params_to_finetune]))
 
     if args.load_checkpoint and os.path.exists(os.path.join(args.exp_dir, 'checkpoint.pth.tar')):
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar')
@@ -539,7 +539,7 @@ if __name__ == "__main__":
 
                 loss = hypo_loss
                 aux_loss_total += hypo_loss.item()
-                cls_acc += metric['part_acc']
+                cls_acc += (metric['part_acc_im_lang']*batch_size + metric['part_acc_lang_im']*((batch_size-1)*n_ex+1))/(batch_size+(batch_size-1)*n_ex+1)
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -551,7 +551,7 @@ if __name__ == "__main__":
 
             if batch_idx % args.log_interval == 0:
                 pbar.set_description('Epoch {} Loss: {:.6f} Metric: {}'.format(
-                    epoch, loss.item(), metric))
+                    epoch, loss.item(), [(k, "{:.6f}".format(v)) for k,v in metric.items()]))
                 pbar.refresh()
 
             pbar.update()

@@ -930,13 +930,13 @@ class SinkhornScorer(Scorer):
     def forward_im_im(self, x, y):
         b, n_ex, m, h = x.shape
         assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
-        n = y.shape[1]
+        n = y.shape[2]
         x = x.flatten(0, 1)
         y = y.flatten(0, 1)
         x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(b**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==(b**2*n_ex**2, m, n)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         one = scores.new_tensor(1)
         ms = (m*one).to(scores)

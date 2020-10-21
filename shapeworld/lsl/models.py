@@ -1031,18 +1031,23 @@ class SinkhornScorer(Scorer):
         Z = Z.exp() 
         return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
 
-    def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
+    def log_ipot(self, Z, log_mu, log_nu, scores_mask=None, iters: int):
         v = log_nu
         T = torch.zeros_like(Z)
         A = Z/self.reg
-        T = T.masked_fill(scores_mask, -1e6)
-        A = A.masked_fill(scores_mask, -1e6)
+        if scores_mask is not None:
+            T = T.masked_fill(scores_mask, -1e6)
+            A = A.masked_fill(scores_mask, -1e6)
         for _ in range(self.iters):
             Q = A + T
             u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
-            v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
+            if scores_mask is not None:
+                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
+            else:
+                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2), dim=1)
             T = Q + u.unsqueeze(2) + v.unsqueeze(1)
-            T = T.masked_fill(scores_mask, -1e6)
+            if scores_mask is not None:
+                T = T.masked_fill(scores_mask, -1e6)
         return T
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):

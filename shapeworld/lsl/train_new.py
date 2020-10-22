@@ -34,9 +34,13 @@ if __name__ == "__main__":
                         type=int,
                         default=256,
                         help='Size of hidden representations')
-    parser.add_argument('--num_slots', 
+    parser.add_argument('--num_vision_slots', 
                         type=int,
                         default=6,
+                        help='Number of slots')
+    parser.add_argument('--num_lang_slots', 
+                        type=int,
+                        default=4,
                         help='Number of slots')
     parser.add_argument('--comparison',
                         choices=['dotp', 'cosine', 'transformer'],
@@ -272,7 +276,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_slots, dim=64, slot_model=image_model)
+    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=64, slot_model=image_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -347,7 +351,7 @@ if __name__ == "__main__":
                         'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
                         'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
-                        'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.aux_task=='matching_image')
+                        'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.aux_task=='matching_image', num_slots=args.num_lang_slots)
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
@@ -526,10 +530,10 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach().t(), vmin=0, vmax=1)
-                    ylabels = list(range(args.num_slots))
-                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots) if y1!=y2]
-                    # ylabels = list(range(args.num_slots))
-                    # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_slots) for y2 in range(args.num_slots)]
+                    ylabels = list(range(args.num_vision_slots))
+                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
+                    # ylabels = list(range(args.num_vision_slots))
+                    # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
                     ax.set_yticks(np.arange(len(hint_seq[0])))
                     ax.set_yticklabels([train_i2w[h.item()] for h in hint_seq[0]])
                     ax.set_xticks(np.arange(len(ylabels)))

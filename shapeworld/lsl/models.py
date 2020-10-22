@@ -966,12 +966,12 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores)
         ns = (n*one).to(scores)
         
-        log_mu = -ms.log().reshape(1, 1).expand(b, m) # batch size x num_obj_x+1
-        log_nu = -ns.log().reshape(1, 1).expand(b, n) # batch size x num_obj_y+1
+        log_mu = -ms.log().reshape(1, 1).expand(b*n_ex, m) # batch size x num_obj_x+1
+        log_nu = -ns.log().reshape(1, 1).expand(b*n_ex, n) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         matching = Z.exp() 
         assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
-        scores = (scores*matching[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        scores = (scores*matching).sum(dim=(1,2))/self.temperature
         scores = scores.reshape(b*n_ex, b*n_ex)
         matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         

@@ -971,15 +971,14 @@ class SinkhornScorer(Scorer):
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         matching = Z.exp() 
         assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
-        scores = (scores*matching).sum(dim=(1,2))/self.temperature
+        scores = (scores*matching).sum(dim=(1,2))
         scores = scores.reshape(b*n_ex, b*n_ex)
         matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         
-        metric = {}
-        pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*n))>0.5).to(scores.device)
+        pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))>0.5).to(scores.device)
         self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask & ~self_mask).reshape(n, n_ex*(n_ex-1))
-        neg = scores.masked_select(~pos_mask).reshape(n, n_ex*(n-1)*n_ex)
+        pos = scores.masked_select(pos_mask & ~self_mask).reshape(b, n_ex*(n_ex-1))
+        neg = scores.masked_select(~pos_mask).reshape(b, n_ex*(b-1)*n_ex)
         # average R@1 scores for image and text retrieval
         # metric['acc'] = 
         # metric['pos_score'] = pos.mean().item()

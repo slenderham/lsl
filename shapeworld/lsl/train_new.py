@@ -696,14 +696,15 @@ if __name__ == "__main__":
         train_loss, pt_metric = pretrain(epoch)
         for k, v in pt_metric.items():
             metrics[k].append(v)
-        save_defaultdict_to_fs(metrics,
-                               os.path.join(args.exp_dir, 'metrics.json'))
+
         simple_val_acc = simple_eval(epoch, 'val')
         if has_same:
             simpel_val_same_acc = simple_eval(epoch, 'val_same')
             metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
         else:
             metrics['simple_val_acc'].append(simple_val_acc)
+
+        save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
 
         is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
         if is_best_epoch:

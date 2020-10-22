@@ -217,6 +217,28 @@ class TextRepTransformer(nn.Module):
 
         return hidden
 
+class TextRepSlot(nn.Module):
+    def __init__(self, embedding_module, hidden_size, num_slots=4, iters=3, eps=1e-8, return_agg=False):
+        super(TextRepSlot, self).__init__()
+        self.model = SlotAttention(num_slots, hidden_size, iters, eps)
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32)
+        self.return_agg = return_agg
+
+    def forward(self, seq, seq_len, src_key_padding_mask=None):
+        batch_size = seq.size(0)
+        # embed your sequences, size: B, L, D
+        assert(src_key_padding_mask.shape==seq.shape)
+        embed_seq = self.embedding(seq)
+        embed_seq = self.pe(embed_seq)
+        hidden, _ = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
+        
+        if (self.return_agg):
+            hidden = hidden.mean(dim=1) # return last hidden state
+
+        return hidden
+
 class TextPositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.0, max_len=5000):
         super(TextPositionalEncoding, self).__init__()
@@ -597,9 +619,9 @@ class SlotAttention(nn.Module):
         self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
         self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim))
 
-        self.to_q = nn.Linear(dim, dim, bias = False)
-        self.to_k = nn.Linear(dim, dim, bias = False)
-        self.to_v = nn.Linear(dim, dim, bias = False)
+        self.to_q = nn.Linear(dim, dim)
+        self.to_k = nn.Linear(dim, dim)
+        self.to_v = nn.Linear(dim, dim)
 
         self.gru = nn.GRUCell(dim, dim)
 
@@ -613,13 +635,13 @@ class SlotAttention(nn.Module):
         self.norm_slots  = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)
 
-    def forward(self, inputs, num_slots = None, num_iters = None):
+    def forward(self, inputs, src_key_padding_mask = None, num_slots = None, num_iters = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         n_it = num_iters if num_iters is not None else self.iters
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = self.slots_sigma.expand(b, n_s, -1)
+        sigma = F.softplus(self.slots_sigma.expand(b, n_s, -1))
         slots = mu + torch.randn_like(mu)*sigma
 
         inputs = self.norm_input(inputs)        
@@ -635,6 +657,8 @@ class SlotAttention(nn.Module):
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
             attn = dots.softmax(dim=1) + self.eps
+            if (src_key_padding_mask is not None):
+                attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0);
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
 
@@ -914,8 +938,8 @@ class SinkhornScorer(Scorer):
         self.comparison = comparison
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
-            self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
-            self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
+            # self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
+            # self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -942,16 +966,14 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores)
         ns = (n*one).to(scores)
         
-        norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-        log_mu = torch.cat([norm.expand(b, m), ns.log().reshape(1, 1) + norm.expand(b, m)], dim=1) # batch size x num_obj_x+1
-        log_nu = torch.cat([norm.expand(b, n), ms.log().reshape(1, 1) + norm.expand(b, n)], dim=1) # batch size x num_obj_y+1
+        log_mu = -ms.log().reshape(1, 1).expand(b, m) # batch size x num_obj_x+1
+        log_nu = -ns.log().reshape(1, 1).expand(b, n) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
-        Z = Z-norm.reshape(b, 1, 1)
         matching = Z.exp() 
-        assert(matching.shape==(b**2*n_ex**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
+        assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
         scores = (scores*matching[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
         scores = scores.reshape(b*n_ex, b*n_ex)
-        matching = matching.reshape(b*n_ex, b*n_ex, m+1, n+1)
+        matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*n))>0.5).to(scores.device)
@@ -978,14 +1000,12 @@ class SinkhornScorer(Scorer):
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
-        y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
-                                                self.clip_dustbin(self.dustbin_scores_lang), \
-                                                self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters)
-        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
+        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1) # the similarity of each image to special language token is -inf
+        # y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1], 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
+        matching, scores = self.log_optimal_transport(scores, scores_mask=y_mask, iters=self.iters)
+        assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
-        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
+        matching = matching.reshape(n*n_ex, n, x.shape[1], y.shape[1])
         
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
@@ -1006,19 +1026,24 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
+    def log_optimal_transport(self, scores, iters: int, alpha_img=None, alpha_lang=None, alpha_both=None, scores_mask=None):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
         one = scores.new_tensor(1)
         ms = (m*one).to(scores)
-        ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
+        if (scores_mask is not None):
+            ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
         
-        bins0 = alpha_img.expand(b, m, 1)
-        bins1 = alpha_lang.expand(b, 1, n)
-        alpha = alpha_both.expand(b, 1, 1)
-        couplings = torch.cat([torch.cat([scores, bins0], -1),
+        assert((alpha_img is not None)==(alpha_lang is not None)==(alpha_both is not None))
+        if (alpha_img is not None):
+            bins0 = alpha_img.expand(b, m, 1)
+            bins1 = alpha_lang.expand(b, 1, n)
+            alpha = alpha_both.expand(b, 1, 1)
+            couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
+        else:
+            couplings = scores
         mask_val = -1e6
         couplings = couplings.masked_fill(scores_mask, mask_val)
         
@@ -1029,7 +1054,12 @@ class SinkhornScorer(Scorer):
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1)
         Z = Z.exp() 
-        return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        if (alpha_img is not None):
+            final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        else:
+            final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
+        
+        return Z, final_scores
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu

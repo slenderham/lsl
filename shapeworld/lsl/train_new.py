@@ -49,7 +49,7 @@ if __name__ == "__main__":
                         action='store_true',
                         help='Use relational model on top of slots or only slots.')
     parser.add_argument('--hypo_model',
-                        choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer'],
+                        choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer', 'slot'],
                         default='bi_gru',
                         help='Which language model to use for ')
     parser.add_argument('--max_train',
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
-    simple_val_scorer = SinkhornScorer(comparison='im_im').to(device)
+    simple_val_scorer = SinkhornScorer(comparison='im_im', iters=100, reg=0.1).to(device)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
@@ -346,7 +346,8 @@ if __name__ == "__main__":
                         'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
                         'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
                         'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image')
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
+                        'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.aux_task=='matching_image')
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())

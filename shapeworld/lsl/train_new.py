@@ -508,7 +508,7 @@ if __name__ == "__main__":
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
             elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
-                if ('transformer' in args.hypo_model):
+                if ('gru' not in args.hypo_model):
                     hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index) 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length) 

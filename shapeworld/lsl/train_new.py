@@ -369,7 +369,7 @@ if __name__ == "__main__":
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_slot':
-        hype_loss = SinkhornScorer(temperature=args.temperature).to(device)
+        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
         params_to_pretrain.extend(hype_loss.parameters())
         models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
@@ -520,7 +520,7 @@ if __name__ == "__main__":
                 if (args.aux_task=='matching_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, 
+                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq,\
                                                 y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)))
 
                 else:

@@ -931,14 +931,15 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, iters=10, reg=0.1, cross_domain_weight=0.8, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word, iters=10, reg=0.1, cross_domain_weight=0.8, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
-            self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
+            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score
+            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
             self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
@@ -985,7 +986,7 @@ class SinkhornScorer(Scorer):
         # metric['neg_score'] = neg.mean().item()
         return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean().item()
     
-    def forward_im_lang(self, x, y, y_mask=None):
+    def forward_im_lang(self, x, y, word_idx, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
         # word_idx.shape = batch_size, num_obj_y
@@ -1003,7 +1004,7 @@ class SinkhornScorer(Scorer):
             y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
-                                                alpha_lang=self.clip_dustbin(self.dustbin_scores_lang), \
+                                                alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
                                                 alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
                                                 scores_mask=y_mask, iters=self.iters)
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"

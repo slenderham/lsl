@@ -966,8 +966,8 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores)
         ns = (n*one).to(scores)
         
-        log_mu = -ms.log().reshape(1, 1).expand(b*n_ex, m) # batch size x num_obj_x+1
-        log_nu = -ns.log().reshape(1, 1).expand(b*n_ex, n) # batch size x num_obj_y+1
+        log_mu = -ms.log().reshape(1, 1).expand(b**2*n_ex**2, m) # batch size x num_obj_x+1
+        log_nu = -ns.log().reshape(1, 1).expand(b**2*n_ex**2, n) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         matching = Z.exp() 
         assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
@@ -978,13 +978,13 @@ class SinkhornScorer(Scorer):
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*n))>0.5).to(scores.device)
         self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask & ~self_mask).reshape(n*n_ex, n_ex-1)
-        neg = scores.masked_select(~pos_mask).reshape(n*n_ex, (n-1)*n_ex)
+        pos = scores.masked_select(pos_mask & ~self_mask).reshape(n, n_ex*(n_ex-1))
+        neg = scores.masked_select(~pos_mask).reshape(n, n_ex*(n-1)*n_ex)
         # average R@1 scores for image and text retrieval
         # metric['acc'] = 
         # metric['pos_score'] = pos.mean().item()
         # metric['neg_score'] = neg.mean().item()
-        return pos.mean(dim=-1)>neg.mean(dim=-1)
+        return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean()
 
     def forward_im_lang(self, x, y, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 

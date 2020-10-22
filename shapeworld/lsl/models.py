@@ -986,7 +986,7 @@ class SinkhornScorer(Scorer):
         # metric['neg_score'] = neg.mean().item()
         return pos.mean(dim=-1)>neg.mean(dim=-1)
 
-    def forward_im_lang(self, x, y, y_mask):
+    def forward_im_lang(self, x, y, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
         # word_idx.shape = batch_size, num_obj_y

@@ -938,8 +938,8 @@ class SinkhornScorer(Scorer):
         self.comparison = comparison
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
-            # self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
-            # self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
+            self.dustbin_scores_lang = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
+            self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -1002,7 +1002,9 @@ class SinkhornScorer(Scorer):
         if y_mask is not None:
             y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1) # the similarity of each image to special language token is -inf
         # y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1], 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        matching, scores = self.log_optimal_transport(scores, scores_mask=y_mask, iters=self.iters)
+        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
+                                        alpha_lang=self.clip_dustbin(self.dustbin_scores_lang), \
+                                        alpha_both=self.clip_dustbin(self.dustbin_scores_im), scores_mask=y_mask, iters=self.iters)
         assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
         matching = matching.reshape(n*n_ex, n, x.shape[1], y.shape[1])

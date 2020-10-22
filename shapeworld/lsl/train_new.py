@@ -543,7 +543,7 @@ if __name__ == "__main__":
 
                 loss = hypo_loss
                 aux_loss_total += hypo_loss.item()
-                cls_acc += (metric['part_acc_im_lang']*batch_size + metric['part_acc_lang_im']*((batch_size-1)*n_ex+1))/(batch_size+(batch_size-1)*n_ex+1)
+                cls_acc += (metric['part_acc_im_lang'] + metric['part_acc_lang_im'])/2
             else:
                 raise ValueError("invalid auxiliary task name")
 

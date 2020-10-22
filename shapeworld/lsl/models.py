@@ -984,7 +984,7 @@ class SinkhornScorer(Scorer):
         # metric['pos_score'] = pos.mean().item()
         # metric['neg_score'] = neg.mean().item()
         return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean().item()
-
+    
     def forward_im_lang(self, x, y, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
@@ -1000,14 +1000,14 @@ class SinkhornScorer(Scorer):
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         if y_mask is not None:
-            y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1) # the similarity of each image to special language token is -inf
-        # y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1], 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
-                                        alpha_lang=self.clip_dustbin(self.dustbin_scores_lang), \
-                                        alpha_both=self.clip_dustbin(self.dustbin_scores_im), scores_mask=y_mask, iters=self.iters)
-        assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"{matching.shape}"
+            y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
+            y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
+        matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
+                                                self.clip_dustbin(self.dustbin_scores_lang), \
+                                                self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters)
+        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
-        matching = matching.reshape(n*n_ex, n, x.shape[1], y.shape[1])
+        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)

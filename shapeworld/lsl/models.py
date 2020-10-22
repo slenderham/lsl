@@ -1035,6 +1035,8 @@ class SinkhornScorer(Scorer):
         ms = (m*one).to(scores)
         if (scores_mask is not None):
             ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
+        else:
+            ns = (n*one).to(scores)
         
         assert((alpha_img is not None)==(alpha_lang is not None)==(alpha_both is not None))
         if (alpha_img is not None):
@@ -1050,14 +1052,22 @@ class SinkhornScorer(Scorer):
         if (scores_mask is not None):
             couplings = couplings.masked_fill(scores_mask, mask_val)
         
-        norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-        log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
-        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+        if (alpha_img is not None):
+            norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
+            log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
+            log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+        else:
+            log_mu = -ms.log().reshape(1, 1).expand(b, m)
+            log_nu = -ns.log().reshape(1, 1).expand(b, n)
+        
         if (scores_mask is not None):
             log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
+        
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1)
-        Z = Z.exp() 
+        if (scores_mask is not None):
+            Z = Z.exp() 
+        
         if (alpha_img is not None):
             final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
         else:

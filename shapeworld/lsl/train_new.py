@@ -322,7 +322,7 @@ if __name__ == "__main__":
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
-    simple_val_scorer = SinkhornScorer(comparison='im_im', iters=100, reg=0.1).to(device)
+    simple_val_scorer = SinkhornScorer(comparison='im_im', iters=100, reg=1).to(device)
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':

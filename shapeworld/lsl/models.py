@@ -1046,12 +1046,15 @@ class SinkhornScorer(Scorer):
         else:
             couplings = scores
         mask_val = -1e6
-        couplings = couplings.masked_fill(scores_mask, mask_val)
+
+        if (scores_mask is not None):
+            couplings = couplings.masked_fill(scores_mask, mask_val)
         
         norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
         log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
         log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
-        log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
+        if (scores_mask is not None):
+            log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         Z = Z-norm.reshape(b, 1, 1)
         Z = Z.exp() 
@@ -1084,11 +1087,15 @@ class SinkhornScorer(Scorer):
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
-        v = v.masked_fill(scores_mask[:,0,:], -1e6)
+        if scores_mask is not None:
+            v = v.masked_fill(scores_mask[:,0,:], -1e6)
         for i in range(iters):
             u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
-            v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
-            v = v.masked_fill(scores_mask[:,0,:], -1e6)
+            if scores_mask is not None:
+                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
+                v = v.masked_fill(scores_mask[:,0,:], -1e6)
+            else:
+                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):

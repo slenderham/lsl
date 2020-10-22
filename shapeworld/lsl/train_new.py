@@ -529,8 +529,9 @@ if __name__ == "__main__":
                     hypo_loss, metric = hype_loss(im=examples_full, s=hint_rep)
                 
                 if args.visualize_attns:
+                    fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().t(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[2][0].detach().t().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_vision_slots))
                     ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
                     # ylabels = list(range(args.num_vision_slots))

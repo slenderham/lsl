@@ -1064,9 +1064,9 @@ class SinkhornScorer(Scorer):
             log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
         
         Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
-        Z = Z-norm.reshape(b, 1, 1)
         if (scores_mask is not None):
-            Z = Z.exp() 
+            Z = Z-norm.reshape(b, 1, 1)
+        Z = Z.exp() 
         
         if (alpha_img is not None):
             final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature

@@ -994,13 +994,14 @@ class SinkhornScorer(Scorer):
         n = y.shape[0]
         n_ex = x.shape[0]//n 
         assert(x.shape[0]==n*n_ex)
-        assert(y_mask.shape==y.shape[:2])
+        assert(y_mask is None or y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
         assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1) # the similarity of each image to special language token is -inf
+        if y_mask is not None:
+            y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1], 1) # the similarity of each image to special language token is -inf
         # y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1], 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         matching, scores = self.log_optimal_transport(scores, scores_mask=y_mask, iters=self.iters)
         assert(matching.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"{matching.shape}"

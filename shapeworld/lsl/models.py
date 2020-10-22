@@ -230,9 +230,9 @@ class TextRepSlot(nn.Module):
         batch_size = seq.size(0)
         # embed your sequences, size: B, L, D
         assert(src_key_padding_mask.shape==seq.shape)
-        embed_seq = self.embedding(seq)
-        embed_seq = self.pe(embed_seq)
-        hidden, _ = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
+        embed_seq = self.embedding(seq).transpose(0, 1)
+        embed_seq = self.pe(embed_seq).transpose(0, 1)
+        hidden, attns = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
         
         if (self.return_agg):
             hidden = hidden.mean(dim=1) # return last hidden state

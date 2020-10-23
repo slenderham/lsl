@@ -809,15 +809,16 @@ class ImagePositionalEmbeddingHarmonic(nn.Module):
         self.register_buffer('x_coord', torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width))
         self.register_buffer('y_coord', torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width))
 
-        self.x_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*16)
-        self.y_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*16)
+        self.x_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*height/8)
+        self.y_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*height/8)
         self.phases = nn.Parameter(torch.rand(num_sins, 1, 1)*2*math.pi)
 
         self.pos_emb = nn.Conv2d(num_sins, hidden_size, 1)
 
     def forward(self, x):
         # add positional embedding to the feature vector
-        sins = torch.sin(self.x_coord*self.x_scales + self.y_coord*self.y_scales + self.phases).unsqueeze(0)
+        sins = torch.sin(self.x_coord*self.x_scales + self.y_coord*self.y_scales \
+                        + F.hardtanh(self.phases, min_val=-2*math.pi, max_val=2*math.pi)).unsqueeze(0)
         return x+self.pos_emb(sins)
 
 class RelationalNet(nn.Module):

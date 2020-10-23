@@ -697,7 +697,7 @@ class SANet(nn.Module):
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                ImagePositionalEmbeddingHarmonic(im_size-2*4, im_size-2*4, dim)
+                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
             )
 
             self.post_mlp = nn.Sequential(
@@ -854,6 +854,33 @@ class RelationalNet(nn.Module):
 
         return x_rel
 
+class SubspaceTranslation(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(SubspaceTranslation, self).__init__()
+        self.subspace = nn.Linear(in_dim, in_dim//4)
+        self.rel_emb = nn.Linear(in_dim//4, out_dim)
+        self.obj_mlp = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        b, n_s, h = x.shape
+        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x = self.obj_mlp(x)
+
+        # get pair-wise rep through multiplicative integration
+        x_rel = self.rel_emb(F.relu(self.subspace(x_i)-self.subspace(x_j))).flatten(1,2)
+        assert (x_rel.shape[:-1]==(b, n_s**2))
+        
+        # get rid of self to self pairings
+        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
+        x_rel = x_rel[:, non_diag_idx, :]
+
+        # concat relations with objects
+        x_rel = torch.cat([x, x_rel], dim=1)
+
+        return x_rel
 """
 Similarity Scores
 """

@@ -697,7 +697,7 @@ class SANet(nn.Module):
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
+                ImagePositionalEmbeddingHarmonic(im_size-2*4, im_size-2*4, dim, num_sins=8)
             )
 
             self.post_mlp = nn.Sequential(
@@ -802,6 +802,23 @@ class ImagePositionalEmbedding(nn.Module):
     def forward(self, x):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords)
+
+class ImagePositionalEmbeddingHarmonic(nn.Module):
+    def __init__(self, height, width, hidden_size, num_sins=8):
+        super(ImagePositionalEmbeddingHarmonic, self).__init__()
+        self.register_buffer('x_coord', torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width))
+        self.register_buffer('y_coord', torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width))
+
+        self.x_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*16)
+        self.y_scales = nn.Parameter(torch.rand(num_sins, 1, 1)*16)
+        self.phases = nn.Parameter(torch.rand(num_sins, 1, 1)*2*math.pi)
+
+        self.pos_emb = nn.Conv2d(num_sins, hidden_size, 1)
+
+    def forward(self, x):
+        # add positional embedding to the feature vector
+        sins = torch.sin(self.x_coord*self.x_scales + self.y_coord*self.y_scales + self.phases)
+        return x+self.pos_emb(sins)
 
 class RelationalNet(nn.Module):
     def __init__(self, in_dim, out_dim):

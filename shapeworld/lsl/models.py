@@ -817,7 +817,7 @@ class ImagePositionalEmbeddingHarmonic(nn.Module):
 
     def forward(self, x):
         # add positional embedding to the feature vector
-        sins = torch.sin(self.x_coord*self.x_scales + self.y_coord*self.y_scales + self.phases)
+        sins = torch.sin(self.x_coord*self.x_scales + self.y_coord*self.y_scales + self.phases).unsqueeze(0)
         return x+self.pos_emb(sins)
 
 class RelationalNet(nn.Module):

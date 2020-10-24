@@ -609,7 +609,7 @@ class TextProposalTransformer(nn.Module):
         return output
 
 class SlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='l2'):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='dp'):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters

@@ -655,7 +655,8 @@ class SlotAttention(nn.Module):
             slots = self.norm_slots(slots)
             q = self.to_q(slots)
 
-            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            # dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            dots = -torch.cdist(q, k) * self.scale
             attn = dots.softmax(dim=1) + self.eps
             if (src_key_padding_mask is not None):
                 attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0);

@@ -609,19 +609,21 @@ class TextProposalTransformer(nn.Module):
         return output
 
 class SlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='l2'):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
         self.eps = eps
         self.scale = dim ** -0.5
+        assert(dist in ['l2', 'dp'])
+        self.dist = dist
 
-        self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim))
+        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
 
-        self.to_q = nn.Linear(dim, dim)
-        self.to_k = nn.Linear(dim, dim)
-        self.to_v = nn.Linear(dim, dim)
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.gru = nn.GRUCell(dim, dim)
 
@@ -641,7 +643,7 @@ class SlotAttention(nn.Module):
         n_it = num_iters if num_iters is not None else self.iters
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = F.softplus(self.slots_sigma.expand(b, n_s, -1))
+        sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
         slots = mu + torch.randn_like(mu)*sigma
 
         inputs = self.norm_input(inputs)        
@@ -655,8 +657,10 @@ class SlotAttention(nn.Module):
             slots = self.norm_slots(slots)
             q = self.to_q(slots)
 
-            # dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
-            dots = -torch.cdist(q, k) * self.scale
+            if self.dist=='dp':
+                dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            else:
+                dots = -torch.cdist(q, k) * self.scale
             attn = dots.softmax(dim=1) + self.eps
             if (src_key_padding_mask is not None):
                 attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0);

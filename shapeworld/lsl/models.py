@@ -869,11 +869,18 @@ class CircularCorr(nn.Module):
             nn.Linear(out_dim, out_dim),
         )
 
+    def com_mult(self, a, b):
+        a = torch.view_as_real(a);
+        b = torch.view_as_real(b);
+        r1, i1 = a[..., 0], a[..., 1]
+        r2, i2 = b[..., 0], b[..., 1]
+        return torch.stack([r1 * r2 - i1 * i2, r1 * i2 + i1 * r2], dim = -1)
+
     def cconv(self, a, b):
-        return torch.irfft(torch.mul(torch.fft.rfft(a, 1), torch.fft.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
+        return torch.irfft(self.com_mult(torch.fft.rfft(a, 1), torch.fft.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
 
     def ccorr(self, a, b):
-        return torch.irfft(torch.mul(torch.fft.rfft(a, 1).conj(), torch.fft.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
+        return torch.irfft(self.com_mult(torch.fft.rfft(a, 1).conj(), torch.fft.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
 
     def forward(self, x):
         x = self.obj_mlp(x)

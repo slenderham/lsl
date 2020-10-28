@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
+import torch.fft
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])

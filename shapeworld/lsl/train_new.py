@@ -286,7 +286,7 @@ if __name__ == "__main__":
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
     if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(SubspaceTranslation(64, args.hidden_size)).to(device)
+        image_relation_model = ExWrapper(CircularCorr(64, args.hidden_size)).to(device)
     elif (args.use_relational_model):
         raise ValueError("can't have relational model if not using slots")
     else:

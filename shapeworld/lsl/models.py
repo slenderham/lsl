@@ -879,9 +879,9 @@ class CircularCorr(nn.Module):
         x = self.obj_mlp(x)
         b, n_s, h = x.shape
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_i = x_i.expand(b, n_s, n_s, h).flatten(1,2)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x_j = x_j.expand(b, n_s, n_s, h).flatten(1,2)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
 
         x_rel = self.ccorr(x_i, x_j)
         assert (x_rel.shape==(b, n_s**2, h))

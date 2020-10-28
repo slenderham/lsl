@@ -809,34 +809,11 @@ class ImagePositionalEmbedding(nn.Module):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords)
 
-class ImagePositionalEmbeddingHarmonic(nn.Module):
-    def __init__(self, height, width, hidden_size):
-        super(ImagePositionalEmbeddingHarmonic, self).__init__()
-
-        pe = torch.zeros(hidden_size, height, width)
-        # Each dimension use half of d_model
-        hidden_size = int(hidden_size / 2)
-        div_term = torch.exp(torch.arange(0., hidden_size, 2) *
-                            -(math.log(10000.0) / hidden_size))
-        pos_w = torch.arange(0., width).unsqueeze(1)
-        pos_h = torch.arange(0., height).unsqueeze(1)
-        pe[0:hidden_size:2, :, :] = torch.sin(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
-        pe[1:hidden_size:2, :, :] = torch.cos(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
-        pe[hidden_size::2, :, :] = torch.sin(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
-        pe[hidden_size + 1::2, :, :] = torch.cos(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
-
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        # add positional embedding to the feature vector
-        return x+self.pe;
-
 class RelationalNet(nn.Module):
     def __init__(self, in_dim, out_dim):
         super(RelationalNet, self).__init__()
         self.leftV = nn.Linear(in_dim, out_dim)
         self.rightV = nn.Linear(in_dim, out_dim)
-        self.rel_emb = nn.Linear(out_dim, out_dim)
         self.obj_mlp = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
@@ -860,31 +837,28 @@ class RelationalNet(nn.Module):
 
         return x_rel
 
-class CircularCorr(nn.Module):
+class TransE(nn.Module):
     def __init__(self, in_dim, out_dim):
-        super(CircularCorr, self).__init__()
+        super(TransE, self).__init__()
         self.obj_mlp = nn.Sequential(
-            nn.Linear(in_dim, out_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(out_dim, out_dim),
-        )
-
-    def cconv(self, a, b):
-        return torch.fft.irfft(torch.fft.rfft(a, 1)*torch.fft.rfft(b, 1), 1, n=(a.shape[-1],))
-
-    def ccorr(self, a, b):
-        return torch.fft.irfft(torch.fft.rfft(a, 1).conj()*torch.fft.rfft(b, 1), n=a.shape[-1])
+                                        nn.Linear(in_dim, out_dim),
+                                        nn.ReLU(inplace=True),
+                                        nn.Linear(out_dim, out_dim)
+                                    );
 
     def forward(self, x):
         x = self.obj_mlp(x)
         b, n_s, h = x.shape
         x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h).flatten(1,2)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
         x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h).flatten(1,2)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
 
-        x_rel = self.ccorr(x_i, x_j)
-        assert (x_rel.shape==(b, n_s**2, h))
+        # get pair-wise rep through multiplicative integration
+        x_rel = (x_i-x_j).flatten(1,2)
+        assert (x_rel.shape[:-1]==(b, n_s**2))
+        
+        # get rid of self to self pairings
         non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
         x_rel = x_rel[:, non_diag_idx, :]
 
@@ -892,7 +866,6 @@ class CircularCorr(nn.Module):
         x_rel = torch.cat([x, x_rel], dim=1)
 
         return x_rel
-
 """
 Similarity Scores
 """

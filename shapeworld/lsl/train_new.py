@@ -598,7 +598,7 @@ if __name__ == "__main__":
                 # use max sum similarity
                 pos_scores = simple_val_scorer(anchor, pos_ex)
                 neg_scores = simple_val_scorer(anchor, neg_ex)
-                concept_avg_meter.update((pos_scores>neg_scores).float().mean(), is_neg.float().sum())
+                concept_avg_meter.update((pos_scores>neg_scores).float().mean().item(), is_neg.float().sum().item())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

@@ -813,6 +813,7 @@ class RelationalNet(nn.Module):
         super(RelationalNet, self).__init__()
         self.leftV = nn.Linear(in_dim, out_dim)
         self.rightV = nn.Linear(in_dim, out_dim)
+        self.rel_emb = nn.Linear(out_dim, out_dim)
         self.obj_mlp = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
@@ -824,7 +825,7 @@ class RelationalNet(nn.Module):
         x = self.obj_mlp(x)
 
         # get pair-wise rep through multiplicative integration
-        x_rel = (self.leftV(x_i)*self.rightV(x_j)).flatten(1,2)
+        x_rel = self.rel_emb(F.relu(self.leftV(x_i)*self.rightV(x_j))).flatten(1,2)
         assert (x_rel.shape[:-1]==(b, n_s**2))
         
         # get rid of self to self pairings
@@ -833,6 +834,35 @@ class RelationalNet(nn.Module):
 
         # concat relations with objects
         x_rel = torch.cat([x, x_rel], dim=1)
+
+        return x_rel
+
+class SubspaceTranslation(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(SubspaceTranslation, self).__init__()
+        self.subspace = nn.Linear(in_dim, in_dim//4)
+        self.rel_emb = nn.Linear(in_dim//4, out_dim)
+        self.obj_mlp = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        b, n_s, h = x.shape
+        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x = self.obj_mlp(x)
+
+        # get pair-wise rep through multiplicative integration
+        x_rel = self.rel_emb(F.relu(self.subspace(x_i)-self.subspace(x_j))).flatten(1,2)
+        assert (x_rel.shape[:-1]==(b, n_s**2))
+        
+        # get rid of self to self pairings
+        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
+        x_rel = x_rel[:, non_diag_idx, :]
+
+        # concat relations with objects
+        x_rel = torch.cat([x, x_rel], dim=1)
+
         return x_rel
 """
 Similarity Scores
@@ -958,40 +988,63 @@ class SinkhornScorer(Scorer):
         else:
             return self.forward_im_im(*args, **kwargs)
     
+    # def forward_im_im(self, x, y):
+    #     b, n_ex, m, h = x.shape
+    #     assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
+    #     n = y.shape[2]
+    #     x = x.flatten(0, 1)
+    #     y = y.flatten(0, 1)
+    #     x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+    #     y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+    #     scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+    #     assert(scores.shape==(b**2*n_ex**2, m, n)), f"scores's shape is wrong: {scores.shape}"
+    #     # pad the score matrix where language is special token
+    #     one = scores.new_tensor(1)
+    #     ms = (m*one).to(scores)
+    #     ns = (n*one).to(scores)
+        
+    #     log_mu = -ms.log().reshape(1, 1).expand(b**2*n_ex**2, m) # batch size x num_obj_x+1
+    #     log_nu = -ns.log().reshape(1, 1).expand(b**2*n_ex**2, n) # batch size x num_obj_y+1
+    #     Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
+    #     matching = Z.exp() 
+    #     assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
+    #     scores = (scores*matching).sum(dim=(1,2))
+    #     scores = scores.reshape(b*n_ex, b*n_ex)
+    #     matching = matching.reshape(b*n_ex, b*n_ex, m, n)
+        
+    #     pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))>0.5).to(scores.device)
+    #     self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
+    #     pos = scores.masked_select(pos_mask & ~self_mask).reshape(b, n_ex*(n_ex-1))
+    #     neg = scores.masked_select(~pos_mask).reshape(b, n_ex*(b-1)*n_ex)
+    #     # average R@1 scores for image and text retrieval
+    #     # metric['acc'] = 
+    #     # metric['pos_score'] = pos.mean().item()
+    #     # metric['neg_score'] = neg.mean().item()
+    #     return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean().item()
+    
+    
     def forward_im_im(self, x, y):
-        b, n_ex, m, h = x.shape
-        assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
-        n = y.shape[2]
-        x = x.flatten(0, 1)
-        y = y.flatten(0, 1)
-        x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-        y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
-        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(b**2*n_ex**2, m, n)), f"scores's shape is wrong: {scores.shape}"
+        b, m, h = x.shape
+        assert(y.shape[0]==b and y.shape[-1]==h)
+        n = y.shape[1]
+        scores = self.base_scorer.score(x, y, get_diag=False)
+        assert(scores.shape==(b, m, n)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         one = scores.new_tensor(1)
         ms = (m*one).to(scores)
         ns = (n*one).to(scores)
         
-        log_mu = -ms.log().reshape(1, 1).expand(b**2*n_ex**2, m) # batch size x num_obj_x+1
-        log_nu = -ns.log().reshape(1, 1).expand(b**2*n_ex**2, n) # batch size x num_obj_y+1
+        log_mu = -ms.log().reshape(1, 1).expand(b, m) # batch size x num_obj_x+1
+        log_nu = -ns.log().reshape(1, 1).expand(b, n) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         matching = Z.exp() 
-        assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
+        assert(matching.shape==(b, x.shape[1], y.shape[1])), f"{matching.shape}"
         scores = (scores*matching).sum(dim=(1,2))
-        scores = scores.reshape(b*n_ex, b*n_ex)
-        matching = matching.reshape(b*n_ex, b*n_ex, m, n)
+        # matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         
-        pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))>0.5).to(scores.device)
-        self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask & ~self_mask).reshape(b, n_ex*(n_ex-1))
-        neg = scores.masked_select(~pos_mask).reshape(b, n_ex*(b-1)*n_ex)
-        # average R@1 scores for image and text retrieval
-        # metric['acc'] = 
-        # metric['pos_score'] = pos.mean().item()
-        # metric['neg_score'] = neg.mean().item()
-        return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean().item()
+        return scores
     
+
     def forward_im_lang(self, x, y, word_idx, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 

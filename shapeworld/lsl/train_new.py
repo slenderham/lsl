@@ -386,8 +386,7 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
-    # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
-    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, step_size=5000, gamma=0.1)
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
     scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]))
     print(sum([p.numel() for p in params_to_finetune]))
@@ -587,10 +586,19 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
                 examples_full = image_relation_model(examples_slot, is_ex=True)
+                image_slot = image_part_model(image, is_ex=False)
+                image_full = image_relation_model(image_slot, is_ex=False)
+
+                is_neg = label==0
+                randOrder = torch.randint(0, n_ex, size=(batch_size,))[is_neg]
+                anchor = examples_full[torch.arange(batch_size)[is_neg], randOrder[is_neg]]
+                pos_ex = examples_full[torch.arange(batch_size)[is_neg], (randOrder[is_neg]+1)%n_ex]
+                neg_ex = image_full[is_neg]
                 
                 # use max sum similarity
-                accuracy = simple_val_scorer(examples_full, examples_full)
-                concept_avg_meter.update(accuracy, batch_size)
+                pos_scores = simple_val_scorer(anchor, pos_ex)
+                neg_scores = simple_val_scorer(anchor, neg_ex)
+                concept_avg_meter.update((pos_scores>neg_scores).float().mean(), is_neg.float().sum())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))
@@ -793,4 +801,3 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_avg)', best_epoch,
         (best_test_acc + best_test_same_acc) / 2))
-

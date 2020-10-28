@@ -995,7 +995,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.8, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word=None, iters=10, reg=0.2, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight

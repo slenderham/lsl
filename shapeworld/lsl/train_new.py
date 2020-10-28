@@ -533,7 +533,7 @@ if __name__ == "__main__":
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach().t().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_vision_slots))
-                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
+                    # ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
                     # ylabels = list(range(args.num_vision_slots))
                     # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
                     ax.set_xticks(np.arange(len(hint_seq[0])))

@@ -591,8 +591,8 @@ if __name__ == "__main__":
 
                 is_neg = label==0
                 randOrder = torch.randint(0, n_ex, size=(batch_size,))[is_neg]
-                anchor = examples_full[torch.arange(batch_size)[is_neg], randOrder[is_neg]]
-                pos_ex = examples_full[torch.arange(batch_size)[is_neg], (randOrder[is_neg]+1)%n_ex]
+                anchor = examples_full[torch.arange(batch_size)[is_neg], randOrder]
+                pos_ex = examples_full[torch.arange(batch_size)[is_neg], (randOrder+1)%n_ex]
                 neg_ex = image_full[is_neg]
                 
                 # use max sum similarity

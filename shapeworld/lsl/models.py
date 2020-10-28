@@ -12,7 +12,6 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-import torch.fft
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -825,7 +824,7 @@ class RelationalNet(nn.Module):
         x = self.obj_mlp(x)
 
         # get pair-wise rep through multiplicative integration
-        x_rel = self.rel_emb(F.relu(self.leftV(x_i)*self.rightV(x_j))).flatten(1,2)
+        x_rel = (self.leftV(x_i)*self.rightV(x_j)).flatten(1,2)
         assert (x_rel.shape[:-1]==(b, n_s**2))
         
         # get rid of self to self pairings
@@ -834,37 +833,6 @@ class RelationalNet(nn.Module):
 
         # concat relations with objects
         x_rel = torch.cat([x, x_rel], dim=1)
-
-        return x_rel
-
-class TransE(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(TransE, self).__init__()
-        self.obj_mlp = nn.Sequential(
-                                        nn.Linear(in_dim, out_dim),
-                                        nn.ReLU(inplace=True),
-                                        nn.Linear(out_dim, out_dim)
-                                    );
-
-    def forward(self, x):
-        x = self.obj_mlp(x)
-        b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
-
-        # get pair-wise rep through multiplicative integration
-        x_rel = (x_i-x_j).flatten(1,2)
-        assert (x_rel.shape[:-1]==(b, n_s**2))
-        
-        # get rid of self to self pairings
-        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
-        x_rel = x_rel[:, non_diag_idx, :]
-
-        # concat relations with objects
-        x_rel = torch.cat([x, x_rel], dim=1)
-
         return x_rel
 """
 Similarity Scores
@@ -969,7 +937,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word=None, iters=10, reg=0.2, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
+    def __init__(self, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.8, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight

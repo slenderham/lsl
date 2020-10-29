@@ -692,16 +692,12 @@ class SANet(nn.Module):
             self.encoder = nn.Sequential(
                 nn.Conv2d(3, dim, 3),
                 nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
             )
 
@@ -838,10 +834,11 @@ class RelationalNet(nn.Module):
         return x_rel
 
 class SubspaceTranslation(nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, num_rel=4):
         super(SubspaceTranslation, self).__init__()
-        self.subspace = nn.Linear(in_dim, in_dim//4)
-        self.rel_emb = nn.Linear(in_dim//4, out_dim)
+        self.subspace = nn.Linear(in_dim, in_dim//4, bias=False)
+        self.rel_emb = nn.Linear(num_rel, out_dim)
+        self.rel_key = nn.Linear(in_dim//4, num_rel)
         self.obj_mlp = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
@@ -853,7 +850,8 @@ class SubspaceTranslation(nn.Module):
         x = self.obj_mlp(x)
 
         # get pair-wise rep through multiplicative integration
-        x_rel = self.rel_emb(F.relu(self.subspace(x_i)-self.subspace(x_j))).flatten(1,2)
+        x_rel = self.subspace(x_i)-self.subspace(x_j)
+        x_rel = self.rel_emb(F.softmax(self.rel_emb(x_rel)))
         assert (x_rel.shape[:-1]==(b, n_s**2))
         
         # get rid of self to self pairings
@@ -1044,7 +1042,6 @@ class SinkhornScorer(Scorer):
         
         return scores
     
-
     def forward_im_lang(self, x, y, word_idx, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 

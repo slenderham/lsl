@@ -537,9 +537,9 @@ if __name__ == "__main__":
                     # ylabels = list(range(args.num_vision_slots))
                     # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]])
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
                     ax.set_yticks(np.arange(len(ylabels)))
-                    ax.set_yticklabels(ylabels, rotation=45)
+                    ax.set_yticklabels(ylabels, rotation=90)
                     ax.set_aspect('auto')
                     plt.colorbar(im, ax=ax)
                     plt.show()

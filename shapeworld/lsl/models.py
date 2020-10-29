@@ -692,12 +692,16 @@ class SANet(nn.Module):
             self.encoder = nn.Sequential(
                 nn.Conv2d(3, dim, 3),
                 nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
                 nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
             )
 

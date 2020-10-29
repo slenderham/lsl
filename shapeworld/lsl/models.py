@@ -855,7 +855,7 @@ class SubspaceTranslation(nn.Module):
 
         # get pair-wise rep through multiplicative integration
         x_rel = self.subspace(x_i)-self.subspace(x_j)
-        x_rel = self.rel_emb(F.softmax(self.rel_emb(x_rel)))
+        x_rel = self.rel_emb(F.softmax(self.rel_emb(x_rel), dim=-1))
         assert (x_rel.shape[:-1]==(b, n_s**2))
         
         # get rid of self to self pairings

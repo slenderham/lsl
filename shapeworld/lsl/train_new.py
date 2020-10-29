@@ -585,15 +585,13 @@ if __name__ == "__main__":
                 n_ex = examples.shape[1]
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                examples_full = image_relation_model(examples_slot, is_ex=True)
                 image_slot = image_part_model(image, is_ex=False)
-                image_full = image_relation_model(image_slot, is_ex=False)
 
                 is_neg = label==0
                 randOrder = torch.randint(0, n_ex, size=(batch_size,))[is_neg]
-                anchor = examples_full[torch.arange(batch_size)[is_neg], randOrder]
-                pos_ex = examples_full[torch.arange(batch_size)[is_neg], (randOrder+1)%n_ex]
-                neg_ex = image_full[is_neg]
+                anchor = examples_slot[torch.arange(batch_size)[is_neg], randOrder]
+                pos_ex = examples_slot[torch.arange(batch_size)[is_neg], (randOrder+1)%n_ex]
+                neg_ex = image_slot[is_neg]
                 
                 # use max sum similarity
                 pos_scores = simple_val_scorer(anchor, pos_ex)

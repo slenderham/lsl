@@ -480,11 +480,11 @@ if __name__ == "__main__":
                 if (args.aux_task=='caption_slot'):
                     assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     hypo_out, attns = hint_model(examples_full.flatten(0, 1), hint_seq, \
-                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0))
+                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
                 else:
                     assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
                     hypo_out = hint_model(examples_full.flatten(0, 1), hint_seq, \
-                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0))
+                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
                 seq_len = hint_seq.size(1)
 
                 if (args.visualize_attns):

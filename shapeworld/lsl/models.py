@@ -295,8 +295,7 @@ class TextProposal(nn.Module):
 
         # embed your sequences
         embed_seq = self.embedding(seq)
-        packed_input = rnn_utils.pack_padded_sequence(embed_seq,
-                                                      sorted_lengths)
+        packed_input = rnn_utils.pack_padded_sequence(embed_seq, sorted_lengths)
         # shape = (seq_len, batch, hidden_dim)
         packed_output, _ = self.gru(packed_input, feats)
         output = rnn_utils.pad_packed_sequence(packed_output)
@@ -660,7 +659,7 @@ class SlotAttention(nn.Module):
             if self.dist=='dp':
                 dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
             else:
-                dots = -torch.cdist(q, k) * self.scale
+                dots = -torch.cdist(q, k)**2 * self.scale
             attn = dots.softmax(dim=1) + self.eps
             if (src_key_padding_mask is not None):
                 attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0);
@@ -794,14 +793,26 @@ class SANet(nn.Module):
         # plt.show()
 
 class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size):
+    def __init__(self, height, width, hidden_size, coord_type='cartesian'):
         super(ImagePositionalEmbedding, self).__init__()
+        self.coord_type = coord_type
+
         x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
         x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
         y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
         y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
 
-        self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
+        if (coord_type=='cartesian'):
+            self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
+        elif (coord_type=='polar'):
+            coords = [];
+            for xx in [x_coord_neg, x_coord_pos]:
+                for yy in [y_coord_neg, y_coord_pos]:
+                    coords.append(torch.sqrt(xx**2+yy**2))
+                    coords.append(torch.atan2(xx, yy))
+            self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
+        else:
+            raise ValueError
         self.pos_emb = nn.Conv2d(4, hidden_size, 1)
 
     def forward(self, x):
@@ -838,11 +849,10 @@ class RelationalNet(nn.Module):
         return x_rel
 
 class SubspaceTranslation(nn.Module):
-    def __init__(self, in_dim, out_dim, num_rel=4):
+    def __init__(self, in_dim, out_dim):
         super(SubspaceTranslation, self).__init__()
-        self.subspace = nn.Linear(in_dim, in_dim//4, bias=False)
-        self.rel_emb = nn.Linear(num_rel, out_dim)
-        self.rel_key = nn.Linear(in_dim//4, num_rel)
+        self.subspace = nn.Linear(in_dim, in_dim//4)
+        self.rel_emb = nn.Linear(in_dim//4, out_dim)
         self.obj_mlp = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
@@ -854,8 +864,8 @@ class SubspaceTranslation(nn.Module):
         x = self.obj_mlp(x)
 
         # get pair-wise rep through multiplicative integration
-        x_rel = self.subspace(x_i)-self.subspace(x_j)
-        x_rel = self.rel_emb(F.softmax(self.rel_emb(x_rel), dim=-1))
+        x_rel = self.subspace(x_i-x_j)
+        x_rel = self.rel_emb(F.softmax(x_rel, dim=-1))
         assert (x_rel.shape[:-1]==(b, n_s**2))
         
         # get rid of self to self pairings
@@ -866,6 +876,220 @@ class SubspaceTranslation(nn.Module):
         x_rel = torch.cat([x, x_rel], dim=1)
 
         return x_rel
+
+class RelationalSlotAttention(nn.Module):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='dp'):
+        super().__init__()
+        self.num_slots = num_slots**2
+        self.iters = iters
+        self.eps = eps
+        self.scale = dim ** -0.5
+        assert(dist in ['l2', 'dp'])
+        self.dist = dist
+
+        self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.rel_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.rel_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+
+        self.rel_to_q = nn.Linear(dim, dim, bias=False)
+        self.rel_s = nn.Linear(dim, dim, bias=False)
+        self.rel_o = nn.Linear(dim, dim, bias=False)
+
+        self.obj_gru = nn.GRUCell(dim*2, dim)
+        self.rel_gru = nn.GRUCell(dim*2, dim)
+
+        self.obj_mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+        )
+
+        self.rel_mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+        )
+
+        self.norm_input  = nn.LayerNorm(dim)
+        self.norm_obj_slots = nn.LayerNorm(dim)
+        self.norm_pre_ff_obj = nn.LayerNorm(dim)
+        self.norm_rel_slots = nn.LayerNorm(dim)
+        self.norm_pre_ff_rel = nn.LayerNorm(dim)
+
+        self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
+
+    def _obj_to_rel(self, x):
+        b, n_s, h = x.shape
+        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
+        x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x_rel = torch.cat([x_i, x_j], dim=-1)
+        assert(x_rel==(b, n_s*n_s, h))
+        return x_rel
+
+    def _rel_to_obj(self, x_rel, x_obj):
+        b, n_s, d = x_obj.shape
+        assert(x_rel.shape[1]==n_s**2)
+        x_obj_q = self.rel_to_q(x_obj) # b, n_s, h
+        x_rel_i = self.rel_s(x_rel).reshape(b, n_s, n_s, d) # b, n_s, n_s, h
+        x_rel_j = self.rel_o(x_rel).reshape(b, n_s, n_s, d) # b, n_s, n_s, h
+
+        # TODO: fix broadcast axis, remove self-edge
+        rel_i_gate = (x_obj_q.unsqueeze(1)*x_rel_i).sum(-1, keepdim=True)*self.scale # b, n_s, n_s, 1
+        rel_j_gate = (x_obj_q.unsqueeze(2)*x_rel_j).sum(-1, keepdim=True)*self.scale # b, n_s, n_s, 1
+        
+        obj_msg = ((rel_i_gate*x_rel_i).sum(1) + (rel_j_gate*x_rel_j).sum(2))/2
+        assert(obj_msg.shape==(b, n_s, d))
+
+        return obj_msg
+
+    def forward(self, inputs, num_slots = None, num_iters = None):
+        b, n, d = inputs.shape
+        n_s = num_slots if num_slots is not None else self.num_slots
+        n_it = num_iters if num_iters is not None else self.iters
+        
+        obj_mu = self.obj_slots_mu.expand(b, n_s, -1)
+        obj_sigma = torch.exp(self.obj_slots_sigma.expand(b, n_s, -1))
+        obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
+
+        rel_mu = self.rel_slots_mu.expand(b, n_s*(n_s-1), -1)
+        rel_sigma = torch.exp(self.rel_slots_sigma.expand(b, n_s*(n_s-1), -1))
+        rel_slots = rel_mu + torch.randn_like(rel_mu)*rel_sigma
+
+        inputs = self.norm_input(inputs)        
+        k, v = self.to_k(inputs), self.to_v(inputs)
+
+        edge_context = torch.zeros_like()
+
+        attns = []
+
+        for _ in range(n_it):
+            slots_prev = obj_slots
+            obj_slots = self.norm_obj_slots(obj_slots)
+            q = self.to_q(obj_slots)
+
+            if self.dist=='dp':
+                dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            else:
+                dots = -torch.cdist(q, k)**2 * self.scale
+            attn = dots.softmax(dim=1) + self.eps
+            attns.append(attn)
+            attn = attn / attn.sum(dim=-1, keepdim=True)
+
+            updates = torch.einsum('bjd,bij->bid', v, attn)
+
+            obj_context = self._rel_to_obj(edge_slots, obj_slots)
+            obj_slots = self.obj_gru(
+                torch.cat([updates, obj_context], dim=-1).reshape(b*n_s, 2*d),
+                slots_prev.reshape(b*n_s, d)
+            )
+
+            obj_slots = obj_slots.reshape(b, n_s, d)
+            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
+
+            # compute edge rep
+            edge_context_w_diag = self._obj_to_rel(obj_slots)
+            edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
+            edge_slots = self.rel_gru(
+                obj_slots.reshape(b*n_s*(n_s-1), 2*d),
+                edge_slots.reshape(b*n_s*(n_s-1), d)
+            ).reshape(b, n_s*(n_s-1), d)
+            edge_slots = edge_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots));
+
+        return (obj_slots, rel_slots), attns
+
+class BroadcastDecoder(nn.Module):
+    """
+    Broadcast decoder, decode l1 normalized perturbations from slots
+    """
+    def __init__(self, hidden_size, im_size, budget=0.05):
+        super(BroadcastDecoder, self).__init__()
+            # Coordinates for the broadcast decoder
+        self.im_size = im_size
+        self.init_size = im_size+2*4
+        self.mean = nn.Linear(hidden_size, hidden_size)
+        self.std = nn.Linear(hidden_size, hidden_size)
+        self.budget = budget
+        self.decoder = nn.Sequential(
+            ImagePositionalEmbedding(self.init_size, self.init_size, hidden_size=hidden_size),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_size, 4, 1)
+        )
+
+    def forward(self, x, img):
+        batch_size, num_slots, h = x.shape
+        x_new = x.reshape(batch_size*num_slots, h)
+        noise = self.mean(x_new) + self.std(x_new).exp()*torch.randn_like(x)
+        x_new += noise
+        x_new = x_new.view(x.shape + (1, 1))
+        x_new = x_new.expand(-1, -1, self.im_size, self.im_size)
+        x_new = self.decoder(x_new)
+
+        x_new = x_new.reshape(batch_size, num_slots, 4, self.im_size, self.im_size)
+        perturb, mask = torch.split(x, [3, 1], dim=2)
+        mask = F.softmax(mask, dim=1)
+        perturb_norm = perturb.abs().sum(dim=[2, 3, 4], keepdim=True)
+        perturb = self.budget*perturb/(perturb_norm+1e-6)*3*self.im_size**2
+        perturb = torch.sum(perturb*mask, dim=1)
+        
+        return torch.clamp(img+perturb, 0, 1)
+
+class TextGenerator(nn.Module):
+    def __init__(self, embedding_module, hidden_size, nhead, num_layers):
+        super(TextGenerator, self).__init__()
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=nhead, dim_feedforward=4*hidden_size, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
+        self.out = nn.Linear(hidden_size, self.embedding.num_embeddings)
+        self.out.weight = self.embedding.weight
+        torch.nn.init.zeros_(self.out.bias)
+
+    def forward(self, seq, seq_len, src_key_padding_mask):
+        batch_size = seq.size(0)
+
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+        embed_seq = self.pe(embed_seq)
+        hidden = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
+
+        # reorder back to (B,L,D)
+        hidden = hidden.transpose(0, 1)
+        logits = self.out(hidden)
+
+        return logits
+
+class SpreadOut(nn.Module):
+    def __init__(self, temperature):
+        self.temperature = temperature
+        self.base_scorer = CosineScorer(temperature=self.temperature)
+
+    def forward(self, x):
+        spread = self.base_scorer(x, x, get_diag=False)
+        return spread.mean()
+        
+# im to lang
+# im to im
+# global contrastive
+# global imagenet pretrain
+
 """
 Similarity Scores
 """
@@ -983,47 +1207,13 @@ class SinkhornScorer(Scorer):
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
         self.reg = reg
+        self.type = loss_type
 
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
             return self.forward_im_lang(*args, **kwargs)
         else:
             return self.forward_im_im(*args, **kwargs)
-    
-    # def forward_im_im(self, x, y):
-    #     b, n_ex, m, h = x.shape
-    #     assert(y.shape[0]==b and y.shape[1]==n_ex and y.shape[-1]==h)
-    #     n = y.shape[2]
-    #     x = x.flatten(0, 1)
-    #     y = y.flatten(0, 1)
-    #     x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-    #     y_expand = y.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
-    #     scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-    #     assert(scores.shape==(b**2*n_ex**2, m, n)), f"scores's shape is wrong: {scores.shape}"
-    #     # pad the score matrix where language is special token
-    #     one = scores.new_tensor(1)
-    #     ms = (m*one).to(scores)
-    #     ns = (n*one).to(scores)
-        
-    #     log_mu = -ms.log().reshape(1, 1).expand(b**2*n_ex**2, m) # batch size x num_obj_x+1
-    #     log_nu = -ns.log().reshape(1, 1).expand(b**2*n_ex**2, n) # batch size x num_obj_y+1
-    #     Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
-    #     matching = Z.exp() 
-    #     assert(matching.shape==(b**2*n_ex**2, x.shape[1], y.shape[1])), f"{matching.shape}"
-    #     scores = (scores*matching).sum(dim=(1,2))
-    #     scores = scores.reshape(b*n_ex, b*n_ex)
-    #     matching = matching.reshape(b*n_ex, b*n_ex, m, n)
-        
-    #     pos_mask = (torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))>0.5).to(scores.device)
-    #     self_mask = (torch.eye(b*n_ex)>0.5).to(scores.device)
-    #     pos = scores.masked_select(pos_mask & ~self_mask).reshape(b, n_ex*(n_ex-1))
-    #     neg = scores.masked_select(~pos_mask).reshape(b, n_ex*(b-1)*n_ex)
-    #     # average R@1 scores for image and text retrieval
-    #     # metric['acc'] = 
-    #     # metric['pos_score'] = pos.mean().item()
-    #     # metric['neg_score'] = neg.mean().item()
-    #     return (pos.mean(dim=-1)>neg.mean(dim=-1)).float().mean().item()
-    
     
     def forward_im_im(self, x, y):
         b, m, h = x.shape
@@ -1045,7 +1235,7 @@ class SinkhornScorer(Scorer):
         # matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         
         return scores
-    
+
     def forward_im_lang(self, x, y, word_idx, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
@@ -1057,17 +1247,29 @@ class SinkhornScorer(Scorer):
         assert(y_mask is None or y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
-        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        if self.type=='wasserstein':
+            scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+            assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        else:
+            scores_xx = self.base_scorer.score(x_expand, x_expand, get_diag=False)
+            scores_yy = self.base_scorer.score(y_expand, y_expand, get_diag=False)
+            scores_xy = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+            assert(scores_xx.shape==(n**2*n_ex, x.shape[1], x.shape[1])), f"scores's shape is wrong: {scores_xx.shape}"
+            assert(scores_yy.shape==(n**2*n_ex, y.shape[1], y.shape[1])), f"scores's shape is wrong: {scores_yy.shape}"
+            assert(scores_xy.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores_xy.shape}"
         # pad the score matrix where language is special token
         if y_mask is not None:
             y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         word_idx = word_idx.repeat(n*n_ex, 1)
-        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
-                                                alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
-                                                scores_mask=y_mask, iters=self.iters)
+
+        if self.type=='wasserstein':
+            matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
+                                                    alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                    alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
+                                                    scores_mask=y_mask, iters=self.iters)
+        else:
+            matching, scores = self.gmv(scores)
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
@@ -1084,8 +1286,8 @@ class SinkhornScorer(Scorer):
                -(1-self.cross_domain_weight)*F.log_softmax(scores_reshaped_by_im, dim=1)[:,0].mean()
 
         # average R@1 scores for image and text retrieval
-        metric['part_acc_im_lang'] = (torch.argmax(scores_reshaped_by_lang, dim=1)==0).float().mean().item()
-        metric['part_acc_lang_im'] = (torch.argmax(scores_reshaped_by_im, dim=1)==0).float().mean().item()
+        metric['acc_im_lang'] = (torch.argmax(scores_reshaped_by_lang, dim=1)==0).float().mean().item()
+        metric['acc_lang_im'] = (torch.argmax(scores_reshaped_by_im, dim=1)==0).float().mean().item()
         metric['pos_score'] = pos.mean().item()
         assert(torch.isclose(neg_by_im.mean(), neg_by_lang.mean()))
         metric['neg_score'] = neg_by_lang.mean().item()
@@ -1173,7 +1375,8 @@ class SinkhornScorer(Scorer):
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):
-        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
+        if self.type=='wasserstein':
+            return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
 
 class SetCriterion(nn.Module):
     """
@@ -1368,30 +1571,23 @@ class ContrastiveLoss(Scorer):
         N = im.shape[0]
         n_ex = im.shape[1]
 
-        scores_im_lang = self.sim.score_im_s(im, s) #--> N x N x n_ex
-        mask = torch.block_diag(*([torch.ones(n_ex, 1)]*N))
-        pos_mask = mask > .5
-        neg_mask = ~pos_mask
-        if torch.cuda.is_available():
-            pos_mask = pos_mask.cuda()
-            neg_mask = neg_mask.cuda()
-
-        positive_scores_im_lang = scores_im_lang.masked_select(pos_mask) # --> N X n_ex, positive pairs 
-        negative_scores_im_lang = scores_im_lang.masked_select(neg_mask) # --> (N-1) x N x n_ex, 
-        assert(positive_scores_im_lang.shape[0]==N*n_ex)
-        assert(negative_scores_im_lang.shape[0]==N*(N-1)*n_ex)
-
-        negative_scores_im_lang = negative_scores_im_lang.reshape(N*n_ex, N-1)
-
-        all_scores_im_lang_by_lang = torch.cat([positive_scores_im_lang.unsqueeze(1), negative_scores_im_lang], dim=1)
-
-        # normalize by hint dimension (push away negative hints from image) and/or normalize by image dimension (push away negative images from hint)
-        loss = -F.log_softmax(all_scores_im_lang_by_lang, dim=1)[:,0].mean()
-
+        scores = self.sim.score_im_s(im, s) #--> N x N x n_ex
         metric = {}
-        metric['pos_score'] = positive_scores_im_lang.mean().item()
-        metric['neg_score'] = negative_scores_im_lang.mean().item()
-        metric['part_acc'] = (torch.argmax(all_scores_im_lang_by_lang, dim=1)==0).float().mean().item()
+        pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask)
+        neg_by_lang = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1)
+        neg_by_im = (scores.t()).masked_select(~pos_mask.t()).reshape(n, (n-1)*n_ex)
+        neg_by_im = torch.repeat_interleave(neg_by_im, dim=0, repeats=n_ex)
+        scores_reshaped_by_lang = torch.cat([pos.reshape(n*n_ex, 1), neg_by_lang], dim=1)
+        scores_reshaped_by_im = torch.cat([pos.reshape(n*n_ex, 1), neg_by_im], dim=1)
+        loss = -self.cross_domain_weight*F.log_softmax(scores_reshaped_by_lang, dim=1)[:,0].mean()\
+               -(1-self.cross_domain_weight)*F.log_softmax(scores_reshaped_by_im, dim=1)[:,0].mean()
+        # average R@1 scores for image and text retrieval
+        metric['acc_im_lang'] = (torch.argmax(scores_reshaped_by_lang, dim=1)==0).float().mean().item()
+        metric['acc_lang_im'] = (torch.argmax(scores_reshaped_by_im, dim=1)==0).float().mean().item()
+        metric['pos_score'] = pos.mean().item()
+        assert(torch.isclose(neg_by_im.mean(), neg_by_lang.mean()))
+        metric['neg_score'] = neg_by_lang.mean().item()
 
         return loss, metric
 

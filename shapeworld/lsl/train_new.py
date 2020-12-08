@@ -70,7 +70,7 @@ if __name__ == "__main__":
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['set_pred_partial', 'caption_slot', 'caption_image', 'matching_slot', 'matching_image'],
+                        choices=['imagenet_pretrain', 'caption_slot', 'caption_image', 'matching_slot', 'matching_image'],
                         default='matching',
                         help='Whether to predict caption or predict objects')
     parser.add_argument('--visualize_attns',
@@ -550,7 +550,7 @@ if __name__ == "__main__":
 
                 loss = hypo_loss
                 aux_loss_total += hypo_loss.item()
-                cls_acc += (metric['part_acc_im_lang'] + metric['part_acc_lang_im'])/2
+                cls_acc += (metric['acc_im_lang'] + metric['acc_lang_im'])/2
             else:
                 raise ValueError("invalid auxiliary task name")
 

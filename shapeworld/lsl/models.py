@@ -239,10 +239,10 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        x_rel = torch.cat([x_i, x_j, x_i*x_j, x_i-x_j], dim=-1)
-        x_rel = self.obj_to_rel_mlp(x_rel)
-        assert(x_rel==(b, n_s*n_s, h))
-        return x_rel
+        rel_msg = torch.cat([x_i, x_j, x_i*x_j, x_i-x_j], dim=-1)
+        rel_msg = self.obj_to_rel_mlp(x_rel)
+        assert(rel_msg.shape==(b, n_s*n_s, h)), f"x_rel's shape is {rel_msg.shape}"
+        return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):
         b, n_s, d = x_obj.shape
@@ -257,7 +257,6 @@ class RelationalSlotAttention(nn.Module):
         rel_j_gate = torch.masked_fill(rel_j_gate, diag_mask, 0)
         obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots+1))
         assert(obj_msg.shape==(b, n_s, d))
-
         return obj_msg
 
     def forward(self, inputs, num_slots = None, num_iters = None):

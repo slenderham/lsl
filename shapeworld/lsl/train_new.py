@@ -268,7 +268,8 @@ if __name__ == "__main__":
         'val_same': val_same_loader if has_same else None,
         'test_same': test_same_loader if has_same else None,
     }
-    labels_to_idx = train_dataset.label2idx
+    if args.aux_task=='set_pred':
+        labels_to_idx = train_dataset.label2idx
 
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots

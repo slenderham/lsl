@@ -1199,9 +1199,7 @@ class SinkhornScorer(Scorer):
         self.comparison = comparison
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
-            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score
-            torch.nn.init.zeros_(self.dustbin_scores_lang.weight)
-            self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
+            self.dustbin_score = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -1254,8 +1252,8 @@ class SinkhornScorer(Scorer):
         # word_idx = word_idx.repeat(n*n_ex, 1)
 
         matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
-                                                alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
+                                                alpha_lang=self.clip_dustbin(self.dustbin_score), \
+                                                alpha_both=self.clip_dustbin(self.dustbin_score)*2+10, \
                                                 scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"

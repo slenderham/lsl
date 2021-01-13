@@ -486,8 +486,11 @@ if __name__ == "__main__":
                 if (args.representation=='slot'):
                     assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length if args.hypo_model!='slot' else args.num_lang_slots, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq,\
-                                                y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)))
+                    if args.hypo_model=='slot':
+                        y_mask = None
+                    else:
+                        y_mask = ((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index))
+                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, y_mask=y_mask)
                 else:
                     assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(batch_size, args.hidden_size))

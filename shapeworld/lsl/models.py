@@ -1305,8 +1305,12 @@ class SinkhornScorer(Scorer):
             couplings = couplings.masked_fill(scores_mask, mask_val)
         
         if (alpha_img is not None):
-            norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-            log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
+            if scores_mask is not None:
+                norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
+                log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
+            else:
+                norm = - (ms + ns).log().view(1, 1)
+                log_mu = torch.cat([norm.expand(b, m), ns.log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
             log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
         else:
             log_mu = -ms.log().reshape(1, 1).expand(b, m)

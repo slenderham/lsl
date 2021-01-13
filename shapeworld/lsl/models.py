@@ -1365,8 +1365,7 @@ class SinkhornScorer(Scorer):
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):
-        if self.type=='wasserstein':
-            return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
+        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
 
 class SetCriterion(nn.Module):
     """

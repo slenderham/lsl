@@ -650,7 +650,7 @@ class TextRepTransformer(nn.Module):
         return hidden
 
 class TextRepSlot(nn.Module):
-    def __init__(self, embedding_module, hidden_size, return_agg, num_slots=4, iters = 3, eps = 1e-8, hidden_dim = 128):
+    def __init__(self, embedding_module, hidden_size, return_agg, num_slots = 4, iters = 3, eps = 1e-8, hidden_dim = 128):
         super().__init__()
         self.return_agg = return_agg
         self.embedding = embedding_module
@@ -667,7 +667,7 @@ class TextRepSlot(nn.Module):
         # embed your sequences, size: B, L, D
         assert(src_key_padding_mask.shape==seq.shape)
         embed_seq = self.encoder(seq, seq_len)
-        hidden, attns = self.slot_iters(embed_seq, embed_seq, src_key_padding_mask=src_key_padding_mask)
+        hidden, attns = self.slot(embed_seq, embed_seq, src_key_padding_mask=src_key_padding_mask)
         if visualize_attns:
             self._visualize_attns(token_seq, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
         if (self.return_agg):

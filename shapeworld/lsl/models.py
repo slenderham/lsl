@@ -209,7 +209,7 @@ class RelationalSlotAttention(nn.Module):
         self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*2, dim)
+        self.rel_gru = nn.GRUCell(dim, dim)
 
         self.obj_mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
@@ -311,7 +311,7 @@ class RelationalSlotAttention(nn.Module):
             edge_context_w_diag = self._obj_to_rel(obj_slots)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
             rel_slots = self.rel_gru(
-                edge_context.reshape(b*n_s*(n_s-1), 2*d),
+                edge_context.reshape(b*n_s*(n_s-1), d),
                 rel_slots.reshape(b*n_s*(n_s-1), d)
               ).reshape(b, n_s*(n_s-1), d)
             rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))

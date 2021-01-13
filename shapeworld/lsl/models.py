@@ -247,7 +247,7 @@ class RelationalSlotAttention(nn.Module):
     def _rel_to_obj(self, x_rel, x_obj):
         b, n_s, d = x_obj.shape
         assert(x_rel.shape[1]==n_s*(n_s-1))
-        x_rel_w_diag = torch.zeros(b, n_s*n_s, d)
+        x_rel_w_diag = torch.zeros(b, n_s*n_s, d).to(x_rel.device)
         x_rel_w_diag[:, self.non_diag_idx, :] = x_rel
         x_rel_w_diag = x_rel_w_diag.reshape(b, n_s, n_s, d)
         rel_i_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(2), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1

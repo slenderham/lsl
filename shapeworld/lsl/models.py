@@ -194,6 +194,8 @@ class RelationalSlotAttention(nn.Module):
         self.iters = iters
         self.eps = eps
         self.num_attn_head = num_attn_head
+        if num_attn_head>1:
+            raise NotImplementedError
         self.dim = dim
         self.scale = (dim//num_attn_head) ** -0.5
 
@@ -274,9 +276,9 @@ class RelationalSlotAttention(nn.Module):
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
 
-        dim_split = self.dim // self.num_attn_head
-        k = torch.cat(k.split(dim_split, 2), 0)
-        v = torch.cat(v.split(dim_split, 2), 0) 
+        # dim_split = self.dim // self.num_attn_head
+        # k = torch.cat(k.split(dim_split, 2), 0)
+        # v = torch.cat(v.split(dim_split, 2), 0) 
         # head, batch, image loc, dim
 
         attns = []
@@ -286,15 +288,15 @@ class RelationalSlotAttention(nn.Module):
             slots_prev = obj_slots
             obj_slots = self.norm_obj_slots(obj_slots)
             q = self.to_q(obj_slots)
-            q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
+            # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
-            dots = torch.einsum('hbid,hbjd->hbij', q, k) * self.scale # head, batch, slot, image loc
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # head, batch, slot, image loc
             attn = dots.softmax(dim=2) + self.eps
             attns.append(attn.mean(0))
             attn = attn / attn.sum(dim=-1, keepdim=True)
 
-            updates = torch.einsum('hbjd,hbij->hbid', v, attn) # head, batch, slot, dim
-            updates = torch.cat(updates.split(self.num_attn_head, 0), 2) # batch, slot, dim
+            updates = torch.einsum('bjd,bij->bid', v, attn) # head, batch, slot, dim
+            # updates = torch.cat(updates.split(self.num_attn_head, 0), 2) # batch, slot, dim
 
             # aggregate message from edge slots
             obj_context = self._rel_to_obj(rel_slots, obj_slots)

@@ -169,9 +169,9 @@ class SlotAttention(nn.Module):
             q = self.to_q(slots)
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
-            if (src_key_padding_mask is not None):
-                dots = dots.masked_fill(src_key_padding_mask.unsqueeze(1), -float('inf'))
             attn = dots.softmax(dim=1) + self.eps
+            if (src_key_padding_mask is not None):
+                attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0)
             attns.append(attn) # batch, num_slot, input dim
             attn = attn / attn.sum(dim=-1, keepdim=True)
 

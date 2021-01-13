@@ -194,6 +194,7 @@ class RelationalSlotAttention(nn.Module):
         self.iters = iters
         self.eps = eps
         self.num_attn_head = num_attn_head
+        self.dim = dim
         self.scale = (dim//num_attn_head) ** -0.5
 
         self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)

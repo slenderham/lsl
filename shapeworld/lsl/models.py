@@ -274,7 +274,7 @@ class RelationalSlotAttention(nn.Module):
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
 
-        dim_split = self.dim // self.num_attn_heads
+        dim_split = self.dim // self.num_attn_head
         k = torch.cat(k.split(dim_split, 2), 0)
         v = torch.cat(v.split(dim_split, 2), 0) 
         # head, batch, image loc, dim

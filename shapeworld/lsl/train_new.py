@@ -287,7 +287,7 @@ if __name__ == "__main__":
     ''' scorer '''
     if args.representation=='slot':
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, comparison='im_im', iters=100, reg=1).to(device)
+        simple_val_scorer = SinkhornScorer(hidden_dim=None, comparison='im_im', iters=100, reg=1).to(device)
     else:
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
         simple_val_scorer = CosineScorer(temperature=1).to(device)
@@ -337,7 +337,7 @@ if __name__ == "__main__":
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device)
     elif args.aux_task=='matching' and args.representation=='slot':
-        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
+        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, idx_to_word=train_i2w, temperature=args.temperature).to(device)
     elif args.aux_task=='matching' and args.representation=='whole':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
     else:

@@ -252,7 +252,7 @@ class RelationalSlotAttention(nn.Module):
         x_rel_w_diag = x_rel_w_diag.reshape(b, n_s, n_s, d)
         rel_i_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(2).expand(b, n_s, n_s, d), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
         rel_j_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(1).expand(b, n_s, n_s, d), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
-        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1) > 0.5
+        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1).to(x_rel.device) > 0.5
         rel_i_gate = torch.masked_fill(rel_i_gate, diag_mask, 0)
         rel_j_gate = torch.masked_fill(rel_j_gate, diag_mask, 0)
         obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots+1))

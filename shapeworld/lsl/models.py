@@ -1251,7 +1251,7 @@ class SinkhornScorer(Scorer):
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         # word_idx = word_idx.repeat(n*n_ex, 1)
 
-        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
+        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_score), \
                                                 alpha_lang=self.clip_dustbin(self.dustbin_score), \
                                                 alpha_both=self.clip_dustbin(self.dustbin_score)*2+10, \
                                                 scores_mask=y_mask, iters=self.iters)

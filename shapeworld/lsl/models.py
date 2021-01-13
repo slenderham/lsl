@@ -1293,7 +1293,7 @@ class SinkhornScorer(Scorer):
         assert((alpha_img is not None)==(alpha_lang is not None)==(alpha_both is not None))
         if (alpha_img is not None):
             bins0 = alpha_img.expand(b, m, 1)
-            bins1 = alpha_lang.transpose(1, 2)
+            bins1 = alpha_lang.expand(b, 1, n)
             alpha = alpha_both.expand(b, 1, 1)
             couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)

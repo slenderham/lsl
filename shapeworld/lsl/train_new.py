@@ -273,7 +273,7 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=64, slot_model=image_model, use_relation=args.use_relational_model)
+    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=args.hidden_size, slot_model=image_model, use_relation=args.use_relational_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]

@@ -170,7 +170,7 @@ class SlotAttention(nn.Module):
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
             if (src_key_padding_mask is not None):
-                dots = dots.masked_fill(src_key_padding_mask.unsqueeze(1), -1e6)
+                dots = dots.masked_fill(src_key_padding_mask.unsqueeze(1), -float('inf'))
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn) # batch, num_slot, input dim
             attn = attn / attn.sum(dim=-1, keepdim=True)
@@ -667,7 +667,7 @@ class TextRepSlot(nn.Module):
         # embed your sequences, size: B, L, D
         assert(src_key_padding_mask.shape==seq.shape)
         embed_seq = self.encoder(seq, seq_len)
-        hidden, attns = self.slot(embed_seq, embed_seq, src_key_padding_mask=src_key_padding_mask)
+        hidden, attns = self.slot(embed_seq, src_key_padding_mask=src_key_padding_mask)
         if visualize_attns:
             self._visualize_attns(token_seq, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
         if (self.return_agg):

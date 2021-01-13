@@ -1198,7 +1198,7 @@ class SinkhornScorer(Scorer):
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         if (self.comparison=='im_lang'):
-            self.temperature = kwargs['temperature']
+            self.temperature = reg
             self.dustbin_score = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
@@ -1253,7 +1253,7 @@ class SinkhornScorer(Scorer):
 
         matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_score), \
                                                 alpha_lang=self.clip_dustbin(self.dustbin_score), \
-                                                alpha_both=self.clip_dustbin(self.dustbin_score)*2+10, \
+                                                alpha_both=self.clip_dustbin(self.dustbin_score)*2-10, \
                                                 scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
@@ -1299,7 +1299,7 @@ class SinkhornScorer(Scorer):
                             torch.cat([bins1, alpha], -1)], 1)
         else:
             couplings = scores
-        mask_val = -1e6
+        mask_val = -float('inf')
 
         if (scores_mask is not None):
             couplings = couplings.masked_fill(scores_mask, mask_val)
@@ -1309,7 +1309,7 @@ class SinkhornScorer(Scorer):
                 norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
                 log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
             else:
-                norm = - (ms + ns).log().view(1, 1)
+                norm = - (ms + ns).log().view(1, 1).expand(b, 1)
                 log_mu = torch.cat([norm.expand(b, m), ns.log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
             log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
         else:

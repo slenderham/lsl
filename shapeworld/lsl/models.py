@@ -289,12 +289,12 @@ class RelationalSlotAttention(nn.Module):
             q = self.to_q(obj_slots)
             # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
-            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # head, batch, slot, image loc
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
             attn = dots.softmax(dim=2) + self.eps
-            attns.append(attn.mean(0))
+            attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
 
-            updates = torch.einsum('bjd,bij->bid', v, attn) # head, batch, slot, dim
+            updates = torch.einsum('bjd,bij->bid', v, attn) # batch, slot, dim
             # updates = torch.cat(updates.split(self.num_attn_head, 0), 2) # batch, slot, dim
 
             # aggregate message from edge slots
@@ -1192,14 +1192,16 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
+    def __init__(self, hidden_dim, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         if (self.comparison=='im_lang'):
             self.temperature = reg
-            self.dustbin_score = nn.Parameter(torch.zeros(1, 1, 1)) # each word token is given a dustbin score
+            self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+            self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
+            self.dustbin_scorer_both = nn.Parameter(torch.zeros(1, 1, 1))
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -1251,9 +1253,9 @@ class SinkhornScorer(Scorer):
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         # word_idx = word_idx.repeat(n*n_ex, 1)
 
-        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_score), \
-                                                alpha_lang=self.clip_dustbin(self.dustbin_score), \
-                                                alpha_both=self.clip_dustbin(self.dustbin_score)*2-10, \
+        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scorer_im(x)), \
+                                                alpha_lang=self.clip_dustbin(self.dustbin_scorer_lang(y)), \
+                                                alpha_both=self.clip_dustbin(self.dustbin_scorer_both)*2-10, \
                                                 scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
@@ -1292,8 +1294,8 @@ class SinkhornScorer(Scorer):
         
         assert((alpha_img is not None)==(alpha_lang is not None)==(alpha_both is not None))
         if (alpha_img is not None):
-            bins0 = alpha_img.expand(b, m, 1)
-            bins1 = alpha_lang.expand(b, 1, n)
+            bins0 = alpha_img.reshape(b, m, 1)
+            bins1 = alpha_lang.reshape(b, 1, n)
             alpha = alpha_both.expand(b, 1, 1)
             couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)

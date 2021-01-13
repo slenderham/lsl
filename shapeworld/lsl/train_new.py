@@ -336,9 +336,9 @@ if __name__ == "__main__":
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device)
-    elif args.aux_task=='matching_slot':
+    elif args.aux_task=='matching' and args.representation=='slot':
         hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
-    elif args.aux_task=='matching_image':
+    elif args.aux_task=='matching' and args.representation=='whole':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
     else:
         raise AssertionError('There are only three types of aux_tasks that require special loss')

@@ -240,7 +240,7 @@ class RelationalSlotAttention(nn.Module):
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
         rel_msg = torch.cat([x_i, x_j, x_i*x_j, x_i-x_j], dim=-1)
-        rel_msg = self.obj_to_rel_mlp(x_rel)
+        rel_msg = self.obj_to_rel_mlp(rel_msg)
         assert(rel_msg.shape==(b, n_s*n_s, h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 

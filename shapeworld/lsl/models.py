@@ -1,17 +1,15 @@
-"""
-Models
-"""
-
 import numpy as np
 import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import torch.distributions as distributions
 import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
+from vision import VGG16
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -62,6 +60,8 @@ class ExWrapper(nn.Module):
 class Identity(nn.Module):
     def forward(self, x):
         return x
+
+''' Visual Modules '''
 
 class ImageRep(nn.Module):
     r"""Two fully-connected layers to form a final image
@@ -120,6 +120,436 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+class SlotAttention(nn.Module):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+        super().__init__()
+        self.num_slots = num_slots
+        self.iters = iters
+        self.eps = eps
+        self.scale = dim ** -0.5
+
+        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+
+        self.gru = nn.GRUCell(dim, dim)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+        )
+
+        self.norm_input  = nn.LayerNorm(dim)
+        self.norm_slots  = nn.LayerNorm(dim)
+        self.norm_pre_ff = nn.LayerNorm(dim)
+
+    def forward(self, inputs, src_key_padding_mask = None, num_slots = None, num_iters = None):
+        b, n, d = inputs.shape
+        n_s = num_slots if num_slots is not None else self.num_slots
+        n_it = num_iters if num_iters is not None else self.iters
+        
+        mu = self.slots_mu.expand(b, n_s, -1)
+        sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
+        slots = mu + torch.randn_like(mu)*sigma
+
+        inputs = self.norm_input(inputs)        
+        k, v = self.to_k(inputs), self.to_v(inputs)
+
+        attns = []
+
+        for _ in range(n_it):
+            slots_prev = slots
+
+            slots = self.norm_slots(slots)
+            q = self.to_q(slots)
+
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
+            if (src_key_padding_mask is not None):
+                dots = dots.masked_fill(src_key_padding_mask.unsqueeze(1), -1e6)
+            attn = dots.softmax(dim=1) + self.eps
+            attns.append(attn) # batch, num_slot, input dim
+            attn = attn / attn.sum(dim=-1, keepdim=True)
+
+            updates = torch.einsum('bjd,bij->bid', v, attn)
+
+            slots = self.gru(
+                updates.reshape(b*n_s, d),
+                slots_prev.reshape(b*n_s, d)
+            )
+
+            slots = slots.reshape(b, n_s, d)
+            slots = slots + self.mlp(self.norm_pre_ff(slots))
+
+        return slots, attns
+
+class RelationalSlotAttention(nn.Module):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, num_attn_head = 1):
+        super().__init__()
+        self.num_slots = num_slots**2
+        self.iters = iters
+        self.eps = eps
+        self.num_attn_head = num_attn_head
+        self.scale = (dim//num_attn_head) ** -0.5
+
+        self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.rel_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.rel_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+
+        self.obj_gru = nn.GRUCell(dim*2, dim)
+        self.rel_gru = nn.GRUCell(dim*2, dim)
+
+        self.obj_mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+         )
+        self.rel_mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+         )
+
+        self.norm_input  = nn.LayerNorm(dim)
+        self.norm_obj_slots = nn.LayerNorm(dim)
+        self.norm_pre_ff_obj = nn.LayerNorm(dim)
+        self.norm_pre_ff_rel = nn.LayerNorm(dim)
+        
+        self.obj_to_rel_mlp = nn.Linear(4*dim, dim)
+        self.rel_s_gate = nn.Linear(2*dim, 1)
+        self.rel_o_gate = nn.Linear(2*dim, 1)
+
+        self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
+
+    def _obj_to_rel(self, x):
+        b, n_s, h = x.shape
+        x_i = torch.unsqueeze(x, 2)  # b. 1, n_s, h
+        x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
+        x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
+        x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
+        x_rel = torch.cat([x_i, x_j, x_i*x_j, x_i-x_j], dim=-1)
+        x_rel = self.obj_to_rel_mlp(x_rel)
+        assert(x_rel==(b, n_s*n_s, h))
+        return x_rel
+
+    def _rel_to_obj(self, x_rel, x_obj):
+        b, n_s, d = x_obj.shape
+        assert(x_rel.shape[1]==n_s*(n_s-1))
+        x_rel_w_diag = torch.zeros(b, n_s*n_s, d)
+        x_rel_w_diag[:, self.non_diag_idx, :] = x_rel
+        x_rel_w_diag = x_rel_w_diag.reshape(b, n_s, n_s, d)
+        rel_i_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(2), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
+        rel_j_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(1), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
+        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1) > 0.5
+        rel_i_gate = torch.masked_fill(rel_i_gate, diag_mask, 0)
+        rel_j_gate = torch.masked_fill(rel_j_gate, diag_mask, 0)
+        obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots+1))
+        assert(obj_msg.shape==(b, n_s, d))
+
+        return obj_msg
+
+    def forward(self, inputs, num_slots = None, num_iters = None):
+        b, n, d = inputs.shape
+        n_s = num_slots if num_slots is not None else self.num_slots
+        n_it = num_iters if num_iters is not None else self.iters
+        
+        obj_mu = self.obj_slots_mu.expand(b, n_s, -1)
+        obj_sigma = torch.exp(self.obj_slots_sigma.expand(b, n_s, -1))
+        obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
+
+        rel_mu = self.rel_slots_mu.expand(b, n_s*(n_s-1), -1)
+        rel_sigma = torch.exp(self.rel_slots_sigma.expand(b, n_s*(n_s-1), -1))
+        rel_slots = rel_mu + torch.randn_like(rel_mu)*rel_sigma
+
+        inputs = self.norm_input(inputs)        
+        k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
+
+        dim_split = self.dim // self.num_attn_heads
+        k = torch.cat(k.split(dim_split, 2), 0)
+        v = torch.cat(v.split(dim_split, 2), 0) 
+        # head, batch, image loc, dim
+
+        attns = []
+
+        for _ in range(n_it):
+            # attention pooling from image source
+            slots_prev = obj_slots
+            obj_slots = self.norm_obj_slots(obj_slots)
+            q = self.to_q(obj_slots)
+            q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
+
+            dots = torch.einsum('hbid,hbjd->hbij', q, k) * self.scale # head, batch, slot, image loc
+            attn = dots.softmax(dim=2) + self.eps
+            attns.append(attn.mean(0))
+            attn = attn / attn.sum(dim=-1, keepdim=True)
+
+            updates = torch.einsum('hbjd,hbij->hbid', v, attn) # head, batch, slot, dim
+            updates = torch.cat(updates.split(self.num_attn_head, 0), 2) # batch, slot, dim
+
+            # aggregate message from edge slots
+            obj_context = self._rel_to_obj(rel_slots, obj_slots)
+
+            # update object slots
+            obj_slots = self.obj_gru(
+                torch.cat([updates, obj_context], dim=-1).reshape(b*n_s, 2*d),
+                slots_prev.reshape(b*n_s, d)
+              ).reshape(b, n_s, d)
+            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
+
+            # compute edge slot from paired object representation
+            edge_context_w_diag = self._obj_to_rel(obj_slots)
+            edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
+            rel_slots = self.rel_gru(
+                edge_context.reshape(b*n_s*(n_s-1), 2*d),
+                rel_slots.reshape(b*n_s*(n_s-1), d)
+              ).reshape(b, n_s*(n_s-1), d)
+            rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(obj_slots))
+
+        return (obj_slots, rel_slots), attns
+
+class SANet(nn.Module):
+    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True):
+        super(SANet, self).__init__()
+        assert(slot_model in ['slot_attn', 'conv', 'pretrained'])
+        self.slot_model = slot_model
+
+        self.iters = iters
+        self.num_slots = num_slots
+
+        if (slot_model=='slot_attn'):
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, dim, 3),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
+            )
+
+            self.post_mlp = nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, dim),
+                nn.ReLU(),
+                nn.Linear(dim, dim)
+            )
+            if use_relation:
+                self.slot_attn = RelationalSlotAttention(num_slots, dim, iters, eps, 2*dim)
+            else:
+                self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+            self.final_feat_dim=dim
+        elif (slot_model=='conv'):
+            final_size = im_size
+            for i in range(4):
+                final_size = (final_size-1)//2+1
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True), 
+                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(dim),
+                ImagePositionalEmbedding(final_size, final_size, dim),
+                nn.Flatten(),
+            )
+            self.final_feat_dim = final_size*final_size*dim
+        elif (slot_model=='pretrained'):
+            self.encoder = VGG16()
+            self.final_feat_dim = 512*7*7
+
+    def forward(self, img, **kwargs):
+        visualize_attns=kwargs.get('visualize_attns', False)
+        num_iters=kwargs.get('num_iters')
+        num_slots=kwargs.get('num_slots')
+        if (self.slot_model=='slot_attn'):
+            x = self.encoder(img)
+            n, c, h, w = x.shape
+            x = x.permute(0, 2, 3, 1).reshape(n, h*w, c)
+            x = self.post_mlp(x)
+            x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots) # --> N * num slots * feature size
+            if visualize_attns:
+                self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
+        elif (self.slot_model=='pretrained'):
+            x = self.encoder(img)
+            if visualize_attns:
+                plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
+        elif (self.slot_model=='conv'):
+            x = self.encoder(img)
+            if visualize_attns:
+                plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
+        return x
+
+    def _visualize_attns(self, img, attns, num_iters, num_slots):
+        cmap = plt.get_cmap(name='Set3')
+        bounds = list(range(12))  # values for each color
+        norm = colors.BoundaryNorm(bounds, cmap.N)
+
+        N, C, H, W = img.shape
+        N, dim_q, dim_k = attns[0].shape # dim_q=the number of slots, dim_k=size of feature map
+        H_k = W_k = math.isqrt(dim_k)
+        # rand_idx = torch.randint(0, N, size=(1,)).item()
+        rand_idx = 2
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu())
+        plt.show()
+        fig1, axes1 = plt.subplots(num_iters, num_slots)
+        fig2, axes2 = plt.subplots(num_iters, num_slots)
+        for i in range(num_iters):
+            for j in range(num_slots):
+                axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 1, dtype=torch.int), extent=(0, H, 0, W))
+                axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
+                    F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1))
+                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
+                axes1[i][j].axis('off')
+                axes2[i][j].axis('off')
+        plt.show()
+
+        # fig, axes = plt.subplots(1, num_iters)
+        # for i in range(num_iters):
+        #     masked_img = torch.zeros(H_k, W_k)
+        #     for h in range(H_k):
+        #         for w in range(W_k):
+        #             masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w])
+        #     axes[i].imshow(masked_img, cmap=cmap, norm=norm)
+
+        # plt.show()
+
+class ImagePositionalEmbedding(nn.Module):
+    def __init__(self, height, width, hidden_size, coord_type='cartesian'):
+        super(ImagePositionalEmbedding, self).__init__()
+        self.coord_type = coord_type
+
+        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
+        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
+        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
+        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
+
+        if (coord_type=='cartesian'):
+            self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
+        elif (coord_type=='polar'):
+            coords = []
+            for xx in [x_coord_neg, x_coord_pos]:
+                for yy in [y_coord_neg, y_coord_pos]:
+                    coords.append(torch.sqrt(xx**2+yy**2))
+                    coords.append(torch.atan2(xx, yy))
+            self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
+        else:
+            raise ValueError
+        self.pos_emb = nn.Conv2d(4, hidden_size, 1)
+
+    def forward(self, x):
+        # add positional embedding to the feature vector
+        return x+self.pos_emb(self.coords)
+
+class AffineDecoder(nn.Module):
+    def __init__(self, hidden_size, im_size, tmplt_size=None):
+        super(AffineDecoder, self).__init__()
+        self.pos_decoder = nn.Linear(hidden_size, 6)
+        self.im_size = im_size
+        if tmplt_size==None:
+            self.tmplt_size = im_size//4
+        else:
+            self.tmplt_size = tmplt_size
+        self.shape_decoder = nn.Sequential(
+            ImagePositionalEmbedding(self.tmplt_size, self.tmplt_size, hidden_size=hidden_size),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_size, 4, 1)
+        )
+
+    def forward(self, x):
+        b, n_s, h = x.shape
+        scale_x, scale_y, theta, shear, trans_x, trans_y = torch.split(self.pos_decoder(x), 1, -1) # 
+        scale_x, scale_y = torch.sigmoid(scale_x) + 1e-2, torch.sigmoid(scale_y) + 1e-2
+        trans_x, trans_y, shear = torch.tanh(trans_x * 5.),  torch.tanh(trans_y * 5.), torch.tanh(shear * 5.)
+        theta *= 2. * math.pi
+        c, s = torch.cos(theta), torch.sin(theta)
+
+        pose = [
+                scale_x * c + shear * scale_y * s, -scale_x * s + shear * scale_y * c,
+                trans_x, scale_y * s, scale_y * c, trans_y
+            ]
+        pose = torch.cat(pose, -1)
+        pose = torch.reshape(pose, (b, n_s, 2, 3))
+
+        x_new = x.reshape(b*n_s, h)
+        x_new = x_new.view(x.shape + (1, 1))
+        x_new = x_new.expand(-1, -1, self.tmplt_size, self.tmplt_size)
+        x_new = self.decoder(x_new)
+
+        grid = F.affine_grid(pose, torch.Size((b*n_s, 4, self.im_size, self.im_size)))
+        x_new = F.grid_sample(x_new, grid)
+        x_new = x_new.reshape(b, n_s, 4, self.im_size, self.im_size)
+        x_new, mask = torch.split(x_new, [3, 1], dim=2)
+        mask = F.softmax(mask, dim=1)
+
+        return {'parts': x_new, 'alpha': mask, 'pose': pose}
+
+    def sample(self, x, scramble=True):
+        x = x.detach()
+        b, n_s, h = x.shape
+        dec = self.forward(x)
+        parts = dec['parts'] #b, n_s, 3, self.im_size, self.im_size
+        alpha = dec['alpha'] #b, n_s, 1, self.im_size, self.im_size
+        if scramble:
+            perm = torch.randperm(b*n_s)
+            parts = parts.reshape(b*n_s, 3, self.im_size, self.im_size)[perm]
+            parts = parts.reshape(b, n_s, 3, self.im_size, self.im_size)
+            alpha = alpha.reshape(b*n_s, 1, self.im_size, self.im_size)[perm]
+            alpha = alpha.reshape(b, n_s, 1, self.im_size, self.im_size)
+        imgs = (parts*alpha).sum(1) #b, 3, self.im_size, self.im_size
+        return imgs
+
+class SpreadOut(nn.Module):
+    def __init__(self, temperature):
+        self.temperature = temperature
+        self.base_scorer = CosineScorer(temperature=self.temperature)
+
+    def forward(self, x):
+        spread = self.base_scorer(x, x, get_diag=False)
+        return spread.mean()
+
+class MixtureImageLikelihood(nn.Module):
+    def __init__(self):
+        super(MixtureImageLikelihood, self).__init__()
+
+    def forward(self, x, img):
+        mask_distr = distributions.Categorical(logits=x['alpha'])
+        part_distr = distributions.Normal(loc=x['parts'], scale=1.0)
+        distr = distributions.MixtureSameFamily(mask_distr, part_distr)
+        log_prob = distr.log_prob(img)
+        return -log_prob
+
+
+''' Text Modules '''
 
 class TextRep(nn.Module):
     r"""Deterministic Bowman et. al. model to form
@@ -218,26 +648,41 @@ class TextRepTransformer(nn.Module):
         return hidden
 
 class TextRepSlot(nn.Module):
-    def __init__(self, embedding_module, hidden_size, num_slots=4, iters=3, eps=1e-8, return_agg=False):
-        super(TextRepSlot, self).__init__()
-        self.model = SlotAttention(num_slots, hidden_size, iters, eps)
-        self.embedding = embedding_module
-        self.embedding_dim = embedding_module.embedding_dim
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=32)
+    def __init__(self, embedding_module, hidden_size, return_agg, num_slots=4, iters = 3, eps = 1e-8, hidden_dim = 128):
+        super().__init__()
         self.return_agg = return_agg
+        self.embedding = embedding_module
+        self.encoder = TextRep(embedding_module, hidden_size, return_agg=False, bidirectional=True)
+        self.slot = SlotAttention(num_slots, hidden_size, iters, eps, hidden_dim)
 
-    def forward(self, seq, seq_len, src_key_padding_mask=None):
-        batch_size = seq.size(0)
+    def forward(self, seq, seq_len, src_key_padding_mask=None, **kwargs):
+        visualize_attns = kwargs.get('visualize_attns', False)
+        token_seq = kwargs.get('token_seq', None)
+        num_iters=kwargs.get('num_iters')
+        num_slots=kwargs.get('num_slots')
+        if visualize_attns:
+            assert(token_seq is not None)
         # embed your sequences, size: B, L, D
         assert(src_key_padding_mask.shape==seq.shape)
-        embed_seq = self.embedding(seq).transpose(0, 1)
-        embed_seq = self.pe(embed_seq).transpose(0, 1)
-        hidden, attns = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
-        
+        embed_seq = self.encoder(seq, seq_len)
+        hidden, attns = self.slot_iters(embed_seq, embed_seq, src_key_padding_mask=src_key_padding_mask)
+        if visualize_attns:
+            self._visualize_attns(token_seq, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
         if (self.return_agg):
             hidden = hidden.mean(dim=1) # return last hidden state
-
         return hidden
+
+    def visualize_attns(self, seq, seq_len, attns, num_iters, num_slots):
+        fig, axes = plt.subplots(num_iters)
+        rand_idx = 0
+        for i in range(num_iters):
+            axes[i].imshow(attns[i][rand_idx][:, :seq_len[rand_idx]].transpose(0, 1).cpu().detach())
+            axes[i].set_yticks(list(range(num_slots)))
+            axes[i].set_yticklabels(list(range(num_slots)))
+            axes[i].tick_params(axis='x', bottom=False)
+        axes[-1].set_xticks(list(range(seq_len[rand_idx])))
+        axes[-1].set_xticklabels(seq[rand_idx][:seq_len[rand_idx]])
+        plt.show()
 
 class TextPositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.0, max_len=5000):
@@ -398,6 +843,7 @@ class Attention(nn.Module):
         Forward propagation.
         :param encoder_out: encoded slots, a tensor of dimension (batch_size, num_slots, encoder_dim)
         :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
+        :param scope: scope for stick breaking which decreases every step, a tensor of dimension (batch_size, num_slots)
         :return: attention weighted encoding, weights
         """
         
@@ -407,7 +853,7 @@ class Attention(nn.Module):
         alpha = self.softmax(att)  # (batch_size, num_slots)
         alpha_tilde = scope[:alpha.shape[0],:]*alpha
         scope[:alpha.shape[0],:] = scope[:alpha.shape[0],:]*(1-alpha)
-        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
+        attention_weighted_encoding = (encoder_out * alpha_tilde.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
 
         return attention_weighted_encoding, alpha_tilde, scope
 
@@ -484,6 +930,7 @@ class TextProposalWithAttn(nn.Module):
         if batch_size > 1:
             _, reversed_idx = torch.sort(sorted_idx)
             output = output[reversed_idx]
+            feats = feats[reversed_idx]
             alphas = alphas[reversed_idx]
 
         return output, alphas
@@ -607,446 +1054,6 @@ class TextProposalTransformer(nn.Module):
 
         return output
 
-class SlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='dp'):
-        super().__init__()
-        self.num_slots = num_slots
-        self.iters = iters
-        self.eps = eps
-        self.scale = dim ** -0.5
-        assert(dist in ['l2', 'dp'])
-        self.dist = dist
-
-        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(dim, dim, bias=False)
-        self.to_v = nn.Linear(dim, dim, bias=False)
-
-        self.gru = nn.GRUCell(dim, dim)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.ReLU(inplace = True),
-            nn.Linear(hidden_dim, dim)
-        )
-
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_slots  = nn.LayerNorm(dim)
-        self.norm_pre_ff = nn.LayerNorm(dim)
-
-    def forward(self, inputs, src_key_padding_mask = None, num_slots = None, num_iters = None):
-        b, n, d = inputs.shape
-        n_s = num_slots if num_slots is not None else self.num_slots
-        n_it = num_iters if num_iters is not None else self.iters
-        
-        mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
-        slots = mu + torch.randn_like(mu)*sigma
-
-        inputs = self.norm_input(inputs)        
-        k, v = self.to_k(inputs), self.to_v(inputs)
-
-        attns = []
-
-        for _ in range(n_it):
-            slots_prev = slots
-
-            slots = self.norm_slots(slots)
-            q = self.to_q(slots)
-
-            if self.dist=='dp':
-                dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
-            else:
-                dots = -torch.cdist(q, k)**2 * self.scale
-            attn = dots.softmax(dim=1) + self.eps
-            if (src_key_padding_mask is not None):
-                attn = attn.masked_fill(src_key_padding_mask.unsqueeze(1), 0);
-            attns.append(attn)
-            attn = attn / attn.sum(dim=-1, keepdim=True)
-
-            updates = torch.einsum('bjd,bij->bid', v, attn)
-
-            slots = self.gru(
-                updates.reshape(b*n_s, d),
-                slots_prev.reshape(b*n_s, d)
-            )
-
-            slots = slots.reshape(b, n_s, d)
-            slots = slots + self.mlp(self.norm_pre_ff(slots))
-
-        return slots, attns
-
-class SANet(nn.Module):
-    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn'):
-        super(SANet, self).__init__()
-        assert(slot_model in ['slot_attn', 'conv'])
-        self.slot_model = slot_model
-
-        self.iters = iters
-        self.num_slots = num_slots
-
-        if (slot_model=='slot_attn'):
-            self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
-            )
-
-            self.post_mlp = nn.Sequential(
-                nn.LayerNorm(dim),
-                nn.Linear(dim, dim),
-                nn.ReLU(),
-                nn.Linear(dim, dim)
-            )
-            self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
-            self.final_feat_dim=dim
-        elif (slot_model=='conv'):
-            final_size = im_size
-            for i in range(4):
-                final_size = (final_size-1)//2+1
-            self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, 2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
-                nn.ReLU(inplace=True), 
-                nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                ImagePositionalEmbedding(final_size, final_size, dim),
-                nn.Flatten(),
-            )
-            self.final_feat_dim = final_size*final_size*dim
-
-    def forward(self, img, **kwargs):
-        visualize_attns=kwargs.get('visualize_attns', False)
-        num_iters=kwargs.get('num_iters')
-        num_slots=kwargs.get('num_slots')
-        if (self.slot_model=='slot_attn'):
-            x = self.encoder(img)
-            n, c, h, w = x.shape
-            x = x.permute(0, 2, 3, 1).reshape(n, h*w, c)
-            x = self.post_mlp(x)
-            x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots) # --> N * num slots * feature size
-            if visualize_attns:
-                self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
-        elif (self.slot_model=='slot_mlp'):
-            x = self.slot_mlp(x)
-            if visualize_attns:
-                plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
-        elif (self.slot_model=='conv'):
-            x = self.encoder(img)
-            if visualize_attns:
-                plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
-        return x
-
-    def _visualize_attns(self, img, attns, num_iters, num_slots):
-        cmap = plt.get_cmap(name='Set3')
-        bounds = list(range(12))  # values for each color
-        norm = colors.BoundaryNorm(bounds, cmap.N)
-
-        N, C, H, W = img.shape
-        N, dim_q, dim_k = attns[0].shape # dim_q=the number of slots, dim_k=size of feature map
-        H_k = W_k = math.isqrt(dim_k)
-        # rand_idx = torch.randint(0, N, size=(1,)).item()
-        rand_idx = 2
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu())
-        plt.show()
-        fig1, axes1 = plt.subplots(num_iters, num_slots)
-        fig2, axes2 = plt.subplots(num_iters, num_slots)
-        for i in range(num_iters):
-            for j in range(num_slots):
-                axes1[i][j].imshow(torch.full(img[rand_idx].shape[:2], 1, dtype=torch.int), extent=(0, H, 0, W))
-                axes1[i][j].imshow(torch.cat([img[rand_idx].permute(1, 2, 0).detach().cpu(),\
-                    F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W, 1).detach().cpu()], dim=-1))
-                axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
-                axes1[i][j].axis('off')
-                axes2[i][j].axis('off')
-        plt.show()
-
-        # fig, axes = plt.subplots(1, num_iters)
-        # for i in range(num_iters):
-        #     masked_img = torch.zeros(H_k, W_k)
-        #     for h in range(H_k):
-        #         for w in range(W_k):
-        #             masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w])
-        #     axes[i].imshow(masked_img, cmap=cmap, norm=norm)
-
-        # plt.show()
-
-class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size, coord_type='cartesian'):
-        super(ImagePositionalEmbedding, self).__init__()
-        self.coord_type = coord_type
-
-        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
-        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
-        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
-        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
-
-        if (coord_type=='cartesian'):
-            self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
-        elif (coord_type=='polar'):
-            coords = [];
-            for xx in [x_coord_neg, x_coord_pos]:
-                for yy in [y_coord_neg, y_coord_pos]:
-                    coords.append(torch.sqrt(xx**2+yy**2))
-                    coords.append(torch.atan2(xx, yy))
-            self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
-        else:
-            raise ValueError
-        self.pos_emb = nn.Conv2d(4, hidden_size, 1)
-
-    def forward(self, x):
-        # add positional embedding to the feature vector
-        return x+self.pos_emb(self.coords)
-
-class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(RelationalNet, self).__init__()
-        self.leftV = nn.Linear(in_dim, out_dim)
-        self.rightV = nn.Linear(in_dim, out_dim)
-        self.rel_emb = nn.Linear(out_dim, out_dim)
-        self.obj_mlp = nn.Linear(in_dim, out_dim)
-
-    def forward(self, x):
-        b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
-        x = self.obj_mlp(x)
-
-        # get pair-wise rep through multiplicative integration
-        x_rel = self.rel_emb(F.relu(self.leftV(x_i)*self.rightV(x_j))).flatten(1,2)
-        assert (x_rel.shape[:-1]==(b, n_s**2))
-        
-        # get rid of self to self pairings
-        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
-        x_rel = x_rel[:, non_diag_idx, :]
-
-        # concat relations with objects
-        x_rel = torch.cat([x, x_rel], dim=1)
-
-        return x_rel
-
-class SubspaceTranslation(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(SubspaceTranslation, self).__init__()
-        self.subspace = nn.Linear(in_dim, in_dim//4)
-        self.rel_emb = nn.Linear(in_dim//4, out_dim)
-        self.obj_mlp = nn.Linear(in_dim, out_dim)
-
-    def forward(self, x):
-        b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
-        x = self.obj_mlp(x)
-
-        # get pair-wise rep through multiplicative integration
-        x_rel = self.subspace(x_i-x_j)
-        x_rel = self.rel_emb(F.softmax(x_rel, dim=-1))
-        assert (x_rel.shape[:-1]==(b, n_s**2))
-        
-        # get rid of self to self pairings
-        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
-        x_rel = x_rel[:, non_diag_idx, :]
-
-        # concat relations with objects
-        x_rel = torch.cat([x, x_rel], dim=1)
-
-        return x_rel
-
-class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, dist='dp'):
-        super().__init__()
-        self.num_slots = num_slots**2
-        self.iters = iters
-        self.eps = eps
-        self.scale = dim ** -0.5
-        assert(dist in ['l2', 'dp'])
-        self.dist = dist
-
-        self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.rel_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.rel_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(dim, dim, bias=False)
-        self.to_v = nn.Linear(dim, dim, bias=False)
-
-        self.rel_to_q = nn.Linear(dim, dim, bias=False)
-        self.rel_s = nn.Linear(dim, dim, bias=False)
-        self.rel_o = nn.Linear(dim, dim, bias=False)
-
-        self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*2, dim)
-
-        self.obj_mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.ReLU(inplace = True),
-            nn.Linear(hidden_dim, dim)
-        )
-
-        self.rel_mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.ReLU(inplace = True),
-            nn.Linear(hidden_dim, dim)
-        )
-
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_obj_slots = nn.LayerNorm(dim)
-        self.norm_pre_ff_obj = nn.LayerNorm(dim)
-        self.norm_rel_slots = nn.LayerNorm(dim)
-        self.norm_pre_ff_rel = nn.LayerNorm(dim)
-
-        self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
-
-    def _obj_to_rel(self, x):
-        b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h, x1x2x3...x1x2x3...x1x2x3...
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2....x3x3x3 
-        x_rel = torch.cat([x_i, x_j], dim=-1)
-        assert(x_rel==(b, n_s*n_s, h))
-        return x_rel
-
-    def _rel_to_obj(self, x_rel, x_obj):
-        b, n_s, d = x_obj.shape
-        assert(x_rel.shape[1]==n_s**2)
-        x_obj_q = self.rel_to_q(x_obj) # b, n_s, h
-        x_rel_i = self.rel_s(x_rel).reshape(b, n_s, n_s, d) # b, n_s, n_s, h
-        x_rel_j = self.rel_o(x_rel).reshape(b, n_s, n_s, d) # b, n_s, n_s, h
-
-        # TODO: fix broadcast axis, remove self-edge
-        rel_i_gate = (x_obj_q.unsqueeze(1)*x_rel_i).sum(-1, keepdim=True)*self.scale # b, n_s, n_s, 1
-        rel_j_gate = (x_obj_q.unsqueeze(2)*x_rel_j).sum(-1, keepdim=True)*self.scale # b, n_s, n_s, 1
-        
-        obj_msg = ((rel_i_gate*x_rel_i).sum(1) + (rel_j_gate*x_rel_j).sum(2))/2
-        assert(obj_msg.shape==(b, n_s, d))
-
-        return obj_msg
-
-    def forward(self, inputs, num_slots = None, num_iters = None):
-        b, n, d = inputs.shape
-        n_s = num_slots if num_slots is not None else self.num_slots
-        n_it = num_iters if num_iters is not None else self.iters
-        
-        obj_mu = self.obj_slots_mu.expand(b, n_s, -1)
-        obj_sigma = torch.exp(self.obj_slots_sigma.expand(b, n_s, -1))
-        obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
-
-        rel_mu = self.rel_slots_mu.expand(b, n_s*(n_s-1), -1)
-        rel_sigma = torch.exp(self.rel_slots_sigma.expand(b, n_s*(n_s-1), -1))
-        rel_slots = rel_mu + torch.randn_like(rel_mu)*rel_sigma
-
-        inputs = self.norm_input(inputs)        
-        k, v = self.to_k(inputs), self.to_v(inputs)
-
-        edge_context = torch.zeros_like()
-
-        attns = []
-
-        for _ in range(n_it):
-            slots_prev = obj_slots
-            obj_slots = self.norm_obj_slots(obj_slots)
-            q = self.to_q(obj_slots)
-
-            if self.dist=='dp':
-                dots = torch.einsum('bid,bjd->bij', q, k) * self.scale
-            else:
-                dots = -torch.cdist(q, k)**2 * self.scale
-            attn = dots.softmax(dim=1) + self.eps
-            attns.append(attn)
-            attn = attn / attn.sum(dim=-1, keepdim=True)
-
-            updates = torch.einsum('bjd,bij->bid', v, attn)
-
-            obj_context = self._rel_to_obj(edge_slots, obj_slots)
-            obj_slots = self.obj_gru(
-                torch.cat([updates, obj_context], dim=-1).reshape(b*n_s, 2*d),
-                slots_prev.reshape(b*n_s, d)
-            )
-
-            obj_slots = obj_slots.reshape(b, n_s, d)
-            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
-
-            # compute edge rep
-            edge_context_w_diag = self._obj_to_rel(obj_slots)
-            edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
-            edge_slots = self.rel_gru(
-                obj_slots.reshape(b*n_s*(n_s-1), 2*d),
-                edge_slots.reshape(b*n_s*(n_s-1), d)
-            ).reshape(b, n_s*(n_s-1), d)
-            edge_slots = edge_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots));
-
-        return (obj_slots, rel_slots), attns
-
-class BroadcastDecoder(nn.Module):
-    """
-    Broadcast decoder, decode l1 normalized perturbations from slots
-    """
-    def __init__(self, hidden_size, im_size, budget=0.05):
-        super(BroadcastDecoder, self).__init__()
-            # Coordinates for the broadcast decoder
-        self.im_size = im_size
-        self.init_size = im_size+2*4
-        self.mean = nn.Linear(hidden_size, hidden_size)
-        self.std = nn.Linear(hidden_size, hidden_size)
-        self.budget = budget
-        self.decoder = nn.Sequential(
-            ImagePositionalEmbedding(self.init_size, self.init_size, hidden_size=hidden_size),
-            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(hidden_size, hidden_size, 3),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose1d(hidden_size, 4, 1)
-        )
-
-    def forward(self, x, img):
-        batch_size, num_slots, h = x.shape
-        x_new = x.reshape(batch_size*num_slots, h)
-        noise = self.mean(x_new) + self.std(x_new).exp()*torch.randn_like(x)
-        x_new += noise
-        x_new = x_new.view(x.shape + (1, 1))
-        x_new = x_new.expand(-1, -1, self.im_size, self.im_size)
-        x_new = self.decoder(x_new)
-
-        x_new = x_new.reshape(batch_size, num_slots, 4, self.im_size, self.im_size)
-        perturb, mask = torch.split(x, [3, 1], dim=2)
-        mask = F.softmax(mask, dim=1)
-        perturb_norm = perturb.abs().sum(dim=[2, 3, 4], keepdim=True)
-        perturb = self.budget*perturb/(perturb_norm+1e-6)*3*self.im_size**2
-        perturb = torch.sum(perturb*mask, dim=1)
-        
-        return torch.clamp(img+perturb, 0, 1)
-
 class TextGenerator(nn.Module):
     def __init__(self, embedding_module, hidden_size, nhead, num_layers):
         super(TextGenerator, self).__init__()
@@ -1076,15 +1083,6 @@ class TextGenerator(nn.Module):
 
         return logits
 
-class SpreadOut(nn.Module):
-    def __init__(self, temperature):
-        self.temperature = temperature
-        self.base_scorer = CosineScorer(temperature=self.temperature)
-
-    def forward(self, x):
-        spread = self.base_scorer(x, x, get_diag=False)
-        return spread.mean()
-        
 # im to lang
 # im to im
 # global contrastive
@@ -1093,7 +1091,6 @@ class SpreadOut(nn.Module):
 """
 Similarity Scores
 """
-
 class Scorer(nn.Module):
     def __init__(self):
         super(Scorer, self).__init__()
@@ -1207,7 +1204,6 @@ class SinkhornScorer(Scorer):
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
         self.reg = reg
-        self.type = loss_type
 
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
@@ -1247,29 +1243,19 @@ class SinkhornScorer(Scorer):
         assert(y_mask is None or y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
-        if self.type=='wasserstein':
-            scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-            assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
-        else:
-            scores_xx = self.base_scorer.score(x_expand, x_expand, get_diag=False)
-            scores_yy = self.base_scorer.score(y_expand, y_expand, get_diag=False)
-            scores_xy = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-            assert(scores_xx.shape==(n**2*n_ex, x.shape[1], x.shape[1])), f"scores's shape is wrong: {scores_xx.shape}"
-            assert(scores_yy.shape==(n**2*n_ex, y.shape[1], y.shape[1])), f"scores's shape is wrong: {scores_yy.shape}"
-            assert(scores_xy.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores_xy.shape}"
+        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+        assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         if y_mask is not None:
             y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         word_idx = word_idx.repeat(n*n_ex, 1)
 
-        if self.type=='wasserstein':
-            matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
-                                                    alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                    alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
-                                                    scores_mask=y_mask, iters=self.iters)
-        else:
-            matching, scores = self.gmv(scores)
+        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scores_im), \
+                                                alpha_lang=self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
+                                                alpha_both=self.clip_dustbin(self.dustbin_scores_im), \
+                                                scores_mask=y_mask, iters=self.iters)
+
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
         matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
@@ -1293,7 +1279,7 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, iters: int, alpha_img=None, alpha_lang=None, alpha_both=None, scores_mask=None):
+    def log_optimal_transport(self, scores, iters: int, alpha_img=None, alpha_lang=None, alpha_both=None, scores_mask: torch.BoolTensor=None):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -1568,7 +1554,7 @@ class ContrastiveLoss(Scorer):
     def forward(self, im, s):
         # compute image-sentence score matrix
 
-        N = im.shape[0]
+        n = im.shape[0]
         n_ex = im.shape[1]
 
         scores = self.sim.score_im_s(im, s) #--> N x N x n_ex

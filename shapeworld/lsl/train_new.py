@@ -42,6 +42,14 @@ if __name__ == "__main__":
                         type=int,
                         default=4,
                         help='Number of slots')
+    parser.add_argument('--img_spec_weight',
+                        type=float,
+                        default=0.,
+                        help='Weight on image autoencoding')
+    parser.add_argument('--lang_spec_weight',
+                        type=float,
+                        default=0.,
+                        help='Weight on language autoencoding')
     parser.add_argument('--comparison',
                         choices=['dotp', 'cosine', 'transformer'],
                         default='transformer',
@@ -68,33 +76,23 @@ if __name__ == "__main__":
                         choices=['multihead_single_label', 'multilabel'],
                         default='multihead_single_label',
                         help='Whether to use one softmax for each attribute or sigmoid for all.')
+    parser.add_argument('--representation',
+                        type=str,
+                        choices=['slot', 'whole'],
+                        default='slot',
+                        help='whether to use single vector or slots')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['imagenet_pretrain', 'caption_slot', 'caption_image', 'matching_slot', 'matching_image'],
+                        choices=['imagenet_pretrain', 'caption', 'matching'],
                         default='matching',
-                        help='Whether to predict caption or predict objects')
+                        help='Whether to predict caption or match objects to captions')
     parser.add_argument('--visualize_attns',
                         action='store_true',
                         help='If true, visualize attention masks of slots and matching/caption if applicable')
-    parser.add_argument('--noise',
-                        type=float,
-                        default=0.0,
-                        help='Amount of noise to add to each example')
-    parser.add_argument('--class_noise_weight',
-                        type=float,
-                        default=0.0,
-                        help='How much of that noise should be class diagnostic?')
     parser.add_argument('--temperature',
                         default=0.5,
                         type=float,
                         help='Temperature parameter used in contrastive loss')
-    parser.add_argument('--noise_at_test',
-                        action='store_true',
-                        help='Add instance-level noise at test time')
-    parser.add_argument('--noise_type',
-                        default='gaussian',
-                        choices=['gaussian', 'uniform'],
-                        help='Type of noise')
     parser.add_argument('--fixed_noise_colors',
                         default=None,
                         type=int,
@@ -187,11 +185,11 @@ if __name__ == "__main__":
         precomputed_features=None,
         max_size=args.max_train,
         preprocess=preprocess,
-        noise=args.noise,
-        class_noise_weight=args.class_noise_weight,
+        noise=0.,
+        class_noise_weight=0,
         fixed_noise_colors=args.fixed_noise_colors,
         fixed_noise_colors_max_rgb=args.fixed_noise_colors_max_rgb,
-        noise_type=args.noise_type,
+        noise_type='gaussian',
         data_dir=args.data_dir,
         language_filter=args.language_filter,
         shuffle_words=args.shuffle_words,
@@ -205,17 +203,14 @@ if __name__ == "__main__":
     eos_index = train_w2i[EOS_TOKEN]
 
     test_class_noise_weight = 0.0
-    if args.noise_at_test:
-        test_noise = args.noise
-    else:
-        test_noise = 0.0
+    test_noise = 0.0
     val_dataset = ShapeWorld(split='val',
                              precomputed_features=None,
                              vocab=train_vocab,
                              preprocess=preprocess,
                              noise=test_noise,
                              class_noise_weight=0.0,
-                             noise_type=args.noise_type,
+                             noise_type='gaussian',
                              data_dir=args.data_dir)
     test_dataset = ShapeWorld(split='test',
                               precomputed_features=None,
@@ -223,7 +218,7 @@ if __name__ == "__main__":
                               preprocess=preprocess,
                               noise=test_noise,
                               class_noise_weight=0.0,
-                              noise_type=args.noise_type,
+                              noise_type='gaussian',
                               data_dir=args.data_dir)
     try:
         val_same_dataset = ShapeWorld(
@@ -233,7 +228,7 @@ if __name__ == "__main__":
             preprocess=preprocess,
             noise=test_noise,
             class_noise_weight=0.0,
-            noise_type=args.noise_type,
+            noise_type='gaussian',
             data_dir=args.data_dir)
         test_same_dataset = ShapeWorld(
             split='test_same',
@@ -242,10 +237,11 @@ if __name__ == "__main__":
             preprocess=preprocess,
             noise=test_noise,
             class_noise_weight=0.0,
-            noise_type=args.noise_type,
+            noise_type='gaussian',
             data_dir=args.data_dir)
         has_same = True
     except RuntimeError:
+        val_same_dataset = test_same_dataset = None
         has_same = False
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -262,6 +258,8 @@ if __name__ == "__main__":
             val_same_dataset, batch_size=args.batch_size, shuffle=False)
         test_same_loader = torch.utils.data.DataLoader(
             test_same_dataset, batch_size=args.batch_size, shuffle=False)
+    else:
+        val_same_loader = test_same_loader = None
 
     data_loader_dict = {
         'train': train_loader,
@@ -270,13 +268,12 @@ if __name__ == "__main__":
         'val_same': val_same_loader if has_same else None,
         'test_same': test_same_loader if has_same else None,
     }
-    if args.aux_task=='set_pred':
-        labels_to_idx = train_dataset.label2idx
+    labels_to_idx = train_dataset.label2idx
 
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
-    image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=64, slot_model=image_model)
+    image_model = 'conv' if args.representation=='whole' else 'slot_attn'
+    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=64, slot_model=image_model, use_relation=args.use_relational_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -285,48 +282,17 @@ if __name__ == "__main__":
     # if use relational and not slots, return error
     # if not use relational and use slots, relation model is MLP to approximately balance number of params
     # if not use relational and not use slots, relational model is MLP as well
-    if (args.use_relational_model and "_slot" in args.aux_task):
-        image_relation_model = ExWrapper(RelationalNet(64, args.hidden_size)).to(device)
-    elif (args.use_relational_model):
-        raise ValueError("can't have relational model if not using slots")
-    else:
-        image_relation_model = ExWrapper(MLP(backbone_model.final_feat_dim, args.hidden_size, args.hidden_size)).to(device)
-    params_to_pretrain.extend(image_relation_model.parameters())
-    models_to_save.append(image_relation_model)
     # abuse of variable name here. This is just to project to the correct dimension
 
     ''' scorer '''
-    # im_im_scorer_model = {
-    #     'dotp': DotPScorer(),
-    #     'cosine': CosineScorer(temperature=args.temperature),
-    #     'transformer': TransformerAgg(args.hidden_size)
-    # }[args.comparison]
-    # if use slots, use transformer scorer
-    # if use conv, use mlp then average
-    # if ('_slot' in args.aux_task):
-    #     if (args.use_relational_model):
-    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-    #         params_to_finetune = list(im_im_scorer_model.parameters())
-    #         models_to_save.append(im_im_scorer_model)
-    #     else:
-    #         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-    #         params_to_finetune = list(im_im_scorer_model.parameters())
-    #         models_to_save.append(im_im_scorer_model)
-    # elif ('_image' in args.aux_task):
-    #     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
-    #     im_im_scorer_model = im_im_scorer_model.to(device)
-    #     params_to_finetune = list(im_im_scorer_model.parameters())
-    #     models_to_save.append(im_im_scorer_model)
-
-    im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+    if args.representation=='slot':
+        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+        simple_val_scorer = SinkhornScorer(comparison='im_im', iters=100, reg=1).to(device)
+    else:
+        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
+        simple_val_scorer = CosineScorer(temperature=1).to(device)
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
-
-    if '_image' in args.aux_task:
-        simple_val_scorer = CosineScorer(temperature=1).to(device)
-    else:
-        simple_val_scorer = SinkhornScorer(comparison='im_im', iters=100, reg=1).to(device)
-
 
     ''' aux task specific '''
     if args.aux_task=='set_pred':
@@ -338,9 +304,9 @@ if __name__ == "__main__":
         params_to_pretrain.extend(image_pos_projection.parameters())
         models_to_save.append(image_pos_projection)
 
-    elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
+    elif args.aux_task=='caption':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        if args.aux_task=='caption_slot':
+        if args.representation=='slot':
             hint_model = TextProposalWithAttn(embedding_model, encoder_dim=args.hidden_size, hidden_size=args.hidden_size)
         else:
             hint_model = TextProposal(embedding_model, hidden_size=args.hidden_size)
@@ -348,14 +314,14 @@ if __name__ == "__main__":
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
 
-    elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
+    elif args.aux_task=='matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         hint_model = {
-                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
-                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
-                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
-                        'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.aux_task=='matching_image', num_slots=args.num_lang_slots)
+                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
+                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
+                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
+                        'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.representation=='whole', num_slots=args.num_lang_slots)
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
@@ -370,16 +336,15 @@ if __name__ == "__main__":
                             pos_cost_weight=args.pos_weight, 
                             eos_coef=0.5, 
                             target_type=args.target_type).to(device)
-        params_to_pretrain.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
     elif args.aux_task=='matching_slot':
         hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
-        params_to_pretrain.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
     elif args.aux_task=='matching_image':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
-        params_to_pretrain.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
+    else:
+        raise AssertionError('There are only three types of aux_tasks that require special loss')
+
+    params_to_pretrain.extend(hype_loss.parameters())
+    models_to_save.append(hype_loss)
 
     # optimizer
     optfunc = {
@@ -459,15 +424,12 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
-            image_full = image_relation_model(image_slot, is_ex=False)
-            examples_full = image_relation_model(examples_slot, is_ex=True)
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
                 slot_pos_pred = image_pos_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
     
-                losses, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred},
-                                    {'labels': objs, 'poses': poses})
+                losses, metric = hype_loss({'pred_logits': slot_cls_score, 'pred_poses': slot_pos_pred}, {'labels': objs, 'poses': poses})
 
                 # Hypothesis loss
                 loss = losses['class'] + args.pos_weight*losses['position']
@@ -475,22 +437,22 @@ if __name__ == "__main__":
                 aux_loss_total += losses['class'].item()
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc']
-            elif args.aux_task=='caption_slot' or args.aux_task=='caption_image':
-                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0) 
-                if (args.aux_task=='caption_slot'):
-                    assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
-                    hypo_out, attns = hint_model(examples_full.flatten(0, 1), hint_seq, \
+            elif args.aux_task=='caption':
+                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0)  # repeat captions to match each image
+                if (args.representation=='slot'):
+                    assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
+                    hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, \
                         torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
                 else:
-                    assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
-                    hypo_out = hint_model(examples_full.flatten(0, 1), hint_seq, \
+                    assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
+                    hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, \
                         torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
                 seq_len = hint_seq.size(1)
 
                 if (args.visualize_attns):
-                    if (args.aux_task=='caption_slot'):
+                    if (args.representation=='slot'):
                         plt.subplot(111).imshow(attns[2].detach().t())
-                    elif(args.aux_task=='caption_image'):
+                    elif(args.representation=='whole'):
                         fig, axes = plt.subplots(2, 7)
                         for i, a in enumerate(attns[2].detach()):
                             axes[i//7][i%7].imshow(a.reshape(56, 56))
@@ -515,33 +477,35 @@ if __name__ == "__main__":
                 metric = {'acc': (hypo_pred==hypo_gt).float().mean().item()} 
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
-            elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
+            elif args.aux_task=='matching':
                 if ('gru' not in args.hypo_model):
                     hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index) 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length) 
 
-                if (args.aux_task=='matching_slot'):
-                    assert(len(examples_full.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
+                if (args.representation=='slot'):
+                    assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
                     assert(hint_rep.shape==(batch_size, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=examples_full.flatten(0, 1), y=hint_rep, word_idx=hint_seq,\
+                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq,\
                                                 y_mask=((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index)))
-
                 else:
-                    assert(len(examples_full.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
+                    assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(batch_size, args.hidden_size))
-                    hypo_loss, metric = hype_loss(im=examples_full, s=hint_rep)
+                    hypo_loss, metric = hype_loss(im=examples_slot, s=hint_rep)
                 
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_vision_slots))
+                    xlabels = list(range(args.num_lang_slots))
                     # ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
                     # ylabels = list(range(args.num_vision_slots))
                     # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
-                    ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
+                    # ax.set_xticks(np.arange(len(hint_seq[0])))
+                    # ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
+                    ax.set_xticks(np.arange(len(xlabels)))
+                    ax.set_xticklabels(xlabels)
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels, rotation=90)
                     ax.set_aspect('auto')
@@ -571,7 +535,7 @@ if __name__ == "__main__":
         return loss, metric
 
     def simple_eval(epoch, split):
-        if ("_image" in args.aux_task):
+        if (args.representation=='whole'):
             raise NotImplementedError
 
         for m in models_to_save:
@@ -630,14 +594,12 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-            image_full = image_relation_model(image_slot, is_ex=False)
-            examples_full = image_relation_model(examples_slot, is_ex=True)
 
-            if "_image" in args.aux_task:
-                examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
-                image_full = image_full.reshape(batch_size, 1, args.hidden_size)
+            if args.representation=='whole':
+                examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size)
+                image_slot = image_slot.reshape(batch_size, 1, args.hidden_size)
 
-            score = im_im_scorer_model(examples_full, image_full).squeeze()
+            score = im_im_scorer_model(examples_slot, image_slot).squeeze()
             loss = F.binary_cross_entropy_with_logits(score, label.float())
             pred_loss_total += loss.item()
             main_acc += ((score>0).long()==label).float().mean().item()
@@ -676,14 +638,12 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                image_full = image_relation_model(image_slot, is_ex=False)
-                examples_full = image_relation_model(examples_slot, is_ex=True)
 
-                if "_image" in args.aux_task:
-                    examples_full = examples_full.reshape(batch_size, n_ex, 1, args.hidden_size)
-                    image_full = image_full.reshape(batch_size, 1, args.hidden_size)
+                if args.representation=='whole':
+                    examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size)
+                    image_slot = image_slot.reshape(batch_size, 1, args.hidden_size)
 
-                score = im_im_scorer_model(examples_full, image_full).squeeze()
+                score = im_im_scorer_model(examples_slot, image_slot).squeeze()
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()
                 accuracy = accuracy_score(label_np, label_hat)
@@ -706,26 +666,39 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
-    for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch)
-        for k, v in pt_metric.items():
-            metrics[k].append(v)
-
-        simple_val_acc = simple_eval(epoch, 'val')
+    if args.aux_task=='imagenet_pretrain':
+        simple_val_acc = simple_eval(1, 'val')
         if has_same:
-            simpel_val_same_acc = simple_eval(epoch, 'val_same')
+            simpel_val_same_acc = simple_eval(1, 'val_same')
             metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
         else:
             metrics['simple_val_acc'].append(simple_val_acc)
 
         save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
-
-        is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
-        if is_best_epoch:
-            best_simple_eval_acc = metrics['simple_val_acc'][-1]
-
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir)
+
+    else:
+        for epoch in range(1, args.pt_epochs+1):
+            train_loss, pt_metric = pretrain(epoch)
+            for k, v in pt_metric.items():
+                metrics[k].append(v)
+
+            simple_val_acc = simple_eval(epoch, 'val')
+            if has_same:
+                simpel_val_same_acc = simple_eval(epoch, 'val_same')
+                metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
+            else:
+                metrics['simple_val_acc'].append(simple_val_acc)
+
+            save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
+
+            is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
+            if is_best_epoch:
+                best_simple_eval_acc = metrics['simple_val_acc'][-1]
+
+            if args.save_checkpoint:
+                save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
         
 
     if args.freeze_slots:

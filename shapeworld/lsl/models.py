@@ -190,7 +190,7 @@ class SlotAttention(nn.Module):
 class RelationalSlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, num_attn_head = 1):
         super().__init__()
-        self.num_slots = num_slots**2
+        self.num_slots = num_slots
         self.iters = iters
         self.eps = eps
         self.num_attn_head = num_attn_head
@@ -315,7 +315,7 @@ class RelationalSlotAttention(nn.Module):
                 edge_context.reshape(b*n_s*(n_s-1), 2*d),
                 rel_slots.reshape(b*n_s*(n_s-1), d)
               ).reshape(b, n_s*(n_s-1), d)
-            rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(obj_slots))
+            rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))
 
         return (obj_slots, rel_slots), attns
 

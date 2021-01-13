@@ -227,7 +227,6 @@ class RelationalSlotAttention(nn.Module):
         self.norm_pre_ff_obj = nn.LayerNorm(dim)
         self.norm_pre_ff_rel = nn.LayerNorm(dim)
         
-        self.obj_to_rel_mlp = nn.Linear(4*dim, dim)
         self.rel_s_gate = nn.Linear(2*dim, 1)
         self.rel_o_gate = nn.Linear(2*dim, 1)
 
@@ -240,8 +239,7 @@ class RelationalSlotAttention(nn.Module):
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
         rel_msg = torch.cat([x_i, x_j], dim=-1)
-        rel_msg = self.obj_to_rel_mlp(rel_msg)
-        assert(rel_msg.shape==(b, n_s*n_s, h)), f"x_rel's shape is {rel_msg.shape}"
+        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):

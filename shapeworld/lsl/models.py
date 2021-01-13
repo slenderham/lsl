@@ -1196,7 +1196,7 @@ class SinkhornScorer(Scorer):
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         if (self.comparison=='im_lang'):
-            self.temperature = reg
+            self.temperature = kwargs['temperature']
             self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
             self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
             self.dustbin_scorer_both = nn.Parameter(torch.zeros(1, 1, 1))
@@ -1299,7 +1299,7 @@ class SinkhornScorer(Scorer):
                             torch.cat([bins1, alpha], -1)], 1)
         else:
             couplings = scores
-        mask_val = -float('inf')
+        mask_val = -1e6
 
         if (scores_mask is not None):
             couplings = couplings.masked_fill(scores_mask, mask_val)

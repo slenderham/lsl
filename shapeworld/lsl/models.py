@@ -288,7 +288,7 @@ class RelationalSlotAttention(nn.Module):
             # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
-            attn = dots.softmax(dim=2) + self.eps
+            attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
 

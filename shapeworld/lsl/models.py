@@ -230,6 +230,8 @@ class RelationalSlotAttention(nn.Module):
         self.rel_s_gate = nn.Linear(2*dim, 1)
         self.rel_o_gate = nn.Linear(2*dim, 1)
 
+        self.rel_to_obj_mlp = nn.Linear(4*dim, 2*dim)
+
         self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
 
     def _obj_to_rel(self, x):
@@ -238,7 +240,7 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i, x_j], dim=-1)
+        rel_msg = self.rel_to_obj_mlp(torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1))
         assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
@@ -1190,7 +1192,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
+    def __init__(self, hidden_dim=None, idx_to_word=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight

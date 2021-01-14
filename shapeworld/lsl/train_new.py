@@ -63,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument('--hypo_model',
                         choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer', 'slot'],
                         default='bi_gru',
-                        help='Which language model to use for ')
+                        help='Which language model to use')
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -503,13 +503,13 @@ if __name__ == "__main__":
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_vision_slots))
                     xlabels = list(range(args.num_lang_slots))
-                    # ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
-                    # ylabels = list(range(args.num_vision_slots))
-                    # ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
-                    # ax.set_xticks(np.arange(len(hint_seq[0])))
-                    # ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
-                    ax.set_xticks(np.arange(len(xlabels)))
-                    ax.set_xticklabels(xlabels)
+                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
+                    ylabels = list(range(args.num_vision_slots))
+                    ylabels = [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots)]
+                    ax.set_xticks(np.arange(len(hint_seq[0])))
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
+                    # ax.set_xticks(np.arange(len(xlabels)))
+                    # ax.set_xticklabels(xlabels)
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels, rotation=90)
                     ax.set_aspect('auto')

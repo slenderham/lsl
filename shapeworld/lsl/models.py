@@ -482,7 +482,7 @@ class AffineDecoder(nn.Module):
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(hidden_size, hidden_size, 3),
             nn.ReLU(inplace=True),
-            nn.ConvTranspose1d(hidden_size, 4, 1)
+            nn.ConvTranspose2d(hidden_size, 4, 1)
         )
 
     def forward(self, x):
@@ -498,12 +498,12 @@ class AffineDecoder(nn.Module):
                 trans_x, scale_y * s, scale_y * c, trans_y
             ]
         pose = torch.cat(pose, -1)
-        pose = torch.reshape(pose, (b, n_s, 2, 3))
+        pose = torch.reshape(pose, (b*n_s, 2, 3))
 
         x_new = x.reshape(b*n_s, h)
-        x_new = x_new.view(x.shape + (1, 1))
+        x_new = x_new.view(x_new.shape + (1, 1))
         x_new = x_new.expand(-1, -1, self.tmplt_size, self.tmplt_size)
-        x_new = self.decoder(x_new)
+        x_new = self.shape_decoder(x_new)
 
         grid = F.affine_grid(pose, torch.Size((b*n_s, 4, self.im_size, self.im_size)))
         x_new = F.grid_sample(x_new, grid)
@@ -542,8 +542,8 @@ class MixtureImageLikelihood(nn.Module):
         super(MixtureImageLikelihood, self).__init__()
 
     def forward(self, x, img):
-        mask_distr = distributions.Categorical(logits=x['alpha'])
-        part_distr = distributions.Normal(loc=x['parts'], scale=1.0)
+        mask_distr = distributions.Categorical(logits=x['alpha'].squeeze(2).permute(0,2,3,1).flatten(0,2))
+        part_distr = distributions.Normal(loc=x['parts'].permute(0,3,4,1,2).flatten(0,2), scale=1.0)
         distr = distributions.MixtureSameFamily(mask_distr, part_distr)
         log_prob = distr.log_prob(img)
         return -log_prob

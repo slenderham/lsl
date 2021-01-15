@@ -244,7 +244,7 @@ class RelationalSlotAttention(nn.Module):
 
     def _rel_to_obj(self, x_rel, x_obj):
         b, n_s, d = x_obj.shape
-        assert(x_rel.shape[1]==n_s*(n_s-1))
+        assert(x_rel.shape==(b, n_s*(n_s-1), d))
         x_rel_w_diag = torch.zeros(b, n_s*n_s, d).to(x_rel.device)
         x_rel_w_diag[:, self.non_diag_idx, :] = x_rel
         x_rel_w_diag = x_rel_w_diag.reshape(b, n_s, n_s, d)
@@ -253,7 +253,7 @@ class RelationalSlotAttention(nn.Module):
         diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1).to(x_rel.device) > 0.5
         rel_i_gate = torch.masked_fill(rel_i_gate, diag_mask, 0)
         rel_j_gate = torch.masked_fill(rel_j_gate, diag_mask, 0)
-        obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots+1))
+        obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots-1))
         assert(obj_msg.shape==(b, n_s, d))
         return obj_msg
 
@@ -372,8 +372,11 @@ class SANet(nn.Module):
                 nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),
                 nn.Flatten(),
+                nn.Linear(final_size*final_size*dim, final_size*final_size*dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(final_size*final_size*dim, dim)
             )
-            self.final_feat_dim = final_size*final_size*dim
+            self.final_feat_dim = dim
         elif (slot_model=='pretrained'):
             self.encoder = VGG16()
             self.final_feat_dim = 512*7*7

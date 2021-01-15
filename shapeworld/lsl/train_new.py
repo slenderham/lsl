@@ -565,7 +565,7 @@ if __name__ == "__main__":
                 image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
                 
                 anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
-                pos_ex = examples_slot.repeat(batch_size, n_ex*n_ex, *examples_slot.shape[-2:]).flatten(0, 1)
+                pos_ex = examples_slot.repeat(1, n_ex, 1, 1).flatten(0, 1)
                 neg_ex = image_slot.reshape(batch_size, 1, *examples_slot.shape[-2:]).flatten(0, 1)
                 
                 pos_scores = simple_val_scorer(anchor, pos_ex) # --> batch_size*n_ex*n_ex

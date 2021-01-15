@@ -209,7 +209,7 @@ class RelationalSlotAttention(nn.Module):
         self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*4, dim)
+        self.rel_gru = nn.GRUCell(dim*2, dim)
 
         self.obj_mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
@@ -238,8 +238,8 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1)
-        assert(rel_msg.shape==(b, n_s*n_s, 4*h)), f"x_rel's shape is {rel_msg.shape}"
+        rel_msg = torch.cat([x_i, x_j], dim=-1)
+        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):
@@ -593,7 +593,8 @@ class TextRep(nn.Module):
         if self.return_agg:
             hidden, _ = rnn_utils.pad_packed_sequence(hidden)
             if self.bidirectional:
-                hidden = (final_hidden[0]+hidden[0,:,:self.hidden_size])/2 # for forward layer, get final for backward, get first
+                hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,:self.hidden_size])/2 # for forward layer, get final for backward, get first
+                hidden = hidden.sum(0)/sorted_lengths.float()
             else:
                 hidden = final_hidden[0]
             if batch_size > 1:
@@ -1057,35 +1058,6 @@ class TextProposalTransformer(nn.Module):
 
         return output
 
-class TextGenerator(nn.Module):
-    def __init__(self, embedding_module, hidden_size, nhead, num_layers):
-        super(TextGenerator, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=nhead, dim_feedforward=4*hidden_size, dropout=0.0)
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.embedding = embedding_module
-        self.embedding_dim = embedding_module.embedding_dim
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
-        self.out = nn.Linear(hidden_size, self.embedding.num_embeddings)
-        self.out.weight = self.embedding.weight
-        torch.nn.init.zeros_(self.out.bias)
-
-    def forward(self, seq, seq_len, src_key_padding_mask):
-        batch_size = seq.size(0)
-
-        # reorder from (B,L,D) to (L,B,D)
-        seq = seq.transpose(0, 1)
-
-        # embed your sequences
-        embed_seq = self.embedding(seq)
-        embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, src_key_padding_mask=src_key_padding_mask)
-
-        # reorder back to (B,L,D)
-        hidden = hidden.transpose(0, 1)
-        logits = self.out(hidden)
-
-        return logits
-
 # im to lang
 # im to im
 # global contrastive
@@ -1215,21 +1187,20 @@ class SinkhornScorer(Scorer):
             return self.forward_im_im(*args, **kwargs)
     
     def forward_im_im(self, x, y):
-        b, m, h = x.shape
-        assert(y.shape[0]==b and y.shape[-1]==h)
-        n = y.shape[1]
+        b, n_s, h = x.shape
+        assert(x.shape==y.shape==(b, n_s, h))
         scores = self.base_scorer.score(x, y, get_diag=False)
-        assert(scores.shape==(b, m, n)), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==(b, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         one = scores.new_tensor(1)
-        ms = (m*one).to(scores)
-        ns = (n*one).to(scores)
+        ms = (n_s*one).to(scores)
+        ns = (n_s*one).to(scores)
         
-        log_mu = -ms.log().reshape(1, 1).expand(b, m) # batch size x num_obj_x+1
-        log_nu = -ns.log().reshape(1, 1).expand(b, n) # batch size x num_obj_y+1
+        log_mu = -ms.log().reshape(1, 1).expand(b, n_s) # batch size x num_obj_x+1
+        log_nu = -ns.log().reshape(1, 1).expand(b, n_s) # batch size x num_obj_y+1
         Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
         matching = Z.exp() 
-        assert(matching.shape==(b, x.shape[1], y.shape[1])), f"{matching.shape}"
+        assert(matching.shape==(b, n_s, n_s)), f"{matching.shape}"
         scores = (scores*matching).sum(dim=(1,2))
         # matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         

@@ -1188,7 +1188,7 @@ class SinkhornScorer(Scorer):
     
     def forward_im_im(self, x, y):
         b, n_s, h = x.shape
-        assert(x.shape==y.shape==(b, n_s, h))
+        assert(x.shape==y.shape==(b, n_s, h)), f'{x.shape}, {y.shape}'
         scores = self.base_scorer.score(x, y, get_diag=False)
         assert(scores.shape==(b, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token

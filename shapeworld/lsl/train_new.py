@@ -553,22 +553,29 @@ if __name__ == "__main__":
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
                 examples = examples.to(device)
                 image = image.to(device)
-                batch_size = len(image)
                 n_ex = examples.shape[1]
+                is_neg = label==0
+
+                examples = examples[is_neg]
+                image = image[is_neg]
+                batch_size = len(image)
+
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                image_slot = image_part_model(image, is_ex=False)
-
-                is_neg = label==0
-                randOrder = torch.randint(0, n_ex, size=(batch_size,))[is_neg]
-                anchor = examples_slot[torch.arange(batch_size)[is_neg], randOrder]
-                pos_ex = examples_slot[torch.arange(batch_size)[is_neg], (randOrder+1)%n_ex]
-                neg_ex = image_slot[is_neg]
+                image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
                 
-                # use max sum similarity
-                pos_scores = simple_val_scorer(anchor, pos_ex)
-                neg_scores = simple_val_scorer(anchor, neg_ex)
-                concept_avg_meter.update((pos_scores>neg_scores).float().mean().item(), is_neg.float().sum().item())
+                anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
+                pos_ex = examples_slot.repeat(batch_size, n_ex*n_ex, *examples_slot.shape[-2:]).flatten(0, 1)
+                neg_ex = image_slot.reshape(batch_size, 1, *examples_slot.shape[-2:]).flatten(0, 1)
+                
+                pos_scores = simple_val_scorer(anchor, pos_ex) # --> batch_size*n_ex*n_ex
+                pos_scores = pos_scores.reshape(batch_size, n_ex*n_ex)
+                min_pos_scores = torch.min(pos_scores, -1)[0]
+
+                anchor = examples_slot.flatten(0, 1)
+                neg_scores = simple_val_scorer(anchor, neg_ex).reshape(batch_size, n_ex) # --> batch_size*n_ex
+                max_neg_scores = torch.max(neg_scores, -1)[0]
+                concept_avg_meter.update((min_pos_scores>max_neg_scores).float().mean().item(), is_neg.float().sum().item())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

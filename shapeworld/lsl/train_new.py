@@ -564,7 +564,7 @@ if __name__ == "__main__":
                 
                 anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
                 pos_ex = examples_slot.repeat(1, n_ex, 1, 1).flatten(0, 1)
-                neg_ex = image_slot.squeeze(1).expand(batch_size, n_ex, args.num_vision_slots, args.hidden_size).flatten(0, 1)
+                neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, args.hidden_size).flatten(0, 1)
                 
                 pos_scores = simple_val_scorer(anchor, pos_ex) # --> batch_size*n_ex*n_ex
                 pos_scores = pos_scores.reshape(batch_size, n_ex*n_ex)

@@ -568,12 +568,12 @@ if __name__ == "__main__":
                 
                 pos_scores = simple_val_scorer(anchor, pos_ex) # --> batch_size*n_ex*n_ex
                 pos_scores = pos_scores.reshape(batch_size, n_ex*n_ex)
-                min_pos_scores = torch.min(pos_scores, -1)[0]
+                pos_scores = torch.mean(pos_scores, -1)
 
                 anchor = examples_slot.flatten(0, 1)
                 neg_scores = simple_val_scorer(anchor, neg_ex).reshape(batch_size, n_ex) # --> batch_size*n_ex
-                max_neg_scores = torch.max(neg_scores, -1)[0]
-                concept_avg_meter.update((min_pos_scores>max_neg_scores).float().mean().item(), is_neg.float().sum().item())
+                neg_scores = torch.mean(neg_scores, -1)
+                concept_avg_meter.update((pos_scores>neg_scores).float().mean().item(), is_neg.float().sum().item())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

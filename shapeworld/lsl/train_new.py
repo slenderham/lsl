@@ -357,7 +357,7 @@ if __name__ == "__main__":
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
     after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
-    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=2000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]))
     print(sum([p.numel() for p in params_to_finetune]))
 

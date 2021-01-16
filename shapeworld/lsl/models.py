@@ -209,7 +209,7 @@ class RelationalSlotAttention(nn.Module):
         self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*2, dim)
+        self.rel_gru = nn.GRUCell(dim*4, dim)
 
         self.obj_mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
@@ -238,8 +238,8 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i, x_j], dim=-1)
-        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
+        rel_msg = torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1)
+        assert(rel_msg.shape==(b, n_s*n_s, 4*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):

@@ -566,7 +566,7 @@ if __name__ == "__main__":
                 pos_ex = examples_slot.repeat(1, n_ex, 1, 1).flatten(0, 1)
                 neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, args.hidden_size).flatten(0, 1)
                 
-                pos_scores = simple_val_scorer(anchor, pos_ex).reshape(batch_size, n_ex*n_ex) # --> batch_size*n_ex*n_ex
+                pos_scores = simple_val_scorer(anchor, pos_ex).reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
                 pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
                 pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
                 mean_pos_scores = torch.mean(pos_scores, -1)

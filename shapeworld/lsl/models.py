@@ -188,16 +188,13 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, num_attn_head = 1):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
         self.eps = eps
-        self.num_attn_head = num_attn_head
-        if num_attn_head>1:
-            raise NotImplementedError
         self.dim = dim
-        self.scale = (dim//num_attn_head) ** -0.5
+        self.scale = (dim) ** -0.5
 
         self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
@@ -306,7 +303,7 @@ class RelationalSlotAttention(nn.Module):
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
 
             # compute edge slot from paired object representation
-            edge_context_w_diag = self._obj_to_rel(obj_slots)
+            edge_context_w_diag = self._obj_to_rel(updates)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
             rel_slots = self.rel_gru(
                 edge_context.reshape(b*n_s*(n_s-1), 4*d),
@@ -345,7 +342,7 @@ class SANet(nn.Module):
             self.post_mlp = nn.Sequential(
                 nn.LayerNorm(dim),
                 nn.Linear(dim, dim),
-                nn.ReLU(),
+                nn.ReLU(inplace=True),
                 nn.Linear(dim, dim)
             )
             if use_relation:
@@ -372,9 +369,9 @@ class SANet(nn.Module):
                 nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),
                 nn.Flatten(),
-                nn.Linear(final_size*final_size*dim, final_size*final_size*dim),
+                nn.Linear(final_size*final_size*dim, self.num_slots*dim),
                 nn.ReLU(inplace=True),
-                nn.Linear(final_size*final_size*dim, dim)
+                nn.Linear(self.num_slots*dim, self.num_slots*dim)
             )
             self.final_feat_dim = dim
         elif (slot_model=='pretrained'):
@@ -1165,16 +1162,27 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', **kwargs):
+    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], **kwargs):
         super(SinkhornScorer, self).__init__()
-        assert(comparison in ['im_im', 'im_lang'])
+        assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
+        self.im_blocks = im_blocks
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
             self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+            if im_blocks is not None:
+                self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
             self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
-            self.dustbin_scorer_both = nn.Parameter(torch.zeros(1, 1, 1))
+        elif (self.comparison=='im_im'):
+            self.temperature = kwargs['temperature']
+            self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+            if im_blocks is not None:
+                self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
+        # elif (self.comparison=='eval'):
+        #     self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+        #     if im_blocks is not None:
+        #         self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -1183,10 +1191,12 @@ class SinkhornScorer(Scorer):
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
             return self.forward_im_lang(*args, **kwargs)
-        else:
+        elif self.comparison=='im_im':
             return self.forward_im_im(*args, **kwargs)
+        else:
+            return self.forward_eval(*args, **kwargs)
     
-    def forward_im_im(self, x, y):
+    def forward_eval(self, x, y):
         b, n_s, h = x.shape
         assert(x.shape==y.shape==(b, n_s, h)), f'{x.shape}, {y.shape}'
         scores = self.base_scorer.score(x, y, get_diag=False)
@@ -1205,6 +1215,45 @@ class SinkhornScorer(Scorer):
         # matching = matching.reshape(b*n_ex, b*n_ex, m, n)
         
         return scores
+
+    def forward_im_im(self, x):
+        b, n_ex, n_s, h = x.shape
+        x = x.reshape(b, n_ex, n_s, h)
+        x_expand = torch.repeat_interleave(x, repeats=b, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+        y_expand = x.repeat(b, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+        assert(scores.shape==(b**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(self.dustbin_scorer_im(x_expand)), \
+                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
+                                                              alpha_both=-10*torch.ones(1), \
+                                                              iters=self.iters)
+
+        assert(matching.shape==(b**2, n_s+1, n_s+1)), f"{matching.shape}"
+        scores = scores.reshape(b, b)
+        matching = matching.reshape(b, b, n_s+1, n_s+1)
+
+        metric = {}
+        mask = torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))
+        pos_mask = torch.as_tensor(mask-np.eye(b*n_ex)>.5).to(scores.device)
+        neg_mask = torch.as_tensor(mask<.5).to(scores.device)
+        pos_scores = scores.masked_select(pos_mask)
+        neg_scores = scores.masked_select(neg_mask)
+
+        assert(pos_scores.shape[0]==b*n_ex*(n_ex-1));
+        assert(neg_scores.shape[0]==(b-1)*b*n_ex**2);
+
+        neg_scores = neg_scores.reshape(b*n_ex, (b-1)*n_ex);
+        neg_scores = torch.repeat_interleave(neg_scores, repeats=n_ex-1, dim=0);
+        all_scores_im_im = torch.cat([pos_scores.unsqueeze(1), neg_scores], dim=1);
+
+        loss = F.log_softmax(all_scores_im_im, dim=1)[:,0].mean()
+
+        # average R@1 scores for image and text retrieval
+        metric['acc'] = (torch.argmax(all_scores_im_im, dim=1)==0).float().mean().item()
+        metric['pos_score'] = pos_scores.mean().item()
+        metric['neg_score'] = neg_scores.mean().item()
+        return matching, loss, metric
 
     def forward_im_lang(self, x, y, word_idx, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
@@ -1225,10 +1274,16 @@ class SinkhornScorer(Scorer):
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
         # word_idx = word_idx.repeat(n*n_ex, 1)
 
-        matching, scores = self.log_optimal_transport(scores, alpha_img=self.clip_dustbin(self.dustbin_scorer_im(x_expand)), \
-                                                alpha_lang=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
-                                                alpha_both=self.clip_dustbin(self.dustbin_scorer_both)*2-10, \
-                                                scores_mask=y_mask, iters=self.iters)
+        if self.im_blocks is not None:
+            x_split = torch.split(x_expand, self.im_blocks, dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im(x_split[0]), self.dustbin_scorer_im_rel(x_split[1])], dim=1)
+        else:
+            dustbin_im = self.dustbin_scorer_im(x_expand)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
+                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
+                                                              alpha_both=-10*torch.ones(1), \
+                                                              scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
@@ -1253,7 +1308,7 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, iters: int, alpha_img=None, alpha_lang=None, alpha_both=None, scores_mask: torch.BoolTensor=None):
+    def log_optimal_transport(self, scores, iters: int, alpha_x=None, alpha_y=None, alpha_both=None, scores_mask: torch.BoolTensor=None):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -1264,10 +1319,10 @@ class SinkhornScorer(Scorer):
         else:
             ns = (n*one).to(scores)
         
-        assert((alpha_img is not None)==(alpha_lang is not None)==(alpha_both is not None))
-        if (alpha_img is not None):
-            bins0 = alpha_img.reshape(b, m, 1)
-            bins1 = alpha_lang.reshape(b, 1, n)
+        assert((alpha_x is not None)==(alpha_y is not None)==(alpha_both is not None))
+        if (alpha_x is not None):
+            bins0 = alpha_x.reshape(b, m, 1)
+            bins1 = alpha_y.reshape(b, 1, n)
             alpha = alpha_both.expand(b, 1, 1)
             couplings = torch.cat([torch.cat([scores, bins0], -1),
                             torch.cat([bins1, alpha], -1)], 1)
@@ -1278,7 +1333,7 @@ class SinkhornScorer(Scorer):
         if (scores_mask is not None):
             couplings = couplings.masked_fill(scores_mask, mask_val)
         
-        if (alpha_img is not None):
+        if (alpha_x is not None):
             if scores_mask is not None:
                 norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
                 log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
@@ -1298,7 +1353,7 @@ class SinkhornScorer(Scorer):
             Z = Z-norm.reshape(b, 1, 1)
         Z = Z.exp() 
         
-        if (alpha_img is not None):
+        if (alpha_x is not None):
             final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
         else:
             final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
@@ -1341,151 +1396,29 @@ class SinkhornScorer(Scorer):
     def M(self, Z, u, v):
         return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
 
-class SetCriterion(nn.Module):
-    """
-            Taken from DETR, simplified by removing object detection losses
-    """
-    def __init__(self, num_classes, eos_coef, target_type, pos_cost_weight=1.0):
-        """ Create the criterion.
-        Parameters:
-            num_classes: number of object categories, omitting the special no-object category
-            pos_cost_weight: relative weight of the position loss
-        """
+class SetPredLoss(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.matcher = self.hungarian
-        self.num_classes = num_classes
-        self.pos_cost_weight = pos_cost_weight
-        self.eos_coef = eos_coef
-        assert(target_type in ['multihead_single_label', 'multilabel'])
-        self.target_type = target_type
-        if self.target_type=='multihead_single_label':
-            self.empty_weights = []
-            for i, n_c in enumerate(self.num_classes):
-                empty_weight = torch.ones(n_c)
-                empty_weight[-1] = self.eos_coef
-                self.register_buffer(f'empty_weight{i}', empty_weight)
-                self.empty_weights.append(empty_weight)
 
-    def loss_labels(self, outputs, targets, indices, num_boxes):
-        """Classification loss (NLL)"""
+    def forward(self, x, target):
+        b, n_s, d = x.shape
+        assert(target.shape==x.shape)
+        x_expand = x.unsqueeze(2).expand(b, n_s, n_s, d).flatten(0, 2)
+        target_expand = target.unsqueeze(1).expand(b, n_s, n_s, d).flatten(0, 2)
+        costs = F.smooth_l1_loss(x_expand, target_expand).reshape(b, n_s, n_s)
 
-        src_logits = outputs['pred_logits']
-        idx = self._get_src_permutation_idx(indices)
-        
-        if self.target_type=='multilabel':
-            target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device)
-            target_classes = torch.zeros(src_logits.shape, device=src_logits.device)
-            target_classes[idx] = target_classes_o
-            loss_ce = F.binary_cross_entropy_with_logits(src_logits, target_classes, weight=self.eos_coef+target_classes*(1-self.eos_coef))
-            acc = (target_classes.long()==(src_logits>0).long()).float().mean()
-            f1 = f1_score(target_classes.long().cpu().numpy().ravel(), (src_logits>0).long().cpu().numpy().ravel())
-            metric = {'acc': acc.item(), 'f1': f1}
-        else:
-            target_classes_o = torch.cat([t[J] for t, (_, J) in zip(targets["labels"], indices)]).to(src_logits.device)
-            default = torch.zeros(sum(self.num_classes)).to(src_logits.device)
-            for n in np.cumsum(self.num_classes):
-                default[n-1] = 1.0
-            target_classes = default.reshape(1, 1, -1).expand(src_logits.shape)
-            target_classes[idx] = target_classes_o
-            src_logits_spl = torch.split(src_logits, self.num_classes, dim=-1)
-            target_classes_spl = torch.split(target_classes, self.num_classes, dim=-1)
-            target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl]
-            loss_ce = sum([F.cross_entropy(src_logits_spl[i].transpose(1, 2), target_classes_spl[i], self.empty_weights[i].to(src_logits.device))
-                            for i, _ in enumerate(src_logits_spl)])/len(self.num_classes)
-            metric = {'acc': (torch.stack([torch.argmax(logit, dim=-1) for logit in src_logits_spl], dim=-1)==torch.stack(target_classes_spl, dim=-1)).float().mean().item()}
-        return loss_ce, metric
+        indices = [linear_sum_assignment(c) for c in costs]
+        indices = [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
-    def loss_position(self, outputs, targets, indices, num_boxes):
-        """Huber Loss"""
-        idx = self._get_src_permutation_idx(indices)
-        src_pos = outputs['pred_poses']
-        target_poses = torch.cat([t[J] for t, (_, J) in zip(targets["poses"], indices)]).to(outputs['pred_poses'].device)
-        loss_l1 = F.smooth_l1_loss(src_pos[idx], target_poses)
-        return loss_l1
+        actual_cost = [torch.sum(costs[i_b][indices[i_b][0], indices[i_b][1]]) for i_b in len(indices)]
+        loss = torch.mean(actual_cost)
+        # acc = (target_classes.long()==(x>0).long()).float().mean()
+        # f1 = f1_score(target_classes.long().cpu().numpy().ravel(), (x>0).long().cpu().numpy().ravel())
+        # metric = {'acc': acc.item(), 'f1': f1}
+        metric = {}
 
-    def _get_src_permutation_idx(self, indices):
-        # permute predictions following indices 
-        # index of sample in batch, repeated by the number of objects in that image
-        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
-        # the index of selected slot in that batch
-        src_idx = torch.cat([src for (src, _) in indices]) 
-        return batch_idx, src_idx
+        return loss, metric
 
-    def forward(self, outputs, targets):
-        """ This performs the loss computation.
-        Parameters:
-             outputs: tensor batch_size x num_slot x num_class
-             targets: list of tensor, such that len(targets) == batch_size. 
-        """
-        # Retrieve the matching between the outputs of the last layer and the targets
-
-        assert("pred_logits" in outputs.keys() and "pred_poses" in outputs.keys())
-        assert("labels" in targets.keys() and "poses" in targets.keys())
-
-        indices = self.matcher(outputs, targets)
-
-        # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_objs = sum(len(t) for t in targets["labels"])
-        num_objs = torch.as_tensor([num_objs], dtype=torch.float, device=outputs["pred_logits"].device)
-
-        # Compute all the requested losses
-        losses = {}
-        loss_cls, metrics = self.loss_labels(outputs, targets, indices, num_objs)
-        losses['class'] = loss_cls
-        losses['position'] = self.loss_position(outputs, targets, indices, num_objs)
-        return losses, metrics
-
-    @ torch.no_grad()
-    def hungarian(self, outputs, targets):
-        """ 
-        adapted from https://github.com/facebookresearch/detr/blob/master/models/matcher.py'
-        Performs the matching
-        Params:
-            outputs: This is a dict that contains at least these entries:
-                 "pred_logits": List of tensor of dim [batch_size, num_slots, num_classes] with the 
-                                classification logits for each  classification problem
-                 "pred_poses": Tensor of dim [batch_size, num_slots, 2] with the predicted position
-            targets: This is a list of targets (len(targets) = batch_size), where each target is a dict containing:
-                 "labels": Tensor of dim [num_objects, num_classes] containing the binary indicator of attributes
-                        or List of tensors of dim [num_objects] containing the label for each cls problem
-                 "poses": Tensor of dim [num_objects, 2] containing the target position
-        Returns:
-            A list of size batch_size, containing tuples of (index_i, index_j) where:
-                - index_i is the indices of the selected predictions (in order)
-                - index_j is the indices of the corresponding selected targets (in order)
-            For each batch element, it holds:
-                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
-        """
-        sizes = [len(t) for t in targets['poses']]
-        n, num_slots, _ = outputs["pred_logits"].shape
-
-        if self.target_type=='multilabel':
-            out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
-            tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob.device) # [sum_i num_obj_i] x num_classes
-            cost_class = torch.cdist(out_prob, tgt_ids, p=1)
-        elif self.target_type=='multihead_single_label':
-            out_prob = outputs["pred_logits"].flatten(0, 1)
-            # split into chunks for different cls heads, then concat back together
-            out_prob = torch.split(out_prob, self.num_classes, dim=-1)
-            for o_p in out_prob:
-                o_p = o_p.softmax(-1)
-            tgt_ids = torch.cat([v for v in targets['labels']]).to(out_prob[0].device)
-            target_classes_spl = torch.split(tgt_ids, self.num_classes, dim=-1)
-            target_classes_spl = [torch.argmax(t_c, dim=-1) for t_c in target_classes_spl]
-            cost_class = -sum([o_p[:,t_c] for o_p, t_c in zip(out_prob, target_classes_spl)])/len(out_prob)
-        else:
-            raise ValueError('Not a valid target type')
-
-        
-        out_pos = outputs["pred_poses"].flatten(0, 1)
-        tgt_pos = torch.cat([v for v in targets['poses']]).to(out_pos.device) # [sum_i num_obj_i] x 2
-        cost_pos = torch.cdist(out_pos, tgt_pos, p=1)
-
-        cost = cost_class + self.pos_cost_weight*cost_pos
-        cost = cost.reshape(n, num_slots, -1).cpu()
-
-        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(cost.split(sizes, -1))]
-        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
     def __init__(self, hidden_size, input_size=None):
@@ -1567,3 +1500,20 @@ class MLPMeanScore(Scorer):
         y = self.mlp(y)
         assert(x.shape==y.shape)
         return (x*y).sum(dim=1)
+
+class SplitMLP(nn.Module):
+    def __init(self, input_size, output_size, num_slots):
+        super(SplitMLP, self).__init__()
+        self.mlp = MLP(input_size, num_slots*output_size, num_slots*output_size)
+        self.input_size = input_size
+        self.output_size = output_size
+        self.num_slots = num_slots
+
+    def forward(self, x):
+        b, h = x.shape
+        assert(h==self.input_size)
+        x = self.mlp(x)
+        x = torch.split(x, [self.output_size]*self.num_slots, dim=-1)
+        x = torch.stack(x, dim=1)
+        assert(x.shape==(b, self.num_slots, self.output_size))
+        return x

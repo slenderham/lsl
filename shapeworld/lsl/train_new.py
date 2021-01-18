@@ -83,8 +83,8 @@ if __name__ == "__main__":
                         help='whether to use single vector or slots')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['imagenet_pretrain', 'caption', 'matching'],
-                        default='matching',
+                        choices=['imagenet_pretrain', 'caption', 'cross_modal_matching', 'im_matching'],
+                        default='cross_modal_matching',
                         help='Whether to predict caption or match objects to captions')
     parser.add_argument('--visualize_attns',
                         action='store_true',
@@ -288,7 +288,7 @@ if __name__ == "__main__":
     ''' scorer '''
     if args.representation=='slot':
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-        simple_val_scorer = SinkhornScorer(hidden_dim=None, comparison='im_im', iters=100, reg=1).to(device)
+        simple_val_scorer = SinkhornScorer(hidden_dim=None, comparison='eval', iters=100, reg=1).to(device)
     else:
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
         simple_val_scorer = CosineScorer(temperature=1).to(device)
@@ -315,7 +315,7 @@ if __name__ == "__main__":
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
 
-    elif args.aux_task=='matching':
+    elif args.aux_task=='cross_modal_matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
@@ -333,14 +333,25 @@ if __name__ == "__main__":
 
     # loss
     if args.aux_task=='set_pred':
-        hype_loss = SetCriterion(num_classes=[len(labels_to_idx['color']), len(labels_to_idx['shape'])], 
-                            pos_cost_weight=args.pos_weight, 
-                            eos_coef=0.5, 
-                            target_type=args.target_type).to(device)
-    elif args.aux_task=='matching' and args.representation=='slot':
-        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, idx_to_word=train_i2w, temperature=args.temperature).to(device)
-    elif args.aux_task=='matching' and args.representation=='whole':
+        hype_loss = SetPredLoss().to(device)
+    elif args.aux_task=='cross_modal_matching' and args.representation=='slot':
+        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                   idx_to_word=train_i2w, \
+                                   temperature=args.temperature, \
+                                   comparison='im_lang', \
+                                   im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
+                                        if args.use_relational_model else None
+                                    ).to(device)
+    elif args.aux_task=='cross_modal_matching' and args.representation=='whole':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
+    elif args.aux_task=='im_matching' and args.representation=='slot':
+        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                   idx_to_word=train_i2w, \
+                                   temperature=args.temperature, \
+                                   comparison='im_im', \
+                                   im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
+                                        if args.use_relational_model else None
+                                    ).to(device)
     else:
         raise AssertionError('There are only three types of aux_tasks that require special loss')
 
@@ -357,7 +368,7 @@ if __name__ == "__main__":
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
     after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
-    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=2000, after_scheduler=after_scheduler)
+    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     print(sum([p.numel() for p in params_to_pretrain]))
     print(sum([p.numel() for p in params_to_finetune]))
 
@@ -478,7 +489,7 @@ if __name__ == "__main__":
                 metric = {'acc': (hypo_pred==hypo_gt).float().mean().item()} 
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
-            elif args.aux_task=='matching':
+            elif args.aux_task=='cross_modal_matching':
                 if ('gru' not in args.hypo_model):
                     hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index) 
                 else:
@@ -517,6 +528,8 @@ if __name__ == "__main__":
                 loss = hypo_loss
                 aux_loss_total += hypo_loss.item()
                 cls_acc += (metric['acc_im_lang'] + metric['acc_lang_im'])/2
+            elif args.aux_task=='im_matching':
+                hypo_loss = hype_loss(examples_slot)
             else:
                 raise ValueError("invalid auxiliary task name")
 
@@ -581,7 +594,7 @@ if __name__ == "__main__":
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))
 
-        return concept_avg_meter.avg
+        return concept_avg_meter.avg, concept_avg_meter.raw_scores
 
     def finetune(epoch, n_steps=100):
         for m in models_to_save:
@@ -696,12 +709,15 @@ if __name__ == "__main__":
             for k, v in pt_metric.items():
                 metrics[k].append(v)
 
-            simple_val_acc = simple_eval(epoch, 'val')
+            simple_val_acc, simple_val_acc_raw = simple_eval(epoch, 'val')
             if has_same:
-                simpel_val_same_acc = simple_eval(epoch, 'val_same')
+                simpel_val_same_acc, simple_val_same_acc_raw = simple_eval(epoch, 'val_same')
                 metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
+                all_simple_val_acc = simple_val_acc_raw+simple_val_same_acc_raw
+                metrics['simple_val_acc_ci'].append(1.96*np.std(all_simple_val_acc)/np.sqrt(len(all_simple_val_acc)))
             else:
                 metrics['simple_val_acc'].append(simple_val_acc)
+                metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc)/np.sqrt(len(simple_val_acc)))
 
             save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
 

@@ -597,7 +597,7 @@ if __name__ == "__main__":
                 mean_neg_scores = torch.mean(neg_scores, -1)
                 # max_neg_scores = torch.max(neg_scores, -1)[0]
                 concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item(), \
-                    raw_scores=(mean_pos_scores>mean_neg_scores).float().numpy())
+                    raw_scores=(mean_pos_scores>mean_neg_scores).float().detach().cpu().numpy())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

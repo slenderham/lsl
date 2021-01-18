@@ -1228,7 +1228,7 @@ class SinkhornScorer(Scorer):
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
-            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
         else:
             dustbin_im = self.dustbin_scorer_im(x_expand)
 
@@ -1284,7 +1284,7 @@ class SinkhornScorer(Scorer):
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
-            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
         else:
             dustbin_im = self.dustbin_scorer_im(x_expand)
 

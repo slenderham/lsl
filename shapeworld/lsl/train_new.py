@@ -307,6 +307,7 @@ if __name__ == "__main__":
 
     elif args.aux_task=='cross_modal_matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        output_size = args.hidden_size if args.representation=='slot' else args.hidden_size*args.num_vision_slots
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
                         'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
@@ -317,7 +318,8 @@ if __name__ == "__main__":
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
-
+    elif args.aux_task=='im_matching':
+        pass
     else:
         raise ValueError('invalid auxiliary task name')
 

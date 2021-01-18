@@ -558,14 +558,17 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=False):
+    def __init__(self, embedding_module, hidden_size, output_size = None, return_agg=False, bidirectional=False):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.bidirectional = bidirectional
         self.hidden_size = hidden_size
+        self.output_size = output_size
         self.return_agg = return_agg
         self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional)
+        if output_size is not None:
+            self.mlp = MLP(hidden_size, hidden_size, output_size)
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -605,6 +608,9 @@ class TextRep(nn.Module):
             hidden = hidden.transpose(0, 1)
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2
+
+        if self.output_size is not None:
+            hidden = self.mlp(hidden)
 
         return hidden
 

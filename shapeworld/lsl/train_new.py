@@ -559,7 +559,7 @@ if __name__ == "__main__":
             if (isinstance(m, nn.Module)):
                 m.eval()
 
-        concept_avg_meter = AverageMeter()
+        concept_avg_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():

@@ -285,16 +285,6 @@ if __name__ == "__main__":
     # if not use relational and not use slots, relational model is MLP as well
     # abuse of variable name here. This is just to project to the correct dimension
 
-    ''' scorer '''
-    if args.representation=='slot':
-        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-        simple_val_scorer = SinkhornScorer(hidden_dim=None, comparison='eval', iters=100, reg=1).to(device)
-    else:
-        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
-        simple_val_scorer = CosineScorer(temperature=1).to(device)
-    params_to_finetune = list(im_im_scorer_model.parameters())
-    models_to_save.append(im_im_scorer_model)
-
     ''' aux task specific '''
     if args.aux_task=='set_pred':
         image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device) # add one for no object
@@ -357,6 +347,16 @@ if __name__ == "__main__":
 
     params_to_pretrain.extend(hype_loss.parameters())
     models_to_save.append(hype_loss)
+
+    ''' scorer '''
+    if args.representation=='slot':
+        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, comparison='eval', iters=100, reg=1, im_dustbin=hype_loss).to(device)
+    else:
+        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
+        simple_val_scorer = CosineScorer(temperature=1).to(device)
+    params_to_finetune = list(im_im_scorer_model.parameters())
+    models_to_save.append(im_im_scorer_model)
 
     # optimizer
     optfunc = {
@@ -529,7 +529,9 @@ if __name__ == "__main__":
                 aux_loss_total += hypo_loss.item()
                 cls_acc += (metric['acc_im_lang'] + metric['acc_lang_im'])/2
             elif args.aux_task=='im_matching':
-                hypo_loss = hype_loss(examples_slot)
+                matching, hypo_loss, metric = hype_loss(examples_slot)
+                loss = hypo_loss
+                cls_acc += metric['acc']
             else:
                 raise ValueError("invalid auxiliary task name")
 

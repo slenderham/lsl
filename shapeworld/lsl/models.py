@@ -1162,7 +1162,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], **kwargs):
+    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1170,19 +1170,19 @@ class SinkhornScorer(Scorer):
         self.im_blocks = im_blocks
         if (self.comparison=='im_lang'):
             self.temperature = kwargs['temperature']
-            self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
-            if im_blocks is not None:
-                self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
+            if im_blocks is None:
+                self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+            else:
+                self.dustbin_scorer_im = nn.ModuleList([nn.Linear(hidden_dim, 1), nn.Linear(hidden_dim, 1)])
             self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
         elif (self.comparison=='im_im'):
             self.temperature = kwargs['temperature']
-            self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
-            if im_blocks is not None:
-                self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
-        # elif (self.comparison=='eval'):
-        #     self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
-        #     if im_blocks is not None:
-        #         self.dustbin_scorer_im_rel = nn.Linear(hidden_dim, 1)
+            if im_blocks is None:
+                self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
+            else:
+                self.dustbin_scorer_im = nn.ModuleList([nn.Linear(hidden_dim, 1), nn.Linear(hidden_dim, 1)])
+        elif (self.comparison=='eval'):
+            self.dustbin_scorer_im = im_dustbin
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
         self.iters = iters
@@ -1202,19 +1202,21 @@ class SinkhornScorer(Scorer):
         scores = self.base_scorer.score(x, y, get_diag=False)
         assert(scores.shape==(b, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
-        one = scores.new_tensor(1)
-        ms = (n_s*one).to(scores)
-        ns = (n_s*one).to(scores)
+
+        if self.im_blocks is not None:
+            x_split = torch.split(x, self.im_blocks, dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
+        else:
+            dustbin_im = self.dustbin_scorer_im(x)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
+                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y)), \
+                                                              alpha_both=-10*torch.ones(1), \
+                                                              iters=self.iters)
+
+        assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
         
-        log_mu = -ms.log().reshape(1, 1).expand(b, n_s) # batch size x num_obj_x+1
-        log_nu = -ns.log().reshape(1, 1).expand(b, n_s) # batch size x num_obj_y+1
-        Z = self.log_ipot(scores, log_mu, log_nu, None, self.iters)
-        matching = Z.exp() 
-        assert(matching.shape==(b, n_s, n_s)), f"{matching.shape}"
-        scores = (scores*matching).sum(dim=(1,2))
-        # matching = matching.reshape(b*n_ex, b*n_ex, m, n)
-        
-        return scores
+        return matching, scores
 
     def forward_im_im(self, x):
         b, n_ex, n_s, h = x.shape
@@ -1224,7 +1226,13 @@ class SinkhornScorer(Scorer):
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
         assert(scores.shape==(b**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
 
-        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(self.dustbin_scorer_im(x_expand)), \
+        if self.im_blocks is not None:
+            x_split = torch.split(x_expand, self.im_blocks, dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
+        else:
+            dustbin_im = self.dustbin_scorer_im(x_expand)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
                                                               alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
                                                               alpha_both=-10*torch.ones(1), \
                                                               iters=self.iters)
@@ -1276,7 +1284,7 @@ class SinkhornScorer(Scorer):
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
-            dustbin_im = torch.cat([self.dustbin_scorer_im(x_split[0]), self.dustbin_scorer_im_rel(x_split[1])], dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
         else:
             dustbin_im = self.dustbin_scorer_im(x_expand)
 
@@ -1308,7 +1316,7 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, iters: int, alpha_x=None, alpha_y=None, alpha_both=None, scores_mask: torch.BoolTensor=None):
+    def log_optimal_transport(self, scores, iters: int, alpha_x=None, alpha_y=None, alpha_both=None, scores_mask: torch.BoolTensor=None, use_ipot=False):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -1348,7 +1356,10 @@ class SinkhornScorer(Scorer):
         if (scores_mask is not None):
             log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
         
-        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
+        if use_ipot:
+            Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
+        else:
+            Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
         if (scores_mask is not None):
             Z = Z-norm.reshape(b, 1, 1)
         Z = Z.exp() 

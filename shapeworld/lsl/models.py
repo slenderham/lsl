@@ -591,7 +591,7 @@ class TextRep(nn.Module):
             hidden, _ = rnn_utils.pad_packed_sequence(hidden)
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,:self.hidden_size])/2 # for forward layer, get final for backward, get first
-                hidden = hidden.sum(0)/sorted_lengths.float()
+                hidden = hidden.sum(0)/sorted_lengths.float().unsqueeze(-1)
             else:
                 hidden = final_hidden[0]
             if batch_size > 1:

@@ -351,7 +351,12 @@ if __name__ == "__main__":
     ''' scorer '''
     if args.representation=='slot':
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, comparison='eval', iters=100, reg=1, temperature=1, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                           comparison='eval', \
+                                           iters=100, reg=1, temperature=1, \
+                                           im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
+                                                if args.use_relational_model else None, \
+                                           im_dustbin=hype_loss.dustbin_scorer_im).to(device)
     else:
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
         simple_val_scorer = CosineScorer(temperature=1).to(device)
@@ -591,7 +596,8 @@ if __name__ == "__main__":
                 neg_scores = simple_val_scorer(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
                 mean_neg_scores = torch.mean(neg_scores, -1)
                 # max_neg_scores = torch.max(neg_scores, -1)[0]
-                concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item(), raw_scores=(mean_pos_scores>mean_neg_scores).float())
+                concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item(), \
+                    raw_scores=(mean_pos_scores>mean_neg_scores).float().numpy())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

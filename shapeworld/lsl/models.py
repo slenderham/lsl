@@ -1168,15 +1168,14 @@ class SinkhornScorer(Scorer):
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         self.im_blocks = im_blocks
+        self.temperature = kwargs['temperature']
         if (self.comparison=='im_lang'):
-            self.temperature = kwargs['temperature']
             if im_blocks is None:
                 self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
             else:
                 self.dustbin_scorer_im = nn.ModuleList([nn.Linear(hidden_dim, 1), nn.Linear(hidden_dim, 1)])
             self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
         elif (self.comparison=='im_im'):
-            self.temperature = kwargs['temperature']
             if im_blocks is None:
                 self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
             else:

@@ -1205,13 +1205,17 @@ class SinkhornScorer(Scorer):
 
         if self.im_blocks is not None:
             x_split = torch.split(x, self.im_blocks, dim=1)
-            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[0](x_split[1])], dim=1)
+            dustbin_im_x = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+            y_split = torch.split(y, self.im_blocks, dim=1)
+            dustbin_im_y = torch.cat([self.dustbin_scorer_im[0](y_split[0]), self.dustbin_scorer_im[1](y_split[1])], dim=1)
         else:
-            dustbin_im = self.dustbin_scorer_im(x)
+            dustbin_im_x = self.dustbin_scorer_im(x)
+            dustbin_im_y = self.dustbin_scorer_im(y)
 
-        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
-                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y)), \
-                                                              alpha_both=-10*torch.ones(1), \
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
+                                                              alpha_y=self.clip_dustbin(dustbin_im_y), \
+                                                              alpha_both=-10*torch.ones(1).to(scores.device), \
                                                               iters=self.iters)
 
         assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
@@ -1228,12 +1232,16 @@ class SinkhornScorer(Scorer):
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
-            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+            dustbin_im_x = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+            y_split = torch.split(y_expand, self.im_blocks, dim=1)
+            dustbin_im_y = torch.cat([self.dustbin_scorer_im[0](y_split[0]), self.dustbin_scorer_im[1](y_split[1])], dim=1)
         else:
-            dustbin_im = self.dustbin_scorer_im(x_expand)
+            dustbin_im_x = self.dustbin_scorer_im(x_expand)
+            dustbin_im_y = self.dustbin_scorer_im(y_expand)
 
-        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
-                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
+                                                              alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-10*torch.ones(1).to(scores.device), \
                                                               iters=self.iters)
 

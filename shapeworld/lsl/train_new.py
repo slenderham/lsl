@@ -351,7 +351,7 @@ if __name__ == "__main__":
     ''' scorer '''
     if args.representation=='slot':
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, comparison='eval', iters=100, reg=1, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, comparison='eval', iters=100, reg=1, temerature=1, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
     else:
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
         simple_val_scorer = CosineScorer(temperature=1).to(device)

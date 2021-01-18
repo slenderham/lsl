@@ -585,13 +585,13 @@ if __name__ == "__main__":
                 pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
                 pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
                 mean_pos_scores = torch.mean(pos_scores, -1)
-                min_pos_scores = torch.min(pos_scores, -1)[0]
+                # min_pos_scores = torch.min(pos_scores, -1)[0]
 
                 anchor = examples_slot.flatten(0, 1)
                 neg_scores = simple_val_scorer(anchor, neg_ex).reshape(batch_size, n_ex) # --> batch_size*n_ex
                 mean_neg_scores = torch.mean(neg_scores, -1)
-                max_neg_scores = torch.max(neg_scores, -1)[0]
-                concept_avg_meter.update((min_pos_scores>max_neg_scores).float().mean().item(), is_neg.float().sum().item())
+                # max_neg_scores = torch.max(neg_scores, -1)[0]
+                concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item())
 
         print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
             '({})'.format(split), epoch, concept_avg_meter.avg))

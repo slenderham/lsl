@@ -1234,7 +1234,7 @@ class SinkhornScorer(Scorer):
 
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
                                                               alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
-                                                              alpha_both=-10*torch.ones(1), \
+                                                              alpha_both=-10*torch.ones(1).to(scores.device), \
                                                               iters=self.iters)
 
         assert(matching.shape==(b**2, n_s+1, n_s+1)), f"{matching.shape}"
@@ -1290,7 +1290,7 @@ class SinkhornScorer(Scorer):
 
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
                                                               alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
-                                                              alpha_both=-10*torch.ones(1), \
+                                                              alpha_both=-10*torch.ones(1).to(scores.device), \
                                                               scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"

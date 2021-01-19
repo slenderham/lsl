@@ -538,6 +538,7 @@ if __name__ == "__main__":
             elif args.aux_task=='im_matching':
                 matching, hypo_loss, metric = hype_loss(examples_slot)
                 loss = hypo_loss
+                aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
             else:
                 raise ValueError("invalid auxiliary task name")

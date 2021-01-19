@@ -307,10 +307,10 @@ if __name__ == "__main__":
 
     elif args.aux_task=='cross_modal_matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        output_size = args.hidden_size if args.representation=='slot' else args.hidden_size*args.num_vision_slots
+        output_size = None if args.representation=='slot' else args.hidden_size*args.num_vision_slots
         hint_model = {
-                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
-                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
+                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
                         'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
                         'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.representation=='whole', num_slots=args.num_lang_slots)
@@ -512,7 +512,7 @@ if __name__ == "__main__":
                     matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, y_mask=y_mask)
                 else:
                     assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
-                    assert(hint_rep.shape==(batch_size, args.hidden_size))
+                    assert(hint_rep.shape[0]==batch_size)
                     hypo_loss, metric = hype_loss(im=examples_slot, s=hint_rep)
                 
                 if args.visualize_attns:
@@ -559,9 +559,6 @@ if __name__ == "__main__":
         return loss, metric
 
     def simple_eval(epoch, split):
-        if (args.representation=='whole'):
-            raise NotImplementedError
-
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.eval()
@@ -583,21 +580,37 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
                 image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
-                
-                anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
-                pos_ex = examples_slot.repeat(1, n_ex, 1, 1).flatten(0, 1)
-                neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, args.hidden_size).flatten(0, 1)
-                
-                pos_scores = simple_val_scorer(anchor, pos_ex)[1].reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
-                pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
-                pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
-                mean_pos_scores = torch.mean(pos_scores, -1)
-                # min_pos_scores = torch.min(pos_scores, -1)[0]
 
-                anchor = examples_slot.flatten(0, 1)
-                neg_scores = simple_val_scorer(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
-                mean_neg_scores = torch.mean(neg_scores, -1)
-                # max_neg_scores = torch.max(neg_scores, -1)[0]
+                if args.representation=='slot':
+                    anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
+                    pos_ex = examples_slot.repeat(1, n_ex, 1, 1).flatten(0, 1)
+                    neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, -1).flatten(0, 1)
+                    
+                    pos_scores = simple_val_scorer(anchor, pos_ex)[1].reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
+                    pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
+                    pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
+                    mean_pos_scores = torch.mean(pos_scores, -1)
+                    # min_pos_scores = torch.min(pos_scores, -1)[0]
+
+                    anchor = examples_slot.flatten(0, 1)
+                    neg_scores = simple_val_scorer(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
+                    mean_neg_scores = torch.mean(neg_scores, -1)
+                    # max_neg_scores = torch.max(neg_scores, -1)[0]
+                else:
+                    anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
+                    pos_ex = examples_slot.repeat(1, n_ex, 1).flatten(0, 1)
+                    neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1).flatten(0, 1)
+                    
+                    pos_scores = simple_val_scorer(anchor, pos_ex)[1].reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
+                    pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
+                    pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
+                    mean_pos_scores = torch.mean(pos_scores, -1)
+                    # min_pos_scores = torch.min(pos_scores, -1)[0]
+
+                    anchor = examples_slot.flatten(0, 1)
+                    neg_scores = simple_val_scorer(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
+                    mean_neg_scores = torch.mean(neg_scores, -1)
+                    # max_neg_scores = torch.max(neg_scores, -1)[0]
                 concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item(), \
                     raw_scores=(mean_pos_scores>mean_neg_scores).float().detach().cpu().numpy())
 

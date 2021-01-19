@@ -1443,7 +1443,6 @@ class SetPredLoss(nn.Module):
 
         return loss, metric
 
-
 class TransformerAgg(Scorer):
     def __init__(self, hidden_size, input_size=None):
         super(TransformerAgg, self).__init__()
@@ -1481,9 +1480,10 @@ class ContrastiveLoss(Scorer):
     Compute contrastive loss
     """
 
-    def __init__(self, temperature=0.1):
+    def __init__(self, temperature=0.1, cross_domain_weight=0.5):
         super(ContrastiveLoss, self).__init__()
         self.sim = CosineScorer(temperature)
+        self.cross_domain_weight = cross_domain_weight
 
     def forward(self, im, s):
         # compute image-sentence score matrix

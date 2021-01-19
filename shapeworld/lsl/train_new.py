@@ -601,14 +601,14 @@ if __name__ == "__main__":
                     pos_ex = examples_slot.repeat(1, n_ex, 1).flatten(0, 1)
                     neg_ex = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1).flatten(0, 1)
                     
-                    pos_scores = simple_val_scorer(anchor, pos_ex)[1].reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
+                    pos_scores = simple_val_scorer.score(anchor, pos_ex)[1].reshape(batch_size, n_ex, n_ex) # --> batch_size*n_ex*n_ex
                     pos_scores = torch.masked_select(pos_scores, torch.eye(n_ex).unsqueeze(0)<0.5)
                     pos_scores = pos_scores.reshape(batch_size, n_ex*(n_ex-1))
                     mean_pos_scores = torch.mean(pos_scores, -1)
                     # min_pos_scores = torch.min(pos_scores, -1)[0]
 
                     anchor = examples_slot.flatten(0, 1)
-                    neg_scores = simple_val_scorer(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
+                    neg_scores = simple_val_scorer.score(anchor, neg_ex)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex
                     mean_neg_scores = torch.mean(neg_scores, -1)
                     # max_neg_scores = torch.max(neg_scores, -1)[0]
                 concept_avg_meter.update((mean_pos_scores>mean_neg_scores).float().mean().item(), is_neg.float().sum().item(), \

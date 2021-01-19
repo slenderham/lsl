@@ -1230,10 +1230,10 @@ class SinkhornScorer(Scorer):
     def forward_im_im(self, x):
         b, n_ex, n_s, h = x.shape
         x = x.reshape(b*n_ex, n_s, h)
-        x_expand = torch.repeat_interleave(x, repeats=b, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+        x_expand = torch.repeat_interleave(x, repeats=b*n_ex, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = x.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(b**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==((b*n_ex)**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
@@ -1250,9 +1250,9 @@ class SinkhornScorer(Scorer):
                                                               alpha_both=-10*torch.ones(1).to(scores.device), \
                                                               iters=self.iters)
 
-        assert(matching.shape==(b**2, n_s+1, n_s+1)), f"{matching.shape}"
-        scores = scores.reshape(b, b)
-        matching = matching.reshape(b, b, n_s+1, n_s+1)
+        assert(matching.shape==((b*n_ex)**2, n_s+1, n_s+1)), f"{matching.shape}"
+        scores = scores.reshape(b*n_ex, b*n_ex)
+        matching = matching.reshape(b*n_ex, b*n_ex, n_s+1, n_s+1)
 
         metric = {}
         mask = torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))
@@ -1268,7 +1268,7 @@ class SinkhornScorer(Scorer):
         neg_scores = torch.repeat_interleave(neg_scores, repeats=n_ex-1, dim=0);
         all_scores_im_im = torch.cat([pos_scores.unsqueeze(1), neg_scores], dim=1);
 
-        loss = F.log_softmax(all_scores_im_im, dim=1)[:,0].mean()
+        loss = - F.log_softmax(all_scores_im_im, dim=1)[:,0].mean()
 
         # average R@1 scores for image and text retrieval
         metric['acc'] = (torch.argmax(all_scores_im_im, dim=1)==0).float().mean().item()

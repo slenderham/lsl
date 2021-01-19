@@ -1229,9 +1229,9 @@ class SinkhornScorer(Scorer):
 
     def forward_im_im(self, x):
         b, n_ex, n_s, h = x.shape
-        x = x.reshape(b, n_ex, n_s, h)
+        x = x.reshape(b*n_ex, n_s, h)
         x_expand = torch.repeat_interleave(x, repeats=b, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-        y_expand = x.repeat(b, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        y_expand = x.repeat(b*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
         assert(scores.shape==(b**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
 

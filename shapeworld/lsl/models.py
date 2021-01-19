@@ -1256,7 +1256,7 @@ class SinkhornScorer(Scorer):
 
         metric = {}
         mask = torch.block_diag(*([torch.ones(n_ex, n_ex)]*b))
-        pos_mask = torch.as_tensor(mask-np.eye(b*n_ex)>.5).to(scores.device)
+        pos_mask = torch.as_tensor((mask-torch.eye(b*n_ex))>.5).to(scores.device)
         neg_mask = torch.as_tensor(mask<.5).to(scores.device)
         pos_scores = scores.masked_select(pos_mask)
         neg_scores = scores.masked_select(neg_mask)

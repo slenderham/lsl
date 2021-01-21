@@ -1221,7 +1221,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-10*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters, use_ipot=True)
+                                                              iters=self.iters)
 
         assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
         

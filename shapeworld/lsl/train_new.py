@@ -328,7 +328,6 @@ if __name__ == "__main__":
         hype_loss = SetPredLoss().to(device)
     elif args.aux_task=='cross_modal_matching' and args.representation=='slot':
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
-                                   idx_to_word=train_i2w, \
                                    temperature=args.temperature, \
                                    comparison='im_lang', \
                                    im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
@@ -338,7 +337,6 @@ if __name__ == "__main__":
         hype_loss = ContrastiveLoss(temperature=args.temperature)
     elif args.aux_task=='im_matching' and args.representation=='slot':
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
-                                   idx_to_word=train_i2w, \
                                    temperature=args.temperature, \
                                    comparison='im_im', \
                                    im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
@@ -521,9 +519,10 @@ if __name__ == "__main__":
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
-                    ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
+                    if args.use_relational_model:
+                        ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     # ax.set_xticks(np.arange(len(xlabels)))
                     # ax.set_xticklabels(xlabels)
                     ax.set_yticks(np.arange(len(ylabels)))

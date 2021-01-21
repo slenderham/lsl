@@ -424,7 +424,7 @@ class SANet(nn.Module):
                 axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
-        plt.show()
+        # plt.show()
 
         # fig, axes = plt.subplots(1, num_iters)
         # for i in range(num_iters):
@@ -1168,7 +1168,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, idx_to_word=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1221,7 +1221,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-10*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters)
+                                                              iters=self.iters, use_ipot=True)
 
         assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
         
@@ -1386,7 +1386,7 @@ class SinkhornScorer(Scorer):
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
-        T = torch.zeros_like(Z)
+        T = log_mu.unsqueeze(2) + log_nu.unsqueeze(1)
         A = Z/self.reg
         if scores_mask is not None:
             T = T.masked_fill(scores_mask, -1e6)
@@ -1396,6 +1396,7 @@ class SinkhornScorer(Scorer):
             u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
             if scores_mask is not None:
                 v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
+                v = v.masked_fill(scores_mask[:,0,:], -1e6)
             else:
                 v = log_nu - torch.logsumexp(Q + u.unsqueeze(2), dim=1)
             T = Q + u.unsqueeze(2) + v.unsqueeze(1)

@@ -303,7 +303,7 @@ class RelationalSlotAttention(nn.Module):
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
 
             # compute edge slot from paired object representation
-            edge_context_w_diag = self._obj_to_rel(updates)
+            edge_context_w_diag = self._obj_to_rel(obj_slots)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
             rel_slots = self.rel_gru(
                 edge_context.reshape(b*n_s*(n_s-1), 4*d),

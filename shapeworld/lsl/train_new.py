@@ -353,7 +353,7 @@ if __name__ == "__main__":
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
                                            comparison='eval', \
-                                           iters=100, reg=0.1, temperature=1, \
+                                           iters=20, reg=0.1, temperature=1, \
                                            im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
                                                 if args.use_relational_model else None, \
                                            im_dustbin=hype_loss.dustbin_scorer_im).to(device)

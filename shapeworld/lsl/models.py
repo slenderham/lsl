@@ -1168,7 +1168,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1386,7 +1386,7 @@ class SinkhornScorer(Scorer):
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
-        T = log_mu.unsqueeze(2) + log_nu.unsqueeze(1)
+        T = torch.zeros_like(Z)
         A = Z/self.reg
         if scores_mask is not None:
             T = T.masked_fill(scores_mask, -1e6)

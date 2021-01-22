@@ -441,10 +441,10 @@ class ImagePositionalEmbedding(nn.Module):
         super(ImagePositionalEmbedding, self).__init__()
         self.coord_type = coord_type
 
-        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
-        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
-        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
-        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
+        x_coord_pos = torch.linspace(0, 3, height).reshape(1, height, 1).expand(1, height, width)
+        x_coord_neg = torch.linspace(3, 0, height).reshape(1, height, 1).expand(1, height, width)
+        y_coord_pos = torch.linspace(0, 3, width).reshape(1, 1, width).expand(1, height, width)
+        y_coord_neg = torch.linspace(3, 0, width).reshape(1, 1, width).expand(1, height, width)
 
         if (coord_type=='cartesian'):
             self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
@@ -1386,7 +1386,7 @@ class SinkhornScorer(Scorer):
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
-        T = torch.zeros_like(Z)
+        T = log_nu.unsqueeze(2) + log_mu.unsqueeze(1)
         A = Z/self.reg
         if scores_mask is not None:
             T = T.masked_fill(scores_mask, -1e6)

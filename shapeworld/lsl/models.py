@@ -437,17 +437,18 @@ class SANet(nn.Module):
         # plt.show()
 
 class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size, coord_type='cartesian'):
+    def __init__(self, height, width, hidden_size, coord_type='polar'):
         super(ImagePositionalEmbedding, self).__init__()
         self.coord_type = coord_type
 
-        x_coord_pos = torch.linspace(0, 3, height).reshape(1, height, 1).expand(1, height, width)
-        x_coord_neg = torch.linspace(3, 0, height).reshape(1, height, 1).expand(1, height, width)
-        y_coord_pos = torch.linspace(0, 3, width).reshape(1, 1, width).expand(1, height, width)
-        y_coord_neg = torch.linspace(3, 0, width).reshape(1, 1, width).expand(1, height, width)
+        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
+        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
+        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
+        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
 
         if (coord_type=='cartesian'):
             self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
+            self.pos_emb = nn.Conv2d(4, hidden_size, 1)
         elif (coord_type=='polar'):
             coords = []
             for xx in [x_coord_neg, x_coord_pos]:
@@ -455,10 +456,10 @@ class ImagePositionalEmbedding(nn.Module):
                     coords.append(torch.sqrt(xx**2+yy**2))
                     coords.append(torch.atan2(xx, yy))
             self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
+            self.pos_emb = nn.Conv2d(8, hidden_size, 1)
         else:
             raise ValueError
-        self.pos_emb = nn.Conv2d(4, hidden_size, 1)
-
+        
     def forward(self, x):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords)

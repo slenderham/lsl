@@ -508,6 +508,7 @@ if __name__ == "__main__":
                         y_mask = None
                     else:
                         y_mask = ((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index))
+                    hype_loss.reg = max(hype_loss.reg-0.001, 0.1)
                     matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, y_mask=y_mask)
                 else:
                     assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
@@ -517,7 +518,7 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[2][0][:-1, :-1].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
                     if args.use_relational_model:

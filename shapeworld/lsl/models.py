@@ -224,6 +224,8 @@ class RelationalSlotAttention(nn.Module):
         self.norm_pre_ff_obj = nn.LayerNorm(dim)
         self.norm_pre_ff_rel = nn.LayerNorm(dim)
         
+        self.rel_i = nn.Linear(dim, dim)
+        self.rel_j = nn.Linear(dim, dim)
         self.rel_s_gate = nn.Linear(2*dim, 1)
         self.rel_o_gate = nn.Linear(2*dim, 1)
 
@@ -231,9 +233,9 @@ class RelationalSlotAttention(nn.Module):
 
     def _obj_to_rel(self, x):
         b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 2)  # b. n_s, 1, h
+        x_i = torch.unsqueeze(self.rel_i(x), 2)  # b. n_s, 1, h
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
-        x_j = torch.unsqueeze(x, 1)  # b, 1, n_s, h
+        x_j = torch.unsqueeze(self.rel_j(x), 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
         rel_msg = torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1)
         assert(rel_msg.shape==(b, n_s*n_s, 4*h)), f"x_rel's shape is {rel_msg.shape}"
@@ -1508,16 +1510,42 @@ class ContrastiveLoss(Scorer):
         return loss, metric
 
 class MLPMeanScore(Scorer):
-    def __init__(self, input_dize, output_size):
+    def __init__(self, input_size, output_size, rep_type, blocks):
         super(MLPMeanScore, self).__init__()
-        self.mlp = MLP(input_dize, output_size, output_size)
+        self.mlp1 = MLP(input_size, output_size, output_size)
+        assert(rep_type in ['rel', 'slot', 'whole'])
+        self.rep_type = rep_type
+        if self.rep_type!='whole':
+            self.mlp2 = MLP(input_size, output_size, output_size)
+            if self.rep_type=='rel':
+                self.mlp3 = MLP(input_size, output_size, output_size)
 
     def forward(self, x, y):
-        assert(len(x.shape)==3), "x should be of shape batch size X n_ex X dim"
-        assert(len(y.shape)==2), "y should be of shape batch size X dim"
-        assert(x.shape[0]==y.shape[0] and x.shape[-1]==y.shape[-1])
-        x = self.mlp(x).mean(dim=(1))
-        y = self.mlp(y)
+        if self.rep_type=='whole':
+            assert(len(x.shape)==3), "x should be of shape batch size X n_ex X dim"
+            assert(len(y.shape)==2), "y should be of shape batch size X dim"
+            assert(x.shape[0]==y.shape[0] and x.shape[-1]==y.shape[-1])
+            x = self.mlp1(x).mean(dim=1)
+            y = self.mlp1(y)
+        elif self.rep_type=='slot':
+            assert(len(x.shape)==4), "x should be of shape batch size X n_ex X num_slots X dim"
+            assert(len(y.shape)==3), "y should be of shape batch size X num_slots X dim"
+            x = self.mlp1(x).mean(dim=2)
+            y = self.mlp1(y).mean(dim=2)
+            x = self.mlp2(x).mean(dim=1)
+            y = self.mlp2(y)
+        elif self.rep_type=='whole':
+            assert(len(x.shape)==4), "x should be of shape batch size X n_ex X num_slots X dim"
+            assert(len(y.shape)==3), "y should be of shape batch size X num_slots X dim"
+            x = torch.split(x, self.blocks, dim=2)
+            y = torch.split(y, self.blocks, dim=1)
+            x_obj = self.mlp1(x[0]).mean(dim=2)
+            y_obj = self.mlp1(y[0]).mean(dim=2)
+            x_rel = self.mlp2(x[1]).mean(dim=1)
+            y_rel = self.mlp2(y[1]).mean(dim=1)
+            x = self.mlp3((x_obj+x_rel)/2).mean(dim=1)
+            y = self.mlp3((y_obj+y_rel)/2)
+        
         assert(x.shape==y.shape)
         return (x*y).sum(dim=1)
 

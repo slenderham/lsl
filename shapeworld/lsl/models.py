@@ -1296,7 +1296,7 @@ class SinkhornScorer(Scorer):
             log_nu = -ns.log().reshape(b, 1).expand(b, n)
         else:
             log_nu = -ns.log().reshape(1, 1).expand(b, n)
-        log_mu_nu = (torch.ones(b, 1, 1)*0.5).log()
+        log_mu_nu = (torch.ones(b, 1, 1)*0.5).log().to(scores.device)
         log_mu = -ms.log().reshape(1, 1).expand(b, m)
         
         

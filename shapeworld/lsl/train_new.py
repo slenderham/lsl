@@ -354,7 +354,8 @@ if __name__ == "__main__":
                                            comparison='eval', \
                                            iters=50, reg=0.1, temperature=1, \
                                            im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
-                                                if args.use_relational_model else None).to(device)
+                                                if args.use_relational_model else None,
+                                            im_dustbin=hype_loss.dustbin_scorer_im).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
@@ -509,7 +510,7 @@ if __name__ == "__main__":
                     else:
                         y_mask = ((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index))
                     hype_loss.reg = max(hype_loss.reg-0.001, 0.1)
-                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, y_mask=y_mask)
+                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, y_mask=y_mask)
                 else:
                     assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape[0]==batch_size)

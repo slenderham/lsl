@@ -1273,10 +1273,9 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_scores.mean().item()
         return matching, loss, metric
 
-    def forward_im_lang(self, x, y, word_idx, y_mask=None):
+    def forward_im_lang(self, x, y, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
-        # word_idx.shape = batch_size, num_obj_y
         # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
         n_ex = x.shape[0]//n 
@@ -1290,7 +1289,6 @@ class SinkhornScorer(Scorer):
         if y_mask is not None:
             y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
             y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        # word_idx = word_idx.repeat(n*n_ex, 1)
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)

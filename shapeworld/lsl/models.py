@@ -1165,7 +1165,8 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, \
+                 comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0.5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1176,6 +1177,7 @@ class SinkhornScorer(Scorer):
         self.clip_dustbin = nn.Tanh()
         self.iters = iters
         self.reg = reg
+        self.partial_mass = partial_mass
 
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
@@ -1194,7 +1196,7 @@ class SinkhornScorer(Scorer):
 
         matching, scores = self.log_optimal_transport(scores, iters=self.iters)
 
-        assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
+        assert(matching.shape==(b, n_s, n_s)), f"{matching.shape}"
         
         return matching, scores
 
@@ -1296,7 +1298,7 @@ class SinkhornScorer(Scorer):
             log_nu = -ns.log().reshape(b, 1).expand(b, n)
         else:
             log_nu = -ns.log().reshape(1, 1).expand(b, n)
-        log_mu_nu = (torch.ones(b, 1, 1)*0.5).log().to(scores.device)
+        log_mu_nu = (torch.ones(b, 1, 1)*self.partial_mass).log().to(scores.device)
         log_mu = -ms.log().reshape(1, 1).expand(b, m)
         
         

@@ -1296,6 +1296,7 @@ class SinkhornScorer(Scorer):
             log_nu = -ns.log().reshape(b, 1).expand(b, n)
         else:
             log_nu = -ns.log().reshape(1, 1).expand(b, n)
+        log_mu_nu = (torch.ones(b, 1, 1)*0.5).log()
         log_mu = -ms.log().reshape(1, 1).expand(b, m)
         
         
@@ -1303,9 +1304,9 @@ class SinkhornScorer(Scorer):
             log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
         
         if use_ipot:
-            Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
+            Z = self.log_ipot(couplings, log_mu, log_nu, log_mu_nu, scores_mask, iters)
         else:
-            Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
+            Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, log_mu_nu, scores_mask, iters)
 
         Z = Z.exp() 
         final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
@@ -1331,17 +1332,16 @@ class SinkhornScorer(Scorer):
                 T = T.masked_fill(scores_mask, -1e6)
         return T
 
-    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
+    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, log_mu_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         A = Z/self.reg
-        A3 = A - torch.logsumexp(A, dim=[-2, -1], keepdim=True)
+        A3 = A + log_mu_nu - torch.logsumexp(A, dim=[-2, -1], keepdim=True)
         for i in range(iters):
             A1 = A3 + torch.minimum(log_mu-torch.logsumexp(A3, dim=2), torch.zeros_like(log_mu)).unsqueeze(2)
             A2 = A1+ torch.minimum(log_nu-torch.logsumexp(A1, dim=1), torch.zeros_like(log_nu)).unsqueeze(1)
             if scores_mask is not None:
                 A = A.masked_fill(scores_mask, -1e6)
-            A3 = A2 - torch.logsumexp(A2, dim=[-2, -1], keepdim=True)
-            print(A3[0].exp().sum(-1),A3[0].exp().sum(-2))
+            A3 = A2 + log_mu_nu - torch.logsumexp(A2, dim=[-2, -1], keepdim=True)
         return A3
 
 class SetPredLoss(nn.Module):

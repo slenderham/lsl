@@ -1165,7 +1165,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1333,12 +1333,16 @@ class SinkhornScorer(Scorer):
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
+        A = Z/self.reg
+        A3 = A - torch.logsumexp(A, dim=[-2, -1], keepdim=True)
         for i in range(iters):
-            Z += torch.minimum(log_mu-torch.logsumexp(Z/self.reg, dim=2), torch.zeros_like(log_mu)).unsqueeze(2)
-            Z += torch.minimum(log_nu-torch.logsumexp(Z/self.reg, dim=1), torch.zeros_like(log_nu)).unsqueeze(1)
+            A1 = A3 + torch.minimum(log_mu-torch.logsumexp(A3, dim=2), torch.zeros_like(log_mu)).unsqueeze(2)
+            A2 = A1+ torch.minimum(log_nu-torch.logsumexp(A1, dim=1), torch.zeros_like(log_nu)).unsqueeze(1)
             if scores_mask is not None:
-                Z = Z.masked_fill(scores_mask, -1e6)
-        return Z
+                A = A.masked_fill(scores_mask, -1e6)
+            A3 = A2 - torch.logsumexp(A2, dim=[-2, -1], keepdim=True)
+            print(A3[0].exp().sum(-1),A3[0].exp().sum(-2))
+        return A3
 
 class SetPredLoss(nn.Module):
     def __init__(self):

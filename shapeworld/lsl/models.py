@@ -194,7 +194,7 @@ class RelationalSlotAttention(nn.Module):
         self.iters = iters
         self.eps = eps
         self.dim = dim
-        self.scale = (dim) ** -0.5
+        self.scale = dim ** -0.5
 
         self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
@@ -231,9 +231,9 @@ class RelationalSlotAttention(nn.Module):
 
     def _obj_to_rel(self, x):
         b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 2)  # b. 1, n_s, h
+        x_i = torch.unsqueeze(x, 2)  # b. n_s, 1, h
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
-        x_j = torch.unsqueeze(x, 1)  # b, n_s, 1, h
+        x_j = torch.unsqueeze(x, 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
         rel_msg = torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1)
         assert(rel_msg.shape==(b, n_s*n_s, 4*h)), f"x_rel's shape is {rel_msg.shape}"
@@ -270,11 +270,6 @@ class RelationalSlotAttention(nn.Module):
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
 
-        # dim_split = self.dim // self.num_attn_head
-        # k = torch.cat(k.split(dim_split, 2), 0)
-        # v = torch.cat(v.split(dim_split, 2), 0) 
-        # head, batch, image loc, dim
-
         attns = []
 
         for _ in range(n_it):
@@ -290,7 +285,6 @@ class RelationalSlotAttention(nn.Module):
             attn = attn / attn.sum(dim=-1, keepdim=True)
 
             updates = torch.einsum('bjd,bij->bid', v, attn) # batch, slot, dim
-            # updates = torch.cat(updates.split(self.num_attn_head, 0), 2) # batch, slot, dim
 
             # aggregate message from edge slots
             obj_context = self._rel_to_obj(rel_slots, obj_slots)
@@ -303,7 +297,7 @@ class RelationalSlotAttention(nn.Module):
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
 
             # compute edge slot from paired object representation
-            edge_context_w_diag = self._obj_to_rel(updates)
+            edge_context_w_diag = self._obj_to_rel(obj_slots)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
             rel_slots = self.rel_gru(
                 edge_context.reshape(b*n_s*(n_s-1), 4*d),
@@ -1169,7 +1163,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=20, reg=0.01, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=50, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1190,7 +1184,7 @@ class SinkhornScorer(Scorer):
         elif (self.comparison=='eval'):
             self.dustbin_scorer_im = im_dustbin
         self.base_scorer = CosineScorer(temperature=1)
-        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
+        self.clip_dustbin = nn.Tanh()
         self.iters = iters
         self.reg = reg
 

@@ -1279,7 +1279,7 @@ class SinkhornScorer(Scorer):
         metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, iters: int, scores_mask: torch.BoolTensor=None, use_ipot=False):
+    def log_optimal_transport(self, scores, iters: int, scores_mask: torch.BoolTensor=None):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
@@ -1305,44 +1305,24 @@ class SinkhornScorer(Scorer):
         if (scores_mask is not None):
             log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
         
-        if use_ipot:
-            Z = self.log_ipot(couplings, log_mu, log_nu, log_mu_nu, scores_mask, iters)
-        else:
-            Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, log_mu_nu, scores_mask, iters)
+        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, log_mu_nu, scores_mask, iters)
 
         Z = Z.exp() 
-        final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
+        final_scores = (scores*Z).sum(dim=(1,2))/self.temperature/self.partial_mass
         
         return Z, final_scores
-
-    def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
-        T = log_mu.unsqueeze(2) + log_nu.unsqueeze(1)
-        A = Z/self.reg
-        if scores_mask is not None:
-            T = T.masked_fill(scores_mask, -1e6)
-            A = A.masked_fill(scores_mask, -1e6)
-        for _ in range(self.iters):
-            Q = A + T
-            u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
-            if scores_mask is not None:
-                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
-                v = v.masked_fill(scores_mask[:,0,:], -1e6)
-            else:
-                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2), dim=1)
-            T = Q + u.unsqueeze(2) + v.unsqueeze(1)
-            if scores_mask is not None:
-                T = T.masked_fill(scores_mask, -1e6)
-        return T
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, log_mu_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         A = Z/self.reg
         A3 = A + log_mu_nu - torch.logsumexp(A, dim=[-2, -1], keepdim=True)
+        if scores_mask is not None:
+            A3 = A3.masked_fill(scores_mask, -1e6)
         for i in range(iters):
             A1 = A3 + torch.minimum(log_mu-torch.logsumexp(A3, dim=2), torch.zeros_like(log_mu)).unsqueeze(2)
             A2 = A1+ torch.minimum(log_nu-torch.logsumexp(A1, dim=1), torch.zeros_like(log_nu)).unsqueeze(1)
             if scores_mask is not None:
-                A = A.masked_fill(scores_mask, -1e6)
+                A2 = A2.masked_fill(scores_mask, -1e6)
             A3 = A2 + log_mu_nu - torch.logsumexp(A2, dim=[-2, -1], keepdim=True)
         return A3
 

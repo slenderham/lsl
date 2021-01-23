@@ -350,16 +350,17 @@ if __name__ == "__main__":
 
     ''' scorer '''
     if args.representation=='slot':
-        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
                                            comparison='eval', \
                                            iters=50, reg=0.1, temperature=1, \
                                            im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
-                                                if args.use_relational_model else None, \
-                                           im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+                                                if args.use_relational_model else None).to(device)
     else:
-        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size)
         simple_val_scorer = CosineScorer(temperature=1).to(device)
+    im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
+                                        rep_type='rel' if args.use_relational_model else args.representation,\
+                                        blocks = [args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)]
+                                            if args.use_relational_model else None)
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 

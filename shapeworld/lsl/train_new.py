@@ -519,7 +519,7 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0)
+                    im = ax.imshow(matching[2][0][:-1, :-1].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
                     if args.use_relational_model:

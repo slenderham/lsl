@@ -206,7 +206,7 @@ class RelationalSlotAttention(nn.Module):
         self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*4, dim)
+        self.rel_gru = nn.GRUCell(dim*2, dim)
 
         self.obj_mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
@@ -237,8 +237,8 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(self.rel_j(x), 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i, x_j, x_i-x_j, x_i*x_j], dim=-1)
-        assert(rel_msg.shape==(b, n_s*n_s, 4*h)), f"x_rel's shape is {rel_msg.shape}"
+        rel_msg = torch.cat([x_i-x_j, x_i*x_j], dim=-1)
+        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):
@@ -281,8 +281,7 @@ class RelationalSlotAttention(nn.Module):
             q = self.to_q(obj_slots)
             # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
-            # dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
-            dots = -torch.cdist(q, k)**2 * self.scale
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
@@ -303,7 +302,7 @@ class RelationalSlotAttention(nn.Module):
             edge_context_w_diag = self._obj_to_rel(obj_slots)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
             rel_slots = self.rel_gru(
-                edge_context.reshape(b*n_s*(n_s-1), 4*d),
+                edge_context.reshape(b*n_s*(n_s-1), 2*d),
                 rel_slots.reshape(b*n_s*(n_s-1), d)
               ).reshape(b, n_s*(n_s-1), d)
             rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))

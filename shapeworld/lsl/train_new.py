@@ -8,6 +8,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import accuracy_score
 from matplotlib import pyplot as plt
+import json
 
 import torch
 import torch.nn as nn
@@ -509,7 +510,6 @@ if __name__ == "__main__":
                         y_mask = None
                     else:
                         y_mask = ((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index))
-                    hype_loss.reg = max(hype_loss.reg-0.001, 0.1)
                     matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, y_mask=y_mask)
                 else:
                     assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
@@ -519,7 +519,7 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0][:-1, :-1].detach().cpu(), vmin=0)
+                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
                     if args.use_relational_model:
@@ -714,6 +714,11 @@ if __name__ == "__main__":
     best_test_acc_ci = 0
     best_simple_eval_acc = 0
     metrics = defaultdict(lambda: [])
+
+    if args.load_checkpoint:
+        with open(os.path.join(args.exp_dir, 'metrics.json')) as f:
+            metrics = json.load(f)
+            print('record loaded correctly')
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 

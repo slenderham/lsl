@@ -1163,12 +1163,13 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, **kwargs):
+    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         self.im_blocks = im_blocks
+        self.partial_mass = partial_mass
         self.temperature = kwargs['temperature']
         if (self.comparison=='im_lang'):
             if im_blocks is None:
@@ -1217,7 +1218,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters)
+                                                              iters=self.iters, use_ipot=True)
 
         assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
         
@@ -1243,7 +1244,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters)
+                                                              iters=self.iters, use_ipot=True)
 
         assert(matching.shape==((b*n_ex)**2, n_s+1, n_s+1)), f"{matching.shape}"
         scores = scores.reshape(b*n_ex, b*n_ex)
@@ -1297,7 +1298,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
                                                               alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              scores_mask=y_mask, iters=self.iters)
+                                                              scores_mask=y_mask, iters=self.iters, use_ipot=True)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
@@ -1349,12 +1350,12 @@ class SinkhornScorer(Scorer):
         
         if (alpha_x is not None):
             if scores_mask is not None:
-                norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-                log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
+                norm = - (ms + ns - 2*self.partial_mass).log().unsqueeze(-1) # --> batch size x 1
+                log_mu = torch.cat([norm.expand(b, m), (ns-self.partial_mass).log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
             else:
-                norm = - (ms + ns).log().view(1, 1).expand(b, 1)
-                log_mu = torch.cat([norm.expand(b, m), ns.log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
-            log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+                norm = - (ms + ns - 2*self.partial_mass).log().view(1, 1).expand(b, 1)
+                log_mu = torch.cat([norm.expand(b, m), (ns-self.partial_mass).log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
+            log_nu = torch.cat([norm.expand(b, n), (ms-self.partial_mass).log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
         else:
             log_mu = -ms.log().reshape(1, 1).expand(b, m)
             log_nu = -ns.log().reshape(1, 1).expand(b, n)

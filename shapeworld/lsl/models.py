@@ -1165,7 +1165,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=5, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=5, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
@@ -1220,7 +1220,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters, use_ipot=True)
+                                                              iters=self.iters)
 
         assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
         
@@ -1246,7 +1246,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
                                                               alpha_y=self.clip_dustbin(dustbin_im_y), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              iters=self.iters, use_ipot=True)
+                                                              iters=self.iters)
 
         assert(matching.shape==((b*n_ex)**2, n_s+1, n_s+1)), f"{matching.shape}"
         scores = scores.reshape(b*n_ex, b*n_ex)
@@ -1300,7 +1300,7 @@ class SinkhornScorer(Scorer):
         matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
                                                               alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
-                                                              scores_mask=y_mask, iters=self.iters, use_ipot=True)
+                                                              scores_mask=y_mask, iters=self.iters)
 
         assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n*n_ex, n)
@@ -1517,6 +1517,7 @@ class MLPMeanScore(Scorer):
         if self.rep_type!='whole':
             self.mlp2 = MLP(input_size, output_size, output_size)
             if self.rep_type=='rel':
+                self.blocks = blocks
                 self.mlp3 = MLP(input_size, output_size, output_size)
 
     def forward(self, x, y):
@@ -1533,14 +1534,14 @@ class MLPMeanScore(Scorer):
             y = self.mlp1(y).mean(dim=2)
             x = self.mlp2(x).mean(dim=1)
             y = self.mlp2(y)
-        elif self.rep_type=='whole':
+        elif self.rep_type=='rel':
             assert(len(x.shape)==4), "x should be of shape batch size X n_ex X num_slots X dim"
             assert(len(y.shape)==3), "y should be of shape batch size X num_slots X dim"
             x = torch.split(x, self.blocks, dim=2)
             y = torch.split(y, self.blocks, dim=1)
             x_obj = self.mlp1(x[0]).mean(dim=2)
-            y_obj = self.mlp1(y[0]).mean(dim=2)
-            x_rel = self.mlp2(x[1]).mean(dim=1)
+            y_obj = self.mlp1(y[0]).mean(dim=1)
+            x_rel = self.mlp2(x[1]).mean(dim=2)
             y_rel = self.mlp2(y[1]).mean(dim=1)
             x = self.mlp3((x_obj+x_rel)/2).mean(dim=1)
             y = self.mlp3((y_obj+y_rel)/2)

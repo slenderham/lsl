@@ -320,19 +320,23 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3),
+                nn.Conv2d(3, dim, 3, bias=False),
+                ImagePositionalEmbedding(im_size-2*1, im_size-2*1, dim, bias=False),
+                nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
+                nn.Conv2d(dim, dim, 3, bias=False),
+                ImagePositionalEmbedding(im_size-2*2, im_size-2*2, dim, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 3, bias=False),
+                ImagePositionalEmbedding(im_size-2*3, im_size-2*3, dim, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 3, bias=False),
+                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3),
                 nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
-                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim)
+                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim, bias=True),
             )
 
             self.post_mlp = nn.Sequential(
@@ -433,7 +437,7 @@ class SANet(nn.Module):
         # plt.show()
 
 class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size, coord_type='cartesian'):
+    def __init__(self, height, width, hidden_size, bias=True, coord_type='cartesian'):
         super(ImagePositionalEmbedding, self).__init__()
         self.coord_type = coord_type
 
@@ -444,7 +448,7 @@ class ImagePositionalEmbedding(nn.Module):
 
         if (coord_type=='cartesian'):
             self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
-            self.pos_emb = nn.Conv2d(4, hidden_size, 1)
+            self.pos_emb = nn.Conv2d(4, hidden_size, 1, bias=bias)
         elif (coord_type=='polar'):
             coords = []
             for xx in [x_coord_neg, x_coord_pos]:
@@ -452,7 +456,7 @@ class ImagePositionalEmbedding(nn.Module):
                     coords.append(torch.sqrt(xx**2+yy**2))
                     coords.append(torch.atan2(xx, yy))
             self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
-            self.pos_emb = nn.Conv2d(8, hidden_size, 1)
+            self.pos_emb = nn.Conv2d(8, hidden_size, 1, bias=bias)
         else:
             raise ValueError
         

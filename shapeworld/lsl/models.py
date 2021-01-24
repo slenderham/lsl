@@ -1411,7 +1411,6 @@ class SinkhornScorer(Scorer):
                 v = v.masked_fill(scores_mask[:,0,:], -1e6)
             else:
                 v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
-            print(u[0], v[0])
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):

@@ -388,7 +388,7 @@ if __name__ == "__main__":
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
 
-    def pretrain(epoch, n_steps=100):
+    def pretrain(epoch, n_steps=500):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train()
@@ -558,7 +558,7 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc))
+        print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total/n_steps, cls_acc/n_steps))
         return loss, metric
 
     def simple_eval(epoch, split):
@@ -798,7 +798,10 @@ if __name__ == "__main__":
             best_test_acc_ci = test_acc_ci
 
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, \
+                             is_best=is_best_epoch, folder=args.exp_dir,\
+                             filename='checkpoint_finetuned.pth.tar',\
+                             best_filename='finetuned_model_best.pth.tar')
 
         metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)

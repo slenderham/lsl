@@ -718,6 +718,7 @@ if __name__ == "__main__":
     if args.load_checkpoint:
         with open(os.path.join(args.exp_dir, 'metrics.json')) as f:
             metrics = json.load(f)
+            metrics = defaultdict(list, metrics)
             print('record loaded correctly')
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))

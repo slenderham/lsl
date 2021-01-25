@@ -224,20 +224,26 @@ class RelationalSlotAttention(nn.Module):
         self.norm_pre_ff_obj = nn.LayerNorm(dim)
         self.norm_pre_ff_rel = nn.LayerNorm(dim)
         
-        self.rel_i = nn.Linear(dim, dim)
-        self.rel_j = nn.Linear(dim, dim)
+        self.rel_i_slot = nn.Linear(dim, dim)
+        self.rel_j_slot = nn.Linear(dim, dim)
+        self.rel_i_update = nn.Linear(dim, dim)
+        self.rel_j_update = nn.Linear(dim, dim)
         self.rel_s_gate = nn.Linear(2*dim, 1)
         self.rel_o_gate = nn.Linear(2*dim, 1)
 
         self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
 
-    def _obj_to_rel(self, x):
+    def _obj_to_rel(self, x, update):
         b, n_s, h = x.shape
-        x_i = torch.unsqueeze(self.rel_i(x), 2)  # b. n_s, 1, h
+        x_i = torch.unsqueeze(self.rel_i_slot(x), 2)  # b. n_s, 1, h
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
-        x_j = torch.unsqueeze(self.rel_j(x), 1)  # b, 1, n_s, h
+        x_j = torch.unsqueeze(self.rel_j_slot(x), 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = x_i*x_j
+        up_i = torch.unsqueeze(self.rel_i_update(update), 2)  # b. n_s, 1, h
+        up_i = up_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
+        up_j = torch.unsqueeze(self.rel_j_update(update), 1)  # b, 1, n_s, h
+        up_j = up_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
+        rel_msg = torch.cat([up_i*up_j, x_i*x_j], dim=-1)
         assert(rel_msg.shape==(b, n_s*n_s, h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
@@ -299,13 +305,11 @@ class RelationalSlotAttention(nn.Module):
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
 
             # compute edge slot from paired object representation
-            edge_context_w_diag = self._obj_to_rel(obj_slots)
+            edge_context_w_diag = self._obj_to_rel(obj_slots, updates)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
-            update_pair_w_diag = self._obj_to_rel(updates)
-            update_pair = update_pair_w_diag[:, self.non_diag_idx, :]
 
             rel_slots = self.rel_gru(
-                torch.cat([update_pair, edge_context], dim=-1).reshape(b*n_s*(n_s-1), 2*d),
+                edge_context.reshape(b*n_s*(n_s-1), 2*d),
                 rel_slots.reshape(b*n_s*(n_s-1), d)
               ).reshape(b, n_s*(n_s-1), d)
             rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))

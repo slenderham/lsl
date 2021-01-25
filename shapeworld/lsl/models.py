@@ -237,8 +237,8 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(self.rel_j(x), 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i, x_j], dim=-1)
-        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
+        rel_msg = x_i*x_j
+        assert(rel_msg.shape==(b, n_s*n_s, h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
     def _rel_to_obj(self, x_rel, x_obj):
@@ -301,8 +301,11 @@ class RelationalSlotAttention(nn.Module):
             # compute edge slot from paired object representation
             edge_context_w_diag = self._obj_to_rel(obj_slots)
             edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
+            update_pair_w_diag = self._obj_to_rel(updates)
+            update_pair = update_pair_w_diag[:, self.non_diag_idx, :]
+
             rel_slots = self.rel_gru(
-                edge_context.reshape(b*n_s*(n_s-1), 2*d),
+                torch.cat([update_pair, edge_context], dim=-1).reshape(b*n_s*(n_s-1), 2*d),
                 rel_slots.reshape(b*n_s*(n_s-1), d)
               ).reshape(b, n_s*(n_s-1), d)
             rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))
@@ -1158,7 +1161,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight

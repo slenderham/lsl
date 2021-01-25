@@ -769,7 +769,7 @@ if __name__ == "__main__":
             p.requires_grad = False
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch, 1)
+        train_loss = finetune(epoch)
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

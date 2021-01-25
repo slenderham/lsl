@@ -237,7 +237,7 @@ class RelationalSlotAttention(nn.Module):
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
         x_j = torch.unsqueeze(self.rel_j(x), 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([x_i-x_j, x_i*x_j], dim=-1)
+        rel_msg = torch.cat([x_i, x_j], dim=-1)
         assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
         return rel_msg
 
@@ -335,12 +335,6 @@ class SANet(nn.Module):
                 ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim, bias=True),
             )
 
-            self.post_mlp = nn.Sequential(
-                nn.LayerNorm(dim),
-                nn.Linear(dim, dim),
-                nn.ReLU(inplace=True),
-                nn.Linear(dim, dim)
-            )
             if use_relation:
                 self.slot_attn = RelationalSlotAttention(num_slots, dim, iters, eps, 2*dim)
             else:
@@ -382,7 +376,6 @@ class SANet(nn.Module):
             x = self.encoder(img)
             n, c, h, w = x.shape
             x = x.permute(0, 2, 3, 1).reshape(n, h*w, c)
-            x = self.post_mlp(x)
             x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots) # --> N * num slots * feature size
             if visualize_attns:
                 self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
@@ -437,10 +430,10 @@ class ImagePositionalEmbedding(nn.Module):
         super(ImagePositionalEmbedding, self).__init__()
         self.coord_type = coord_type
 
-        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
-        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
-        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
-        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
+        x_coord_pos = torch.linspace(-1, 1, height).reshape(1, height, 1).expand(1, height, width)
+        x_coord_neg = torch.linspace(1, -1, height).reshape(1, height, 1).expand(1, height, width)
+        y_coord_pos = torch.linspace(-1, 1, width).reshape(1, 1, width).expand(1, height, width)
+        y_coord_neg = torch.linspace(1, -1, width).reshape(1, 1, width).expand(1, height, width)
 
         if (coord_type=='cartesian'):
             self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
@@ -1165,7 +1158,7 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
+    def __init__(self, hidden_dim=None, iters=10, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight

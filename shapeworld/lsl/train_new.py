@@ -362,7 +362,7 @@ if __name__ == "__main__":
     im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
                                         rep_type='rel' if args.use_relational_model else args.representation,\
                                         blocks = [args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)]
-                                            if args.use_relational_model else None)
+                                            if args.use_relational_model else None).to(device)
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 

@@ -1466,7 +1466,7 @@ class TransformerAgg(Scorer):
             self.proj = nn.Linear(input_size, hidden_size)
         else:
             self.proj = nn.Identity()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
 

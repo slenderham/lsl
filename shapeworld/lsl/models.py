@@ -314,7 +314,7 @@ class RelationalSlotAttention(nn.Module):
               ).reshape(b, n_s*(n_s-1), d)
             rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))
 
-        return torch.cat([obj_slots, rel_slots], dim=1), attns
+        return obj_slots, attns
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True):

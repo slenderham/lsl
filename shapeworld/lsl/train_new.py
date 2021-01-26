@@ -357,9 +357,10 @@ if __name__ == "__main__":
                                            im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
                                                 if args.use_relational_model else None,
                                             im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
-    im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
+        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
                                         rep_type='rel' if args.use_relational_model else args.representation,\
                                         blocks = [args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)]
                                             if args.use_relational_model else None).to(device)
@@ -519,7 +520,7 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0][:-1, :-1].detach().cpu(), vmin=0)
+                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
                     if args.use_relational_model:

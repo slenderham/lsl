@@ -653,12 +653,11 @@ if __name__ == "__main__":
                     all_scores = all_scores+mean_scores.tolist()
                 else:
                     raise NotImplementedError
-        
-        auc = roc_auc_score(labels, scores)
+        auc = roc_auc_score(labels, all_scores)
         print('====> {:>12}\tEpoch: {:>3}\tAUC: {:.4f}'.format(
             '({})'.format(split), epoch, auc))
 
-        return auc, labels, scores
+        return auc, labels, all_scores
 
     def finetune(epoch, n_steps=100):
         for m in models_to_save:

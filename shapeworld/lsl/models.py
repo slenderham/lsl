@@ -196,8 +196,8 @@ class RelationalSlotAttention(nn.Module):
         self.dim = dim
         self.scale = dim ** -0.5
 
-        self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
 
         self.to_q = nn.Linear(dim, dim, bias=False)
         self.to_k = nn.Linear(dim, dim, bias=False)
@@ -240,8 +240,8 @@ class RelationalSlotAttention(nn.Module):
         n_s = num_slots if num_slots is not None else self.num_slots
         n_it = num_iters if num_iters is not None else self.iters
         
-        obj_mu = self.obj_slots_mu.expand(b, n_s, -1)
-        obj_sigma = torch.exp(self.obj_slots_sigma.expand(b, n_s, -1))
+        obj_mu = self.slots_mu.expand(b, n_s, -1)
+        obj_sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
         obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
 
         inputs = self.norm_input(inputs)        
@@ -267,7 +267,7 @@ class RelationalSlotAttention(nn.Module):
             rel_msg = self._rel_msg(slots_prev)
 
             # update object slots
-            obj_slots = self.obj_gru(
+            obj_slots = self.gru(
                 torch.cat([updates, rel_msg], dim=-1).reshape(b*n_s, 2*d),
                 slots_prev.reshape(b*n_s, d)
               ).reshape(b, n_s, d)

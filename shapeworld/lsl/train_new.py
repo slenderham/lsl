@@ -360,7 +360,7 @@ if __name__ == "__main__":
         # im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         # TODO: hard coded number of examples
         im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
-                                        num_obj=args.num_vision_slots**2 if args.use_relational_model else args.num_vision_slots)
+                                        num_obj=args.num_vision_slots**2 if args.use_relational_model else args.num_vision_slots).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \

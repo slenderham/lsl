@@ -1597,7 +1597,7 @@ class SortPoolScorer(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex))
         self.bias = nn.Parameter(torch.zeros(1))
-        self.base_scorer = BilinearScorer(hidden_size)
+        self.base_scorer = CosineScorer(temperature=temperature)
         self.relaxed = relaxed
 
     def forward(self, x, y):

@@ -1596,7 +1596,7 @@ class SortPoolScorer(nn.Module):
         """
         super().__init__()
         self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex))
-        self.bias = nn.Parameter(torch.zeros(1, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(1))
         self.base_scorer = BilinearScorer(hidden_size)
         self.relaxed = relaxed
 
@@ -1619,7 +1619,8 @@ class SortPoolScorer(nn.Module):
             sims, perm = sims.sort(dim=2, descending=True)
 
         sims = (sims * self.weight).sum(dim=2).mean(dim=1)+self.bias
-        return sims, perm
+        assert(sims.shape==(b))
+        return sims
 
     def deterministic_sort(self, s, tau):
         """

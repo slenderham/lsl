@@ -1182,10 +1182,11 @@ class SinkhornScorer(Scorer):
             return self.forward_eval(*args, **kwargs)
     
     def forward_eval(self, x, y):
-        b, n_s, h = x.shape
+        b, n_x, h = x.shape
         assert(y.shape[0]==b and y.shape[2]==h), f'{x.shape}, {y.shape}'
+        n_y = y.shape[1]
         scores = self.base_scorer.score(x, y, get_diag=False)
-        assert(scores.shape==(b, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==(b, n_x, n_y)), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
 
         if self.im_blocks is not None:
@@ -1202,7 +1203,7 @@ class SinkhornScorer(Scorer):
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
                                                               iters=self.iters)
 
-        assert(matching.shape==(b, n_s+1, n_s+1)), f"{matching.shape}"
+        assert(matching.shape==(b, n_x+1, n_y+1)), f"{matching.shape}"
         
         return matching, scores
 

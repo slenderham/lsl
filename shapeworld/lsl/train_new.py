@@ -629,7 +629,7 @@ if __name__ == "__main__":
                 m.eval()
 
         labels = []
-        scores = []
+        all_scores = []
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -650,7 +650,7 @@ if __name__ == "__main__":
                     mean_scores = torch.mean(scores, -1)
 
                     labels = labels+label.tolist()
-                    scores = scores+mean_scores.tolist()
+                    all_scores = all_scores+mean_scores.tolist()
                 else:
                     raise NotImplementedError
         

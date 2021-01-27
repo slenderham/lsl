@@ -331,8 +331,7 @@ if __name__ == "__main__":
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
                                    temperature=args.temperature, \
                                    comparison='im_lang', \
-                                   im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
-                                        if args.use_relational_model else None
+                                   im_blocks=None
                                     ).to(device)
     elif args.aux_task=='cross_modal_matching' and args.representation=='whole':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
@@ -340,8 +339,7 @@ if __name__ == "__main__":
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
                                    temperature=args.temperature, \
                                    comparison='im_im', \
-                                   im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
-                                        if args.use_relational_model else None
+                                   im_blocks=None
                                     ).to(device)
     else:
         raise AssertionError('There are only three types of aux_tasks that require special loss')
@@ -354,19 +352,16 @@ if __name__ == "__main__":
         simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
                                            comparison='eval', \
                                            iters=50, reg=0.1, temperature=1, \
-                                           im_blocks=[args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)] 
-                                                if args.use_relational_model else None,
-                                            im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+                                           im_blocks=None).to(device)
         # im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         # TODO: hard coded number of examples
         im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
-                                        num_obj=args.num_vision_slots**2 if args.use_relational_model else args.num_vision_slots).to(device)
+                                        num_obj=args.num_vision_slots).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
-                                        rep_type='rel' if args.use_relational_model else args.representation,\
-                                        blocks = [args.num_vision_slots, args.num_vision_slots*(args.num_vision_slots-1)]
-                                            if args.use_relational_model else None).to(device)
+                                        rep_type = args.representation,\
+                                        blocks = None).to(device)
     params_to_finetune = list(im_im_scorer_model.parameters())
     models_to_save.append(im_im_scorer_model)
 
@@ -526,8 +521,8 @@ if __name__ == "__main__":
                     im = ax.imshow(matching[2][0].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
-                    if args.use_relational_model:
-                        ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
+                    # if args.use_relational_model:
+                    #     ylabels = ylabels + [str(y2)+' x '+str(y1) for y1 in range(args.num_vision_slots) for y2 in range(args.num_vision_slots) if y1!=y2]
                     ax.set_xticks(np.arange(len(hint_seq[0])))
                     ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
                     # ax.set_xticks(np.arange(len(xlabels)))

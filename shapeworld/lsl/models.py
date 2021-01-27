@@ -198,69 +198,42 @@ class RelationalSlotAttention(nn.Module):
 
         self.obj_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.obj_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.rel_slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.rel_slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
 
         self.to_q = nn.Linear(dim, dim, bias=False)
         self.to_k = nn.Linear(dim, dim, bias=False)
         self.to_v = nn.Linear(dim, dim, bias=False)
 
-        self.obj_gru = nn.GRUCell(dim*2, dim)
-        self.rel_gru = nn.GRUCell(dim*2, dim)
+        self.gru = nn.GRUCell(dim*2, dim)
 
         self.obj_mlp = nn.Sequential(
             nn.Linear(dim, hidden_dim),
             nn.ReLU(inplace = True),
             nn.Linear(hidden_dim, dim)
          )
+
         self.rel_mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
+            nn.Linear(dim*2, hidden_dim),
             nn.ReLU(inplace = True),
             nn.Linear(hidden_dim, dim)
-         )
+        )
 
         self.norm_input  = nn.LayerNorm(dim)
         self.norm_obj_slots = nn.LayerNorm(dim)
-        self.norm_pre_ff_obj = nn.LayerNorm(dim)
-        self.norm_pre_ff_rel = nn.LayerNorm(dim)
-        
-        self.rel_i_slot = nn.Linear(dim, dim)
-        self.rel_j_slot = nn.Linear(dim, dim)
-        self.rel_i_update = nn.Linear(dim, dim)
-        self.rel_j_update = nn.Linear(dim, dim)
-        self.rel_s_gate = nn.Linear(2*dim, 1)
-        self.rel_o_gate = nn.Linear(2*dim, 1)
+        self.norm_pre_ff = nn.LayerNorm(dim)        
 
-        self.non_diag_idx = list(set(range(num_slots**2)) - set([n*num_slots+n for n in range(num_slots)]))
-
-    def _obj_to_rel(self, x, update):
+    def _rel_msg(self, x):
         b, n_s, h = x.shape
-        x_i = torch.unsqueeze(self.rel_i_slot(x), 2)  # b. n_s, 1, h
+        x_i = torch.unsqueeze(x, 2)  # b. n_s, 1, h
         x_i = x_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
-        x_j = torch.unsqueeze(self.rel_j_slot(x), 1)  # b, 1, n_s, h
+        x_j = torch.unsqueeze(x, 1)  # b, 1, n_s, h
         x_j = x_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        up_i = torch.unsqueeze(self.rel_i_update(update), 2)  # b. n_s, 1, h
-        up_i = up_i.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
-        up_j = torch.unsqueeze(self.rel_j_update(update), 1)  # b, 1, n_s, h
-        up_j = up_j.expand(b, n_s, n_s, h).flatten(1, 2)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
-        rel_msg = torch.cat([up_i*up_j, x_i*x_j], dim=-1)
-        assert(rel_msg.shape==(b, n_s*n_s, 2*h)), f"x_rel's shape is {rel_msg.shape}"
-        return rel_msg
-
-    def _rel_to_obj(self, x_rel, x_obj):
-        b, n_s, d = x_obj.shape
-        assert(x_rel.shape==(b, n_s*(n_s-1), d))
-        x_rel_w_diag = torch.zeros(b, n_s*n_s, d).to(x_rel.device)
-        x_rel_w_diag[:, self.non_diag_idx, :] = x_rel
-        x_rel_w_diag = x_rel_w_diag.reshape(b, n_s, n_s, d)
-        rel_i_gate = self.rel_s_gate(torch.cat([x_obj.unsqueeze(2).expand(b, n_s, n_s, d), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
-        rel_j_gate = self.rel_o_gate(torch.cat([x_obj.unsqueeze(1).expand(b, n_s, n_s, d), x_rel_w_diag], dim=-1)).sigmoid() # b, n_s, n_s, 1
-        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1).to(x_rel.device) > 0.5
-        rel_i_gate = torch.masked_fill(rel_i_gate, diag_mask, 0)
-        rel_j_gate = torch.masked_fill(rel_j_gate, diag_mask, 0)
-        obj_msg = ((rel_i_gate*x_rel_w_diag).sum(2) + (rel_j_gate*x_rel_w_diag).sum(1))/(2*(self.num_slots-1))
-        assert(obj_msg.shape==(b, n_s, d))
-        return obj_msg
+        x_ij = torch.cat([x_i, x_j], dim=-1)
+        x_ij = self.rel_mlp(x_ij)
+        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1).to(x_ij.device) > 0.5
+        x_ij = x_ij.masked_fill(diag_mask, 0)
+        x_ij = x_ij.sum(dim=2)/(n_s-1)
+        assert(x_ij.shape==(b, n_s, h)), f"x_rel's shape is {x_ij.shape}"
+        return x_ij
 
     def forward(self, inputs, num_slots = None, num_iters = None):
         b, n, d = inputs.shape
@@ -270,10 +243,6 @@ class RelationalSlotAttention(nn.Module):
         obj_mu = self.obj_slots_mu.expand(b, n_s, -1)
         obj_sigma = torch.exp(self.obj_slots_sigma.expand(b, n_s, -1))
         obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
-
-        rel_mu = self.rel_slots_mu.expand(b, n_s*(n_s-1), -1)
-        rel_sigma = torch.exp(self.rel_slots_sigma.expand(b, n_s*(n_s-1), -1))
-        rel_slots = rel_mu + torch.randn_like(rel_mu)*rel_sigma
 
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
@@ -295,26 +264,16 @@ class RelationalSlotAttention(nn.Module):
             updates = torch.einsum('bjd,bij->bid', v, attn) # batch, slot, dim
 
             # aggregate message from edge slots
-            obj_context = self._rel_to_obj(rel_slots, obj_slots)
+            rel_msg = self._rel_msg(slots_prev)
 
             # update object slots
             obj_slots = self.obj_gru(
-                torch.cat([updates, obj_context], dim=-1).reshape(b*n_s, 2*d),
+                torch.cat([updates, rel_msg], dim=-1).reshape(b*n_s, 2*d),
                 slots_prev.reshape(b*n_s, d)
               ).reshape(b, n_s, d)
-            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff_obj(obj_slots))
+            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
 
-            # compute edge slot from paired object representation
-            edge_context_w_diag = self._obj_to_rel(obj_slots, updates)
-            edge_context = edge_context_w_diag[:, self.non_diag_idx, :]
-
-            rel_slots = self.rel_gru(
-                edge_context.reshape(b*n_s*(n_s-1), 2*d),
-                rel_slots.reshape(b*n_s*(n_s-1), d)
-              ).reshape(b, n_s*(n_s-1), d)
-            rel_slots = rel_slots + self.rel_mlp(self.norm_pre_ff_rel(rel_slots))
-
-        return torch.cat([obj_slots, rel_slots], dim=1), attns
+        return obj_slots, attns
 
 class SANet(nn.Module):
     def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True):
@@ -1595,7 +1554,7 @@ class SortPoolScorer(nn.Module):
         relaxed: Use sorting networks relaxation instead of traditional sorting
         """
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex))
+        self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex)/((num_obj*num_ex)**0.5))
         self.bias = nn.Parameter(torch.zeros(1))
         self.base_scorer = CosineScorer(temperature=temperature)
 

@@ -1619,7 +1619,7 @@ class SortPoolScorer(nn.Module):
             sims, perm = sims.sort(dim=2, descending=True)
 
         sims = (sims * self.weight).sum(dim=2).mean(dim=1)+self.bias
-        assert(sims.shape==(b))
+        assert(sims.shape==(b)), sims.shape
         return sims
 
     def deterministic_sort(self, s, tau):

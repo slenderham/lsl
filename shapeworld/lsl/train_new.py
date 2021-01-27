@@ -630,6 +630,7 @@ if __name__ == "__main__":
 
         labels = []
         scores = []
+        data_loader = data_loader_dict[split]
 
         with torch.no_grad():
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
@@ -654,7 +655,7 @@ if __name__ == "__main__":
                     raise NotImplementedError
         
         auc = roc_auc_score(labels, scores)
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
+        print('====> {:>12}\tEpoch: {:>3}\tAUC: {:.4f}'.format(
             '({})'.format(split), epoch, auc))
 
         return auc, labels, scores

@@ -1098,8 +1098,11 @@ class DotPScorer(Scorer):
     def __init__(self):
         super(DotPScorer, self).__init__()
 
-    def score(self, x, y):
-        return torch.sum(x * y, dim=-1)
+    def score(self, x, y, get_diag=True):
+        if get_diag:
+            return torch.sum(x * y, dim=-1)
+        else:
+            return torch.matmul(x, y.transpose(-1, -2))
 
     def batchwise_score(self, y, x):
         # REVERSED
@@ -1162,10 +1165,10 @@ class BilinearScorer(DotPScorer):
                 torch.eye(hidden_size, dtype=torch.float32))
             self.bilinear.weight.requires_grad = False
 
-    def score(self, x, y):
+    def score(self, x, y, get_diag=True):
         wy = self.bilinear(y)
         wy = self.dropout(wy)
-        return super(BilinearScorer, self).score(x, wy)
+        return super(BilinearScorer, self).score(x, wy, get_diag)
 
     def batchwise_score(self, x, y):
         """
@@ -1580,3 +1583,75 @@ class SplitMLP(nn.Module):
         x = torch.stack(x, dim=1)
         assert(x.shape==(b, self.num_slots, self.output_size))
         return x
+
+class SortPoolScorer(nn.Module):
+    """
+        Adopted from Featurewise sort pooling. From:
+        FSPool: Learning Set Representations with Featurewise Sort Pooling.
+    """
+    def __init__(self, hidden_size, num_ex, num_obj, temperature, relaxed=False):
+        """
+        in_channels: Number of channels in input
+        relaxed: Use sorting networks relaxation instead of traditional sorting
+        """
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex))
+        self.bias = nn.Parameter(torch.zeros(1, 1, 1))
+        self.base_scorer = BilinearScorer(hidden_size)
+        self.relaxed = relaxed
+
+    def forward(self, x, y):
+        """ FSPool
+        x: FloatTensor of shape (batch_size, num_obj, num_obj*num_ex).
+            This should contain the similarity scores between objects in query and 
+            objects in all support images (order doesn't matter since they are sorted)
+        Returns: pooled score
+        """
+        b, n_ex, num_slot, h = x.shape
+        assert(self.input_size==None or h==self.input_size)
+        assert(y.shape==(b, num_slot, h))
+
+        sims = self.base_scorer.score(y, x.flatten(1,2), get_diag=False) # --> b X num_obj_y X num_obj_X*n_ex
+        assert(sims.shape==(b, num_slot, num_slot*n_ex))
+
+        if self.relaxed:
+            sims, perm = self.cont_sort(sims, temp=self.relaxed)
+        else:
+            sims, perm = sims.sort(dim=2, descending=True)
+
+        sims = (sims * self.weight).sum(dim=2).mean(dim=1)
+        return sims, perm
+
+    def deterministic_sort(self, s, tau):
+        """
+        "Stochastic Optimization of Sorting Networks via Continuous Relaxations" https://openreview.net/forum?id=H1eSS3CcKX
+        Aditya Grover, Eric Wang, Aaron Zweig, Stefano Ermon
+        s: input elements to be sorted. Shape: batch_size x n x 1
+        tau: temperature for relaxation. Scalar.
+        """
+        n = s.size()[1]
+        one = torch.ones((n, 1), dtype = torch.float32, device=s.device)
+        A_s = torch.abs(s - s.permute(0, 2, 1))
+        B = torch.matmul(A_s, torch.matmul(one, one.transpose(0, 1)))
+        scaling = (n + 1 - 2 * (torch.arange(n, device=s.device) + 1)).type(torch.float32)
+        C = torch.matmul(s, scaling.unsqueeze(0))
+        P_max = (C - B).permute(0, 2, 1)
+        sm = torch.nn.Softmax(-1)
+        P_hat = sm(P_max / tau)
+        return P_hat
+
+    def cont_sort(self, x, perm=None, temp=1):
+        """ Helper function that calls deterministic_sort with the right shape.
+        Since it assumes a shape of (batch_size, n, 1) while the input x is of shape (batch_size, channels, n),
+        we can get this to the right shape by merging the first two dimensions.
+        If an existing perm is passed in, we compute the "inverse" (transpose of perm) and just use that to unsort x.
+        """
+        original_size = x.size()
+        x = x.view(-1, x.size(2), 1)
+        if perm is None:
+            perm = self.deterministic_sort(x, temp)
+        else:
+            perm = perm.transpose(1, 2)
+        x = perm.matmul(x)
+        x = x.view(original_size)
+        return x, perm

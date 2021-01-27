@@ -1608,7 +1608,6 @@ class SortPoolScorer(nn.Module):
         Returns: pooled score
         """
         b, n_ex, num_slot, h = x.shape
-        assert(self.input_size==None or h==self.input_size)
         assert(y.shape==(b, num_slot, h))
 
         sims = self.base_scorer.score(y, x.flatten(1,2), get_diag=False) # --> b X num_obj_y X num_obj_X*n_ex
@@ -1619,7 +1618,7 @@ class SortPoolScorer(nn.Module):
         else:
             sims, perm = sims.sort(dim=2, descending=True)
 
-        sims = (sims * self.weight).sum(dim=2).mean(dim=1)
+        sims = (sims * self.weight).sum(dim=2).mean(dim=1)+self.bias
         return sims, perm
 
     def deterministic_sort(self, s, tau):

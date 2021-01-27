@@ -1164,7 +1164,10 @@ class SinkhornScorer(Scorer):
                 self.dustbin_scorer_im = nn.ModuleList([nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1)), 
                                                         nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))])
         elif (self.comparison=='eval'):
-            self.dustbin_scorer_im = im_dustbin
+            if im_dustbin is not None:
+                self.dustbin_scorer_im = im_dustbin
+            else:
+                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = nn.Tanh()
         self.iters = iters
@@ -1431,6 +1434,7 @@ class TransformerAgg(Scorer):
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
+        self.base_scorer = SinkhornScorer(hidden_size, iters=20, reg=0.1, comparison='eval')
 
     def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape
@@ -1447,7 +1451,7 @@ class TransformerAgg(Scorer):
         assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return (x.mean(1)*y.mean(1)).sum(1)
+        return self.base_scorer(x, y)[1]
 
 class ContrastiveLoss(Scorer):
     """

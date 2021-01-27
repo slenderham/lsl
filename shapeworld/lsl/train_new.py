@@ -353,10 +353,10 @@ if __name__ == "__main__":
                                            comparison='eval', \
                                            iters=50, reg=0.1, temperature=1, \
                                            im_blocks=None, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
-        # im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         # TODO: hard coded number of examples
-        im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
-                                        num_obj=args.num_vision_slots).to(device)
+        # im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
+                                        # num_obj=args.num_vision_slots).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
         im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \

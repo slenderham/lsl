@@ -646,8 +646,8 @@ if __name__ == "__main__":
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)
                     image_slot = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, -1).flatten(0, 1)
-                    scores = simple_val_scorer(examples_slot.flatten(0, 1), image_slot)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex*n_ex
-                    mean_scores = torch.mean(pos_scores, -1)
+                    scores = simple_val_scorer(examples_slot, image_slot)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex*n_ex
+                    mean_scores = torch.mean(scores, -1)
 
                     labels = labels+label.tolist()
                     scores = scores+mean_scores.tolist()

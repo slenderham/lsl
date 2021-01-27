@@ -1435,7 +1435,7 @@ class TransformerAgg(Scorer):
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
-        self.base_scorer = SinkhornScorer(hidden_size, iters=20, reg=0.1, comparison='eval', temperature=0.1)
+        self.base_scorer = SinkhornScorer(hidden_size, iters=20, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
 
     def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape

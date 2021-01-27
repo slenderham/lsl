@@ -6,7 +6,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from matplotlib import pyplot as plt
 import json
 
@@ -623,6 +623,42 @@ if __name__ == "__main__":
 
         return concept_avg_meter.avg, concept_avg_meter.raw_scores
 
+    def eval_auc(epoch, split):
+        for m in models_to_save:
+            if (isinstance(m, nn.Module)):
+                m.eval()
+
+        labels = []
+        scores = []
+
+        with torch.no_grad():
+            for examples, image, label, hint_seq, hint_length, *rest in data_loader:
+                examples = examples.to(device)
+                image = image.to(device)
+                n_ex = examples.shape[1]
+                batch_size = len(image)
+
+                # Learn representations of images and examples
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
+                image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
+
+                if args.representation=='slot':
+                    examples_slot = examples_slot.flatten(0, 1)
+                    image_slot = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, -1).flatten(0, 1)
+                    scores = simple_val_scorer(examples_slot.flatten(0, 1), image_slot)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex*n_ex
+                    mean_scores = torch.mean(pos_scores, -1)
+
+                    labels = labels+label.tolist()
+                    scores = scores+mean_scores.tolist()
+                else:
+                    raise NotImplementedError
+        
+        auc = roc_auc_score(labels, scores)
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, auc))
+
+        return auc, labels, scores
+
     def finetune(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
@@ -743,13 +779,17 @@ if __name__ == "__main__":
                 metrics[k].append(v)
 
             simple_val_acc, simple_val_acc_raw = simple_eval(epoch, 'val')
+            simple_val_auc, val_labels, val_scores = eval_auc(epoch, 'val')
             if has_same:
                 simpel_val_same_acc, simple_val_same_acc_raw = simple_eval(epoch, 'val_same')
+                simple_val_same_auc, val_same_labels, val_same_scores = eval_auc(epoch, 'val_same')
                 metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
+                metrics['simple_val_auc'].append(roc_auc_score(val_labels+val_same_labels, val_scores+val_same_scores))
                 all_simple_val_acc = simple_val_acc_raw+simple_val_same_acc_raw
                 metrics['simple_val_acc_ci'].append(1.96*np.std(all_simple_val_acc)/np.sqrt(len(all_simple_val_acc)))
             else:
                 metrics['simple_val_acc'].append(simple_val_acc)
+                metrics['simple_val_auc'].append(simple_val_auc)
                 metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc)/np.sqrt(len(simple_val_acc)))
 
             save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))

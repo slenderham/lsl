@@ -388,7 +388,7 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(args.exp_dir, 'checkpoint.pth.tar')
         sds = torch.load(ckpt_path, map_location=device)
         for m in models_to_save:
-            if (not isinstance(m, TransformerAgg)) or (not isinstance(m, SortPoolScorer)):
+            if (not isinstance(m, TransformerAgg)) and (not isinstance(m, SortPoolScorer)):
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
 

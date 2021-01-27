@@ -1589,7 +1589,7 @@ class SortPoolScorer(nn.Module):
         Adopted from Featurewise sort pooling. From:
         FSPool: Learning Set Representations with Featurewise Sort Pooling.
     """
-    def __init__(self, hidden_size, num_ex, num_obj, temperature, relaxed=False):
+    def __init__(self, hidden_size, num_ex, num_obj, temperature):
         """
         in_channels: Number of channels in input
         relaxed: Use sorting networks relaxation instead of traditional sorting
@@ -1598,7 +1598,6 @@ class SortPoolScorer(nn.Module):
         self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex))
         self.bias = nn.Parameter(torch.zeros(1))
         self.base_scorer = CosineScorer(temperature=temperature)
-        self.relaxed = relaxed
 
     def forward(self, x, y):
         """ FSPool
@@ -1613,45 +1612,8 @@ class SortPoolScorer(nn.Module):
         sims = self.base_scorer.score(y, x.flatten(1,2), get_diag=False) # --> b X num_obj_y X num_obj_X*n_ex
         assert(sims.shape==(b, num_slot, num_slot*n_ex))
 
-        if self.relaxed:
-            sims, perm = self.cont_sort(sims, temp=self.relaxed)
-        else:
-            sims, perm = sims.sort(dim=2, descending=True)
+        sims, perm = sims.sort(dim=2, descending=True)
 
         sims = (sims * self.weight).sum(dim=2).mean(dim=1)+self.bias
         assert(sims.shape[0]==b), sims.shape
         return sims
-
-    def deterministic_sort(self, s, tau):
-        """
-        "Stochastic Optimization of Sorting Networks via Continuous Relaxations" https://openreview.net/forum?id=H1eSS3CcKX
-        Aditya Grover, Eric Wang, Aaron Zweig, Stefano Ermon
-        s: input elements to be sorted. Shape: batch_size x n x 1
-        tau: temperature for relaxation. Scalar.
-        """
-        n = s.size()[1]
-        one = torch.ones((n, 1), dtype = torch.float32, device=s.device)
-        A_s = torch.abs(s - s.permute(0, 2, 1))
-        B = torch.matmul(A_s, torch.matmul(one, one.transpose(0, 1)))
-        scaling = (n + 1 - 2 * (torch.arange(n, device=s.device) + 1)).type(torch.float32)
-        C = torch.matmul(s, scaling.unsqueeze(0))
-        P_max = (C - B).permute(0, 2, 1)
-        sm = torch.nn.Softmax(-1)
-        P_hat = sm(P_max / tau)
-        return P_hat
-
-    def cont_sort(self, x, perm=None, temp=1):
-        """ Helper function that calls deterministic_sort with the right shape.
-        Since it assumes a shape of (batch_size, n, 1) while the input x is of shape (batch_size, channels, n),
-        we can get this to the right shape by merging the first two dimensions.
-        If an existing perm is passed in, we compute the "inverse" (transpose of perm) and just use that to unsort x.
-        """
-        original_size = x.size()
-        x = x.view(-1, x.size(2), 1)
-        if perm is None:
-            perm = self.deterministic_sort(x, temp)
-        else:
-            perm = perm.transpose(1, 2)
-        x = perm.matmul(x)
-        x = x.view(original_size)
-        return x, perm

@@ -110,10 +110,10 @@ class MLP(nn.Module):
             layers.append(nn.Linear(input_size, output_size))
         else:
             layers.append(nn.Linear(input_size, hidden_size))
-            layers.append(nn.ReLU())
+            layers.append(nn.ReLU(inplace=True))
             for _ in range(num_layers-1):
                 layers.append(nn.Linear(hidden_size, hidden_size))
-                layers.append(nn.ReLU())
+                layers.append(nn.ReLU(inplace=True))
             layers.append(nn.Linear(hidden_size, output_size))
 
         self.model = nn.Sequential(*layers)

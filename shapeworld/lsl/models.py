@@ -259,7 +259,7 @@ class RelationalSlotAttention(nn.Module):
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
             if self.add_gumbel_attention:
-                noise = distributions.Gumbel(0, 1).sample(dots.shape)
+                noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
                 dots = dots + noise
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)

@@ -188,13 +188,14 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, add_gumbel_attention = True):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
         self.eps = eps
         self.dim = dim
         self.scale = dim ** -0.5
+        self.add_gumbel_attention = add_gumbel_attention
 
         self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
@@ -257,6 +258,9 @@ class RelationalSlotAttention(nn.Module):
             # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
+            if self.add_gumbel_attention:
+                noise = distributions.Gumbel(0, 1).sample(dots.shape)
+                dots = dots + noise
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
@@ -364,7 +368,7 @@ class SANet(nn.Module):
         N, dim_q, dim_k = attns[0].shape # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k)
         # rand_idx = torch.randint(0, N, size=(1,)).item()
-        rand_idx = 2
+        rand_idx = 0
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu())

@@ -275,7 +275,9 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=args.hidden_size, slot_model=image_model, use_relation=args.use_relational_model)
+    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
+                           dim=args.hidden_size, slot_model=image_model, \
+                           use_relation=args.use_relational_model, iters=7 if args.visualize_attns else 3)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -518,7 +520,7 @@ if __name__ == "__main__":
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0)
+                    im = ax.imshow(matching[0][0].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_vision_slots))
                     # xlabels = list(range(args.num_lang_slots))
                     # if args.use_relational_model:

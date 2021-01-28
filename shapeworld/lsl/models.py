@@ -1436,6 +1436,7 @@ class TransformerAgg(Scorer):
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
         self.base_scorer = SinkhornScorer(hidden_size, iters=10, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
+        self.bias = nn.Parameter(torch.zeros(1))
 
     def forward(self, x, y):
         b, n_ex, num_rel, h = x.shape
@@ -1452,7 +1453,7 @@ class TransformerAgg(Scorer):
         assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return self.base_scorer(x, y)[1]
+        return self.base_scorer(x, y)[1]+self.bias
 
 class ContrastiveLoss(Scorer):
     """

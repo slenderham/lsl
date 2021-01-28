@@ -275,18 +275,10 @@ if __name__ == "__main__":
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
-    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
-                            dim=args.hidden_size, slot_model=image_model, \
-                            use_relation=args.use_relational_model,\
-                            iters = 7 if args.visualize_attns else 3)
+    backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, dim=args.hidden_size, slot_model=image_model, use_relation=args.use_relational_model)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
-    
-    vis_proj = MLP(args.hidden_size, args.hidden_size, args.hidden_size).to(device)
-    params_to_pretrain.extend(vis_proj.parameters())
-    models_to_save.append(vis_proj)
-
 
     # if use relational model and use slots, add relational net structure
     # if use relational and not slots, return error
@@ -316,9 +308,10 @@ if __name__ == "__main__":
 
     elif args.aux_task=='cross_modal_matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        output_size = None if args.representation=='slot' else args.hidden_size*args.num_vision_slots
         hint_model = {
-                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole', output_size=None),
-                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole', output_size=None),
+                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
                         'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
                         'slot': TextRepSlot(embedding_model, hidden_size=args.hidden_size, return_agg=args.representation=='whole', num_slots=args.num_lang_slots)
@@ -326,9 +319,6 @@ if __name__ == "__main__":
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
-        txt_proj = MLP(args.hidden_size, args.hidden_size, args.hidden_size).to(device)
-        params_to_pretrain.extend(txt_proj.parameters())
-        models_to_save.append(txt_proj)
     elif args.aux_task=='im_matching':
         pass
     else:
@@ -453,8 +443,6 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
-            image_slot = vis_proj(image_slot)
-            examples_slot = vis_proj(examples_slot)
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
@@ -513,8 +501,6 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length, hint_seq==pad_index) 
                 else:
                     hint_rep = hint_model(hint_seq, hint_length) 
-                
-                hint_rep = txt_proj(hint_rep)
 
                 if (args.representation=='slot'):
                     assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
@@ -598,8 +584,6 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
                 image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
-                examples_slot = vis_proj(examples_slot)
-                image_slot = vis_proj(image_slot)
 
                 if args.representation=='slot':
                     anchor = torch.repeat_interleave(examples_slot, repeats=n_ex, dim=1).flatten(0, 1)
@@ -658,8 +642,6 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
                 image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
-                examples_slot = vis_proj(examples_slot)
-                image_slot = vis_proj(image_slot)
 
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)

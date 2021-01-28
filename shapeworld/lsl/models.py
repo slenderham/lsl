@@ -107,14 +107,14 @@ class MLP(nn.Module):
         assert(num_layers>=0), "At least 0 hidden_layers (a simple linear transform)"
         layers = []
         if (num_layers==0):
-            layers.append(nn.Linear(input_size, output_size, bias=False))
+            layers.append(nn.Linear(input_size, output_size))
         else:
             layers.append(nn.Linear(input_size, hidden_size))
             layers.append(nn.ReLU(inplace=True))
             for _ in range(num_layers-1):
                 layers.append(nn.Linear(hidden_size, hidden_size))
                 layers.append(nn.ReLU(inplace=True))
-            layers.append(nn.Linear(hidden_size, output_size, bias=False))
+            layers.append(nn.Linear(hidden_size, output_size))
 
         self.model = nn.Sequential(*layers)
 

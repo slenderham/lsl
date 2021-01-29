@@ -188,14 +188,14 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, add_gumbel_attention = True):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
         self.eps = eps
         self.dim = dim
         self.scale = dim ** -0.5
-        self.add_gumbel_attention = add_gumbel_attention
+        self.gumbel_attention = gumbel_attention
 
         self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
@@ -258,7 +258,7 @@ class RelationalSlotAttention(nn.Module):
             # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
 
             dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
-            if self.add_gumbel_attention:
+            if self.gumbel_attention:
                 noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
                 dots = dots + noise
             attn = dots.softmax(dim=1) + self.eps

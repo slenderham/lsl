@@ -691,10 +691,6 @@ if __name__ == "__main__":
             image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
 
-            if args.representation=='whole':
-                examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size*args.num_vision_slots)
-                image_slot = image_slot.reshape(batch_size, 1, args.hidden_size*args.num_vision_slots)
-
             score = im_im_scorer_model(examples_slot, image_slot).squeeze()
             loss = F.binary_cross_entropy_with_logits(score, label.float())
             pred_loss_total += loss.item()
@@ -782,7 +778,7 @@ if __name__ == "__main__":
 
     else:
         for epoch in range(1, args.pt_epochs+1):
-            train_loss, pt_metric = pretrain(epoch)
+            train_loss, pt_metric = pretrain(epoch, 1)
             for k, v in pt_metric.items():
                 metrics[k].append(v)
 
@@ -819,7 +815,7 @@ if __name__ == "__main__":
             p.requires_grad = False
 
     for epoch in range(1, args.ft_epochs+1):
-        train_loss = finetune(epoch)
+        train_loss = finetune(epoch, 1)
         train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')

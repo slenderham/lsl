@@ -361,7 +361,7 @@ if __name__ == "__main__":
                                         # num_obj=args.num_vision_slots).to(device)
     else:
         simple_val_scorer = CosineScorer(temperature=1).to(device)
-        im_im_scorer_model = MLPMeanScore(args.hidden_size, args.hidden_size, \
+        im_im_scorer_model = MLPMeanScore(args.hidden_size*args.num_vision_slots, args.hidden_size, \
                                         rep_type = args.representation,\
                                         blocks = None).to(device)
     params_to_finetune = list(im_im_scorer_model.parameters())

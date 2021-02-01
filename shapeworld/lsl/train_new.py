@@ -692,8 +692,8 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
 
             if args.representation=='whole':
-                examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size)
-                image_slot = image_slot.reshape(batch_size, 1, args.hidden_size)
+                examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size*args.num_vision_slots)
+                image_slot = image_slot.reshape(batch_size, 1, args.hidden_size*args.num_vision_slots)
 
             score = im_im_scorer_model(examples_slot, image_slot).squeeze()
             loss = F.binary_cross_entropy_with_logits(score, label.float())

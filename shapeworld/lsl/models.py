@@ -417,19 +417,9 @@ class ImagePositionalEmbedding(nn.Module):
             self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
             self.pos_emb = nn.Conv2d(8, hidden_size, 1, bias=bias)
         elif (coord_type=='sine'):
-            x_coord_pos = torch.linspace(0, 1, height)*2*math.pi
-            y_coord_pos = torch.linspace(0, 1, width)*2*math.pi
-            y_coord_neg = torch.linspace(1, 0, width)*2*math.pi
-
-            coord_pos = torch.cartesian_prod(x_coord_pos, y_coord_pos).reshape(1, 1, width, height, 2)
-            coord_neg = torch.cartesian_prod(x_coord_pos, y_coord_neg).reshape(1, 1, width, height, 2)
-
-            dim_t = torch.linspace(1, (int(hidden_size**0.5/2)), int(hidden_size**0.5/2)) # sqrt(hidden_size)
-            dim_t = torch.cartesian_prod(dim_t, dim_t).reshape(1, hidden_size//4, 1, 1, 2) # hidden_size
-
-            coord_pos = (coord_pos/(dim_t)).sum(-1)
-            coord_neg = (coord_neg/(dim_t)).sum(-1)
-            self.register_buffer('coords', torch.cat([coord_pos.sin(), coord_pos.cos(), coord_neg.sin(), coord_neg.cos()], dim=1))
+            div_term = 2*math.pi*torch.exp(-math.log(10000.0)*torch.arange(0., hidden_size//2)/hidden_size).reshape(hidden_size//2, 1, 1)
+            self.register_buffer('coords', torch.cat([torch.sin((x_coord_pos * div_term)[0::2]), torch.cos((x_coord_pos * div_term)[1::2]), \
+                                                      torch.sin((y_coord_pos * div_term)[0::2]), torch.cos((y_coord_pos * div_term)[1::2])], dim=0).unsqueeze(0))
             self.pos_emb = nn.Identity()
         else:
             raise ValueError

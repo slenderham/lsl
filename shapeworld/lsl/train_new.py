@@ -648,13 +648,19 @@ if __name__ == "__main__":
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)
                     image_slot = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1, -1).flatten(0, 1)
-                    scores = simple_val_scorer(examples_slot, image_slot)[1].reshape(batch_size, n_ex) # --> batch_size*n_ex*n_ex
+                    scores = simple_val_scorer(examples_slot, image_slot)[1].reshape(batch_size, n_ex)
                     mean_scores = torch.mean(scores, -1)
 
                     labels = labels+label.tolist()
                     all_scores = all_scores+mean_scores.tolist()
                 else:
-                    raise NotImplementedError
+                    examples_slot = examples_slot.flatten(0, 1)
+                    image_slot = image_slot.unsqueeze(1).expand(batch_size, n_ex, -1).flatten(0, 1)
+                    scores = simple_val_scorer.score(examples_slot, image_slot).reshape(batch_size, n_ex)
+                    mean_scores = torch.mean(scores, -1)
+
+                    labels = labels+label.tolist()
+                    all_scores = all_scores+mean_scores.tolist()
         auc = roc_auc_score(labels, all_scores)
         print('====> {:>12}\tEpoch: {:>3}\tAUC: {:.4f}'.format(
             '({})'.format(split), epoch, auc))

@@ -731,10 +731,6 @@ if __name__ == "__main__":
                 image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
                 examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
 
-                if args.representation=='whole':
-                    examples_slot = examples_slot.reshape(batch_size, n_ex, 1, args.hidden_size)
-                    image_slot = image_slot.reshape(batch_size, 1, args.hidden_size)
-
                 score = im_im_scorer_model(examples_slot, image_slot).squeeze()
                 label_hat = score > 0
                 label_hat = label_hat.cpu().numpy()

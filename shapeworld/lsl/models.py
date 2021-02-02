@@ -290,19 +290,19 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, bias=False),
+                nn.Conv2d(3, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 3, bias=False),
+                nn.Conv2d(dim, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 3, bias=False),
+                nn.Conv2d(dim, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 3, bias=False),
+                nn.Conv2d(dim, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
-                ImagePositionalEmbedding(im_size-2*4, im_size-2*4, dim, bias=True),
+                ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True),
             )
 
             if use_relation:
@@ -313,18 +313,18 @@ class SANet(nn.Module):
         elif (slot_model=='conv'):
             final_size = im_size
             for i in range(4):
-                final_size = (final_size-1)//2+1
+                final_size = (final_size-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 3, 2, padding=1),
+                nn.Conv2d(3, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True), 
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 3, 2, padding=1),
+                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True),
                 nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),

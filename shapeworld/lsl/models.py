@@ -417,7 +417,7 @@ class ImagePositionalEmbedding(nn.Module):
             self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
             self.pos_emb = nn.Conv2d(8, hidden_size, 1, bias=bias)
         elif (coord_type=='sine'):
-            div_term = (width+height)/2*torch.exp(-math.log(10000.0)*torch.arange(0., hidden_size, 2)/hidden_size).reshape(hidden_size//2, 1, 1)
+            div_term = 2*math.pi*torch.exp(-math.log(10000.0)*torch.arange(0., hidden_size, 2)/hidden_size).reshape(hidden_size//2, 1, 1)
             self.register_buffer('coords', torch.cat([torch.sin((x_coord_pos * div_term)[0::2]), torch.cos((x_coord_pos * div_term)[1::2]), \
                                                       torch.sin((y_coord_pos * div_term)[0::2]), torch.cos((y_coord_pos * div_term)[1::2])], dim=0).unsqueeze(0))
             self.pos_emb = nn.Identity()

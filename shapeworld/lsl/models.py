@@ -315,18 +315,18 @@ class SANet(nn.Module):
             for i in range(4):
                 final_size = (final_size-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5, 2, padding=1),
+                nn.Conv2d(3, dim, 5, 2, padding=1, bias=False),
+                nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
                 nn.BatchNorm2d(dim),
-                nn.Conv2d(dim, dim, 5, 2, padding=1),
                 nn.ReLU(inplace=True),
-                nn.BatchNorm2d(dim),
                 ImagePositionalEmbedding(final_size, final_size, dim),
                 nn.Flatten(),
                 nn.Linear(final_size*final_size*dim, self.num_slots*dim),

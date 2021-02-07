@@ -7,12 +7,14 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import torch.distributions as distributions
 import torch.nn.utils.rnn as rnn_utils
 from matplotlib import pyplot as plt
 from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
-from vision import ResNet18, ResNet50, ResNet10, BottleneckBlock
+from vision import ResNet18, ResNet50, ResNet10, BottleneckBlock, FPN, VGG16
+import torchvision.models as models
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -138,14 +140,17 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=False):
+    def __init__(self, embedding_module, hidden_size, output_size = None, return_agg=False, bidirectional=False):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.bidirectional = bidirectional
         self.hidden_size = hidden_size
+        self.output_size = output_size
         self.return_agg = return_agg
         self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional)
+        if output_size is not None:
+            self.mlp = MLP(hidden_size, hidden_size, output_size)
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -170,7 +175,8 @@ class TextRep(nn.Module):
         if self.return_agg:
             hidden, _ = rnn_utils.pad_packed_sequence(hidden)
             if self.bidirectional:
-                hidden = (final_hidden[0]+hidden[0,:,:self.hidden_size])/2 # for forward layer, get final for backward, get first
+                hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,:self.hidden_size])/2 # for forward layer, get final for backward, get first
+                hidden = hidden.sum(0)/sorted_lengths.float().unsqueeze(-1)
             else:
                 hidden = final_hidden[0]
             if batch_size > 1:
@@ -184,6 +190,9 @@ class TextRep(nn.Module):
             hidden = hidden.transpose(0, 1)
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2
+
+        if self.output_size is not None:
+            hidden = self.mlp(hidden)
 
         return hidden
 
@@ -661,9 +670,9 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class SANet(nn.Module):
-    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn'):
+    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True):
         super(SANet, self).__init__()
-        assert(slot_model in ['slot_attn', 'conv'])
+        assert(slot_model in ['slot_attn', 'conv', 'pretrained'])
         self.slot_model = slot_model
 
         self.iters = iters
@@ -673,30 +682,43 @@ class SANet(nn.Module):
             im_size = (im_size+2-3)//2+1
             im_size = (im_size+2-3)//2+1
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, 64, 3, 1, 1, bias=False),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                BottleneckBlock(64, 128, True),
-                BottleneckBlock(128, 256, True),
-                BottleneckBlock(256, 512, False),
+                ResNet18(flatten=False),
                 nn.Conv2d(512, dim, 1),
                 ImagePositionalEmbedding(im_size, im_size, dim)
             )
 
-            self.post_mlp = nn.Sequential(
-                nn.LayerNorm(dim),
-                nn.Linear(dim, dim),
-                nn.ReLU(),
-                nn.Linear(dim, dim)
-            )
-            self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
+            if use_relation:
+                self.slot_attn = RelationalSlotAttention(num_slots, dim, iters, eps, 2*dim)
+            else:
+                self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
             self.final_feat_dim=dim
         elif (slot_model=='conv'):
             final_size = im_size
             for i in range(4):
                 final_size = (final_size-3)//2+1
-            self.encoder = ResNet18(flatten=True)
-            self.final_feat_dim = final_size*final_size*dim
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, dim, 5, 2, padding=1, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True), 
+                nn.Conv2d(dim, dim, 5, 2, padding=1, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True),
+                ImagePositionalEmbedding(final_size, final_size, dim),
+                nn.Flatten(),
+                nn.Linear(final_size*final_size*dim, self.num_slots*dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.num_slots*dim, self.num_slots*dim)
+            )
+            self.final_feat_dim = dim
+        elif (slot_model=='pretrained'):
+            self.encoder = VGG16()
+            self.final_feat_dim = 512*7*7
 
     def forward(self, img, **kwargs):
         visualize_attns=kwargs.get('visualize_attns', False)
@@ -706,12 +728,11 @@ class SANet(nn.Module):
             x = self.encoder(img)
             n, c, h, w = x.shape
             x = x.permute(0, 2, 3, 1).reshape(n, h*w, c)
-            x = self.post_mlp(x)
             x, attns = self.slot_attn(x, num_iters=num_iters, num_slots=num_slots) # --> N * num slots * feature size
             if visualize_attns:
                 self._visualize_attns(img, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
-        elif (self.slot_model=='slot_mlp'):
-            x = self.slot_mlp(x)
+        elif (self.slot_model=='pretrained'):
+            x = self.encoder(img)
             if visualize_attns:
                 plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
         elif (self.slot_model=='conv'):
@@ -729,7 +750,7 @@ class SANet(nn.Module):
         N, dim_q, dim_k = attns[0].shape # dim_q=the number of slots, dim_k=size of feature map
         H_k = W_k = math.isqrt(dim_k)
         # rand_idx = torch.randint(0, N, size=(1,)).item()
-        rand_idx = 2
+        rand_idx = 0
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.imshow(img[rand_idx].permute(1, 2, 0).detach().cpu())
@@ -744,7 +765,7 @@ class SANet(nn.Module):
                 axes2[i][j].imshow(F.interpolate(attns[i][rand_idx][j].reshape(1, 1, H_k, W_k), size=(H, W), mode='bilinear').reshape(H, W).detach().cpu(), vmin=0, vmax=1)
                 axes1[i][j].axis('off')
                 axes2[i][j].axis('off')
-        plt.show()
+        # plt.show()
 
         # fig, axes = plt.subplots(1, num_iters)
         # for i in range(num_iters):
@@ -753,51 +774,129 @@ class SANet(nn.Module):
         #         for w in range(W_k):
         #             masked_img[h, w] = torch.argmax(attns[i][rand_idx,:,h*W_k+w])
         #     axes[i].imshow(masked_img, cmap=cmap, norm=norm)
+
         # plt.show()
 
+
 class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size):
+    def __init__(self, height, width, hidden_size, coord_type='polar'):
         super(ImagePositionalEmbedding, self).__init__()
+        self.coord_type = coord_type
+
         x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
         x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
         y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
         y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
 
-        self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
-        self.pos_emb = nn.Conv2d(4, hidden_size, 1)
+        if (coord_type=='cartesian'):
+            self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
+            self.pos_emb = nn.Conv2d(4, hidden_size, 1)
+        elif (coord_type=='polar'):
+            coords = [];
+            for xx in [x_coord_neg, x_coord_pos]:
+                for yy in [y_coord_neg, y_coord_pos]:
+                    coords.append(torch.sqrt(xx**2+yy**2))
+                    coords.append(torch.atan2(xx, yy))
+            self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
+            self.pos_emb = nn.Conv2d(8, hidden_size, 1)
+        else:
+            raise ValueError
 
     def forward(self, x):
         # add positional embedding to the feature vector
         return x+self.pos_emb(self.coords)
 
-class RelationalNet(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(RelationalNet, self).__init__()
-        self.leftV = nn.Linear(in_dim, out_dim)
-        self.rightV = nn.Linear(in_dim, out_dim)
-        self.rel_emb = nn.Linear(out_dim, out_dim)
-        self.obj_mlp = nn.Linear(in_dim, out_dim)
+class RelationalSlotAttention(nn.Module):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False):
+        super().__init__()
+        self.num_slots = num_slots
+        self.iters = iters
+        self.eps = eps
+        self.dim = dim
+        self.scale = dim ** -0.5
+        self.gumbel_attention = gumbel_attention
 
-    def forward(self, x):
+        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+
+        self.gru = nn.GRUCell(dim*2, dim)
+
+        self.obj_mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+         )
+
+        self.rel_mlp = nn.Sequential(
+            nn.Linear(dim*2, hidden_dim),
+            nn.ReLU(inplace = True),
+            nn.Linear(hidden_dim, dim)
+        )
+
+        self.norm_input  = nn.LayerNorm(dim)
+        self.norm_obj_slots = nn.LayerNorm(dim)
+        self.norm_pre_ff = nn.LayerNorm(dim)        
+
+    def _rel_msg(self, x):
         b, n_s, h = x.shape
-        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
-        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
-        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
-        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
-        x = self.obj_mlp(x)
+        x_i = torch.unsqueeze(x, 2)  # b. n_s, 1, h
+        x_i = x_i.expand(b, n_s, n_s, h)  # b. n_s*n_s, h: x1x1x1...x2x2x2...x3x3x3...
+        x_j = torch.unsqueeze(x, 1)  # b, 1, n_s, h
+        x_j = x_j.expand(b, n_s, n_s, h)  # b. n_s*n_s, h: x1x2x3...x1x2x3...x1x2x3...
+        x_ij = torch.cat([x_i, x_j], dim=-1)
+        x_ij = self.rel_mlp(x_ij)
+        diag_mask = torch.eye(n_s, n_s).reshape(1, n_s, n_s, 1).expand(b, n_s, n_s, 1).to(x_ij.device) > 0.5
+        x_ij = x_ij.masked_fill(diag_mask, 0)
+        x_ij = x_ij.sum(dim=2)/(n_s-1)
+        assert(x_ij.shape==(b, n_s, h)), f"x_rel's shape is {x_ij.shape}"
+        return x_ij
 
-        # get pair-wise rep through multiplicative integration
-        x_rel = self.rel_emb(F.relu(self.leftV(x_i)*self.rightV(x_j))).flatten(1,2)
-        assert (x_rel.shape[:-1]==(b, n_s**2))
+    def forward(self, inputs, num_slots = None, num_iters = None):
+        b, n, d = inputs.shape
+        n_s = num_slots if num_slots is not None else self.num_slots
+        n_it = num_iters if num_iters is not None else self.iters
         
-        # get rid of self to self pairings
-        non_diag_idx = list(set(range(n_s**2)) - set([n*n_s+n for n in range(n_s)])) # remove self to self pairs
-        x_rel = x_rel[:, non_diag_idx, :]
+        obj_mu = self.slots_mu.expand(b, n_s, -1)
+        obj_sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
+        obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
 
-        # concat relations with objects
-        x_rel = torch.cat([x, x_rel], dim=1)
+        inputs = self.norm_input(inputs)        
+        k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim
 
-        return x_rel
+        attns = []
+
+        for _ in range(n_it):
+            # attention pooling from image source
+            slots_prev = obj_slots
+            obj_slots = self.norm_obj_slots(obj_slots)
+            q = self.to_q(obj_slots)
+            # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
+
+            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
+            if self.gumbel_attention:
+                noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
+                dots = dots + noise
+            attn = dots.softmax(dim=1) + self.eps
+            attns.append(attn)
+            attn = attn / attn.sum(dim=-1, keepdim=True)
+
+            updates = torch.einsum('bjd,bij->bid', v, attn) # batch, slot, dim
+
+            # aggregate message from edge slots
+            rel_msg = self._rel_msg(slots_prev)
+
+            # update object slots
+            obj_slots = self.gru(
+                torch.cat([updates, rel_msg], dim=-1).reshape(b*n_s, 2*d),
+                slots_prev.reshape(b*n_s, d)
+              ).reshape(b, n_s, d)
+            obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
+
+        return obj_slots, attns
 
 class NonlinearSpreadOut(nn.Module):
     def __init__(self, margin=0.5):
@@ -915,118 +1014,255 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, idx_to_word, freq=None, iters=100, reg=0.1, comparison='im_lang', cross_domain_weight=0.5, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
         super(SinkhornScorer, self).__init__()
-        assert(comparison in ['im_im', 'im_lang'])
-        self.temperature = kwargs['temperature']
+        assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
-        assert(self.cross_domain_weight<=1 and self.cross_domain_weight>=0)
-        if (comparison=='im_lang'):
-            self.base_scorer = CosineScorer(temperature=1)
-            self.dustbin_scores_lang = nn.Embedding(len(idx_to_word), 1) # each word token is given a dustbin score
-            # freqs = [freq.get(idx_to_word[i], 0.0)*1.0 for i in range(len(idx_to_word))]
-            # assert(len(freqs)==len(idx_to_word)), f"length of frequency vector is {len(freq)}, length of index to word is {len(idx_to_word)}"
-            # freqs = torch.tensor(freqs)
-            # freqs = torch.log(freqs/(freqs.sum()))
-            # freqs -= freqs[freqs != -float("Inf")].min()
-            # freqs /= freqs[freqs != -float("Inf")].max()
-            # freqs = freqs*0.2-0.1
-            # freqs[freqs == -float("Inf")] = 1
-            # self.dustbin_scores_lang.weight = nn.Parameter(freqs.unsqueeze(1))
-            torch.nn.init.constant_(self.dustbin_scores_lang.weight, 0.0)
-        else:
-            self.base_scorer = DotPScorer()
-        self.dustbin_scores_im = nn.Parameter(torch.zeros(1, 1, 1))
-        self.clip_dustbin = lambda x: torch.clamp(x, -1, 1)
+        self.comparison = comparison
+        self.im_blocks = im_blocks
+        self.partial_mass = partial_mass
+        self.temperature = kwargs['temperature']
+        if (self.comparison=='im_lang'):
+            if im_blocks is None:
+                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+            else:
+                self.dustbin_scorer_im = nn.ModuleList([nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1)), 
+                                                        nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))])
+            self.dustbin_scorer_lang = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+        elif (self.comparison=='im_im'):
+            if im_blocks is None:
+                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+            else:
+                self.dustbin_scorer_im = nn.ModuleList([nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1)), 
+                                                        nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))])
+        elif (self.comparison=='eval'):
+            if im_dustbin is not None:
+                self.dustbin_scorer_im = im_dustbin
+            else:
+                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+        self.base_scorer = CosineScorer(temperature=1)
+        self.clip_dustbin = nn.Tanh()
         self.iters = iters
         self.reg = reg
 
-    def forward(self, x, y, word_idx, y_mask):
+    def forward(self, *args, **kwargs):
+        if self.comparison=='im_lang':
+            return self.forward_im_lang(*args, **kwargs)
+        elif self.comparison=='im_im':
+            return self.forward_im_im(*args, **kwargs)
+        else:
+            return self.forward_eval(*args, **kwargs)
+    
+    def forward_eval(self, x, y):
+        b, n_x, h = x.shape
+        assert(y.shape[0]==b and y.shape[2]==h), f'{x.shape}, {y.shape}'
+        n_y = y.shape[1]
+        scores = self.base_scorer.score(x, y, get_diag=False)
+        assert(scores.shape==(b, n_x, n_y)), f"scores's shape is wrong: {scores.shape}"
+        # pad the score matrix where language is special token
+
+        if self.im_blocks is not None:
+            x_split = torch.split(x, self.im_blocks, dim=1)
+            dustbin_im_x = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+            y_split = torch.split(y, self.im_blocks, dim=1)
+            dustbin_im_y = torch.cat([self.dustbin_scorer_im[0](y_split[0]), self.dustbin_scorer_im[1](y_split[1])], dim=1)
+        else:
+            dustbin_im_x = self.dustbin_scorer_im(x)
+            dustbin_im_y = self.dustbin_scorer_im(y)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
+                                                              alpha_y=self.clip_dustbin(dustbin_im_y), \
+                                                              alpha_both=-100*torch.ones(1).to(scores.device), \
+                                                              iters=self.iters)
+
+        assert(matching.shape==(b, n_x+1, n_y+1)), f"{matching.shape}"
+        
+        return matching, scores
+
+    def forward_im_im(self, x):
+        b, n_s, h = x.shape
+        x = x.reshape(b, n_s, h)
+        x_expand = torch.repeat_interleave(x, repeats=b, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
+        y_expand = x.repeat(b, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
+        assert(scores.shape==((b)**2, n_s, n_s)), f"scores's shape is wrong: {scores.shape}"
+
+        if self.im_blocks is not None:
+            x_split = torch.split(x_expand, self.im_blocks, dim=1)
+            dustbin_im_x = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+            y_split = torch.split(y_expand, self.im_blocks, dim=1)
+            dustbin_im_y = torch.cat([self.dustbin_scorer_im[0](y_split[0]), self.dustbin_scorer_im[1](y_split[1])], dim=1)
+        else:
+            dustbin_im_x = self.dustbin_scorer_im(x_expand)
+            dustbin_im_y = self.dustbin_scorer_im(y_expand)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im_x), \
+                                                              alpha_y=self.clip_dustbin(dustbin_im_y), \
+                                                              alpha_both=-100*torch.ones(1).to(scores.device), \
+                                                              iters=self.iters)
+
+        assert(matching.shape==((b)**2, n_s+1, n_s+1)), f"{matching.shape}"
+        scores = scores.reshape(b, b)
+        matching = matching.reshape(b, b, n_s+1, n_s+1)
+
+        metric = {}
+        mask = torch.eye(b)
+        pos_mask = torch.as_tensor((mask-torch.eye(b))>.5).to(scores.device)
+        neg_mask = torch.as_tensor(mask<.5).to(scores.device)
+        pos_scores = scores.masked_select(pos_mask)
+        neg_scores = scores.masked_select(neg_mask)
+
+        assert(pos_scores.shape[0]==b);
+        assert(neg_scores.shape[0]==(b-1)*b);
+
+        neg_scores = neg_scores.reshape(b, b-1);
+        all_scores_im_im = torch.cat([pos_scores.unsqueeze(1), neg_scores], dim=1);
+
+        loss = - F.log_softmax(all_scores_im_im, dim=1)[:,0].mean()
+
+        # average R@1 scores for image and text retrieval
+        metric['acc'] = (torch.argmax(all_scores_im_im, dim=1)==0).float().mean().item()
+        metric['pos_score'] = pos_scores.mean().item()
+        metric['neg_score'] = neg_scores.mean().item()
+        return matching, loss, metric
+
+    def forward_im_lang(self, x, y, y_mask=None):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
-        # word_idx.shape = batch_size, num_obj_y
         # y_mask.shape = batch_size, num_obj_y
         n = y.shape[0]
         assert(x.shape[0]==n)
-        assert(y_mask.shape==word_idx.shape==y.shape[:2])
+        assert(y_mask is None or y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
         y_expand = y.repeat(n, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
         assert(scores.shape==(n**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
-        y_mask = y_mask.unsqueeze(1).repeat(n, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
-        y_mask = torch.cat([y_mask, (torch.ones(n**2, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
-        word_idx = word_idx.repeat(n, 1)
-        matching, scores = self.log_optimal_transport(scores, self.clip_dustbin(self.dustbin_scores_im), \
-                                                self.clip_dustbin(self.dustbin_scores_lang(word_idx)), \
-                                                self.clip_dustbin(self.dustbin_scores_im), y_mask, self.iters)
+        if y_mask is not None:
+            y_mask = y_mask.unsqueeze(1).repeat(n, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
+            y_mask = torch.cat([y_mask, (torch.ones(n**2, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
+
+        if self.im_blocks is not None:
+            x_split = torch.split(x_expand, self.im_blocks, dim=1)
+            dustbin_im = torch.cat([self.dustbin_scorer_im[0](x_split[0]), self.dustbin_scorer_im[1](x_split[1])], dim=1)
+        else:
+            dustbin_im = self.dustbin_scorer_im(x_expand)
+
+        matching, scores = self.log_optimal_transport(scores, alpha_x=self.clip_dustbin(dustbin_im), \
+                                                              alpha_y=self.clip_dustbin(self.dustbin_scorer_lang(y_expand)), \
+                                                              alpha_both=-100*torch.ones(1).to(scores.device), \
+                                                              scores_mask=y_mask, iters=self.iters)
+
         assert(matching.shape==(n**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
         scores = scores.reshape(n, n)
         matching = matching.reshape(n, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
-        pos_mask = (torch.block_diag(*([torch.ones(1, 1)]*n))>0.5).to(scores.device)
-        pos = scores.masked_select(pos_mask).reshape(n, 1)
-        neg = scores.masked_select(~pos_mask).reshape(n, n-1)
-        loss = -self.cross_domain_weight*torch.diagonal(F.log_softmax(scores, dim=1)).mean() \
-               -(1-self.cross_domain_weight)*torch.diagonal(F.log_softmax(scores, dim=0)).mean()
-        
+        # pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
+        pos_mask = (torch.eye(n)>0.5).to(scores.device)
+        pos = scores.masked_select(pos_mask)
+        neg_by_lang = scores.masked_select(~pos_mask).reshape(n, n-1)
+        neg_by_im = (scores.t()).masked_select(~pos_mask.t()).reshape(n, n-1)
+        scores_reshaped_by_lang = torch.cat([pos.reshape(n, 1), neg_by_lang], dim=1)
+        scores_reshaped_by_im = torch.cat([pos.reshape(n, 1), neg_by_im], dim=1)
+        loss = -self.cross_domain_weight*F.log_softmax(scores_reshaped_by_lang, dim=1)[:,0].mean()\
+               -(1-self.cross_domain_weight)*F.log_softmax(scores_reshaped_by_im, dim=1)[:,0].mean()
+
         # average R@1 scores for image and text retrieval
-        metric['part_acc_im_lang'] = (torch.argmax(scores, dim=1)==torch.arange(n).to(scores.device)).float().mean().item()
-        metric['part_acc_lang_im'] = (torch.argmax(scores, dim=0)==torch.arange(n).to(scores.device)).float().mean().item()
+        metric['acc_im_lang'] = (torch.argmax(scores_reshaped_by_lang, dim=1)==0).float().mean().item()
+        metric['acc_lang_im'] = (torch.argmax(scores_reshaped_by_im, dim=1)==0).float().mean().item()
         metric['pos_score'] = pos.mean().item()
-        metric['neg_score'] = neg.mean().item()
+        assert(torch.isclose(neg_by_im.mean(), neg_by_lang.mean()))
+        metric['neg_score'] = neg_by_lang.mean().item()
         return matching, loss, metric
     
-    def log_optimal_transport(self, scores, alpha_img, alpha_lang, alpha_both, scores_mask, iters: int):
+    def log_optimal_transport(self, scores, iters: int, alpha_x=None, alpha_y=None, alpha_both=None, scores_mask: torch.BoolTensor=None, use_ipot=False):
         """https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/superglue.py
             Perform Differentiable Optimal Transport in Log-space for stability"""
         b, m, n = scores.shape
         one = scores.new_tensor(1)
         ms = (m*one).to(scores)
-        ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
-
-        assert(alpha_lang.shape==(b, n, 1)), f"wrong shape for the language dustbin score: {alpha_lang.shape}"
-        bins0 = alpha_img.expand(b, m, 1)
-        bins1 = alpha_lang.transpose(1, 2)
-        alpha = alpha_both.expand(b, 1, 1)
-
-        couplings = torch.cat([torch.cat([scores, bins0], -1),
-                            torch.cat([bins1, alpha], -1)], 1)
-        mask_val = -1e6
-        couplings = couplings.masked_fill(scores_mask, mask_val)
+        if (scores_mask is not None):
+            ns = ((~scores_mask).float().sum(dim=[1, 2]))/(m+1)-1 # -> batch size
+        else:
+            ns = (n*one).to(scores)
         
-        norm = - (ms + ns).log().unsqueeze(-1) # --> batch size x 1
-        log_mu = torch.cat([norm.expand(b, m), ns.log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
-        log_nu = torch.cat([norm.expand(b, n), ms.log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
-        log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
-        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
-        Z = Z-norm.reshape(b, 1, 1)
+        assert((alpha_x is not None)==(alpha_y is not None)==(alpha_both is not None))
+        if (alpha_x is not None):
+            bins0 = alpha_x.reshape(b, m, 1)
+            bins1 = alpha_y.reshape(b, 1, n)
+            alpha = alpha_both.expand(b, 1, 1)
+            couplings = torch.cat([torch.cat([scores, bins0], -1),
+                            torch.cat([bins1, alpha], -1)], 1)
+        else:
+            couplings = scores
+        mask_val = -1e6
+
+        if (scores_mask is not None):
+            couplings = couplings.masked_fill(scores_mask, mask_val)
+        
+        if (alpha_x is not None):
+            if scores_mask is not None:
+                norm = - (ms + ns - 2*self.partial_mass).log().unsqueeze(-1) # --> batch size x 1
+                log_mu = torch.cat([norm.expand(b, m), (ns-self.partial_mass).log()[:, None] + norm], dim=1) # batch size x num_obj_x+1
+            else:
+                norm = - (ms + ns - 2*self.partial_mass).log().view(1, 1).expand(b, 1)
+                log_mu = torch.cat([norm.expand(b, m), (ns-self.partial_mass).log()[None, None] + norm], dim=1) # batch size x num_obj_x+1
+            log_nu = torch.cat([norm.expand(b, n), (ms-self.partial_mass).log()[None, None] + norm], dim=1) # batch size x num_obj_y+1
+        else:
+            log_mu = -ms.log().reshape(1, 1).expand(b, m)
+            log_nu = -ns.log().reshape(1, 1).expand(b, n)
+
+        if (scores_mask is not None):
+            log_nu = log_nu.masked_fill(scores_mask[:, 0, :], mask_val)
+
+        if use_ipot:
+            Z = self.log_ipot(couplings, log_mu, log_nu, scores_mask, iters)
+        else:
+            Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, scores_mask, iters)
+        if (scores_mask is not None):
+            Z = Z-norm.reshape(b, 1, 1)
         Z = Z.exp() 
-        return Z, (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        
+        if (alpha_x is not None):
+            final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+        else:
+            final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
+        
+        return Z, final_scores
 
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
-        T = torch.zeros_like(Z)
+        T = log_mu.unsqueeze(2) + log_nu.unsqueeze(1)
         A = Z/self.reg
-        T = T.masked_fill(scores_mask, -1e6)
-        A = A.masked_fill(scores_mask, -1e6)
+        if scores_mask is not None:
+            T = T.masked_fill(scores_mask, -1e6)
+            A = A.masked_fill(scores_mask, -1e6)
         for _ in range(self.iters):
             Q = A + T
             u = log_mu - torch.logsumexp(Q + v.unsqueeze(1), dim=2)
-            v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
+            if scores_mask is not None:
+                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2) + scores_mask[:,0:1,:].to(Q.dtype)*1e6, dim=1)
+                v = v.masked_fill(scores_mask[:,0,:], -1e6)
+            else:
+                v = log_nu - torch.logsumexp(Q + u.unsqueeze(2), dim=1)
             T = Q + u.unsqueeze(2) + v.unsqueeze(1)
-            T = T.masked_fill(scores_mask, -1e6)
+            if scores_mask is not None:
+                T = T.masked_fill(scores_mask, -1e6)
         return T
 
     def log_sinkhorn_iterations(self, Z, log_mu, log_nu, scores_mask, iters: int):
         """ Perform Sinkhorn Normalization in Log-space for stability"""
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
-        v = v.masked_fill(scores_mask[:,0,:], -1e6)
+        if scores_mask is not None:
+            v = v.masked_fill(scores_mask[:,0,:], -1e6)
         for i in range(iters):
             u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
-            v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
-            v = v.masked_fill(scores_mask[:,0,:], -1e6)
+            if scores_mask is not None:
+                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
+                v = v.masked_fill(scores_mask[:,0,:], -1e6)
+            else:
+                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):
@@ -1179,25 +1415,38 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, input_size=None):
         super(TransformerAgg, self).__init__()
+        
         self.hidden_size = hidden_size
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0)
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.input_size = input_size
 
-    def forward(self, x, n_shot):
-        n_way, n_total, num_slot, h = x.shape
-        x = x.flatten(0, 1).transpose(0, 1);
-        assert(x.shape==(num_slot, n_way*n_total, h))
-        x = self.model(x).mean(0)
-        # x.shape = n_way*n_total, h
-        x = x.reshape(n_way, n_total, self.hidden_size)
-        support = x[:, :n_shot].mean(1) # n_way, h
-        query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, h
-        # 0,0,...,0,1,1,...,1,...,4,4,4,...4
-        scores = -torch.cdist(query.unsqueeze(0), support.unsqueeze(0)).squeeze(0); # n_way*n_query, n_way
-        assert(scores.shape==(n_way*(n_total-n_shot), n_way))
-        return scores
+        if (input_size is not None):
+            self.proj = nn.Linear(input_size, hidden_size)
+        else:
+            self.proj = nn.Identity()
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
+        self.base_scorer = SinkhornScorer(hidden_size, iters=10, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
+        self.bias = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, y):
+        b, n_ex, num_rel, h = x.shape
+        assert(self.input_size==None or h==self.input_size)
+        assert(y.shape==(b, num_rel, h))
+        x = self.proj(x)
+        y = self.proj(y)
+        x = x.flatten(1, 2)
+        x += self.image_id[:,0:1,:]
+        y += self.image_id[:,1:2,:]
+        x = x.transpose(0, 1)
+        y = y.transpose(0, 1)
+        whole_rep = self.model(torch.cat([x, y], dim=0))
+        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
+        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
+        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
+        return self.base_scorer(x, y)[1]+self.bias
 
 class ContrastiveLoss(Scorer):
     """
@@ -1242,15 +1491,42 @@ class ContrastiveLoss(Scorer):
         return loss, metric
 
 class MLPMeanScore(Scorer):
-    def __init__(self, input_dize, output_size):
+    def __init__(self, input_size, output_size, rep_type, blocks):
         super(MLPMeanScore, self).__init__()
-        self.mlp = MLP(input_dize, output_size, output_size)
+        self.mlp1 = MLP(input_size, output_size, output_size)
+        assert(rep_type in ['rel', 'slot', 'whole'])
+        self.rep_type = rep_type
+        if self.rep_type!='whole':
+            self.mlp2 = MLP(input_size, output_size, output_size)
+            if self.rep_type=='rel':
+                self.blocks = blocks
+                self.mlp3 = MLP(input_size, output_size, output_size)
 
     def forward(self, x, y):
-        assert(len(x.shape)==3), "x should be of shape batch size X n_ex X dim"
-        assert(len(y.shape)==2), "y should be of shape batch size X dim"
-        assert(x.shape[0]==y.shape[0] and x.shape[-1]==y.shape[-1])
-        x = self.mlp(x).mean(dim=(1))
-        y = self.mlp(y)
+        if self.rep_type=='whole':
+            assert(len(x.shape)==3), "x should be of shape batch size X n_ex X dim"
+            assert(len(y.shape)==2), "y should be of shape batch size X dim"
+            assert(x.shape[0]==y.shape[0] and x.shape[-1]==y.shape[-1])
+            x = self.mlp1(x).mean(dim=1)
+            y = self.mlp1(y)
+        elif self.rep_type=='slot':
+            assert(len(x.shape)==4), "x should be of shape batch size X n_ex X num_slots X dim"
+            assert(len(y.shape)==3), "y should be of shape batch size X num_slots X dim"
+            x = self.mlp1(x).mean(dim=2)
+            y = self.mlp1(y).mean(dim=2)
+            x = self.mlp2(x).mean(dim=1)
+            y = self.mlp2(y)
+        elif self.rep_type=='rel':
+            assert(len(x.shape)==4), "x should be of shape batch size X n_ex X num_slots X dim"
+            assert(len(y.shape)==3), "y should be of shape batch size X num_slots X dim"
+            x = torch.split(x, self.blocks, dim=2)
+            y = torch.split(y, self.blocks, dim=1)
+            x_obj = self.mlp1(x[0]).mean(dim=2)
+            y_obj = self.mlp1(y[0]).mean(dim=1)
+            x_rel = self.mlp2(x[1]).mean(dim=2)
+            y_rel = self.mlp2(y[1]).mean(dim=1)
+            x = self.mlp3((x_obj+x_rel)/2).mean(dim=1)
+            y = self.mlp3((y_obj+y_rel)/2)
+        
         assert(x.shape==y.shape)
         return (x*y).sum(dim=1)

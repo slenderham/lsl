@@ -3,6 +3,7 @@ Training script
 """
 
 import os
+import json
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
@@ -49,11 +50,19 @@ if __name__ == "__main__":
                         type=int,
                         default=None,
                         help='Max number of training examples')
+    parser.add_argument('--representation',
+                        type=str,
+                        choices=['slot', 'whole'],
+                        default='slot',
+                        help='whether to use single vector or slots')
     parser.add_argument('--aux_task',
                         type=str,
-                        choices=['caption_slot', 'caption_image', 'matching_slot', 'matching_image', 'matching_oracle'],
-                        default='matching',
-                        help='Whether to predict caption or predict objects')
+                        choices=['imagenet_pretrain', 'caption', 'cross_modal_matching', 'im_matching'],
+                        default='cross_modal_matching',
+                        help='Whether to predict caption or match objects to captions')
+    parser.add_argument('--use_relational_model',
+                        action='store_true',
+                        help='Use relational model on top of slots or only slots.')
     parser.add_argument('--visualize_attns',
                         action='store_true',
                         help='If true, visualize attention masks of slots and matching/caption if applicable')
@@ -180,63 +189,99 @@ if __name__ == "__main__":
 
     ''' vision '''
     # if _image in task name, get vector for each image with conv net else get set of vectors with slots
-    image_model = 'conv' if '_image' in args.aux_task else 'slot_attn'
-    backbone_model = SANet(im_size=224, num_slots=args.num_slots, dim=args.hidden_size, slot_model=image_model)
+    image_model = 'conv' if args.representation=='whole' else 'slot_attn'
+    backbone_model = SANet(im_size=224, num_slots=args.num_slots, \
+                           dim=args.hidden_size, slot_model=image_model, \
+                           use_relation=args.use_relational_model, iters=7 if args.visualize_attns else 3)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
 
+    # if use relational model and use slots, add relational net structure
+    # if use relational and not slots, return error
+    # if not use relational and use slots, relation model is MLP to approximately balance number of params
+    # if not use relational and not use slots, relational model is MLP as well
     # abuse of variable name here. This is just to project to the correct dimension
 
-    ''' scorer '''
-    im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
-    params_to_finetune = list(im_im_scorer_model.parameters())
-    models_to_save.append(im_im_scorer_model)
-
     ''' aux task specific '''
-    if args.aux_task=='caption_slot' or args.aux_task=='caption_image':
+    if args.aux_task=='set_pred':
+        raise NotImplementedError
+        image_cls_projection = MLP(64, args.hidden_size, len(labels_to_idx['color'])+len(labels_to_idx['shape'])).to(device) # add one for no object
+        params_to_pretrain.extend(image_cls_projection.parameters())
+        models_to_save.append(image_cls_projection)
+
+        image_pos_projection = MLP(64, args.hidden_size, 2).to(device)
+        params_to_pretrain.extend(image_pos_projection.parameters())
+        models_to_save.append(image_pos_projection)
+
+    elif args.aux_task=='caption':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
-        if args.glove_init:
-            vecs = lang_utils.glove_init(vocab, emb_size=args.hidden_size)
-        embedding_model = nn.Embedding(
-            train_vocab_size, args.hidden_size, _weight=vecs if args.glove_init else None
-        )
-        if args.freeze_emb:
-            embedding_model.weight.requires_grad = False
-        
-        if args.aux_task=='caption_slot':
-            hint_model = TextProposalWithAttn(embedding_model, encoder_dim=args.hidden_size, hidden_size=args.hidden_size, )
+        if args.representation=='slot':
+            hint_model = TextProposalWithAttn(embedding_model, encoder_dim=args.hidden_size, hidden_size=args.hidden_size)
         else:
             hint_model = TextProposal(embedding_model, hidden_size=args.hidden_size)
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
 
-    elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
+    elif args.aux_task=='cross_modal_matching':
         embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        output_size = None if args.representation=='slot' else args.hidden_size*args.num_slots
         hint_model = {
-                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
-                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image'),
-                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.aux_task=='matching_image'),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.aux_task=='matching_image')
+                        'uni_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_gru': TextRep(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
+                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
         models_to_save.append(hint_model)
-
+    elif args.aux_task=='im_matching':
+        pass
     else:
         raise ValueError('invalid auxiliary task name')
 
     # loss
-    if args.aux_task=='matching_slot':
-        hype_loss = SinkhornScorer(idx_to_word=train_i2w, temperature=args.temperature).to(device)
-        spread_loss = NonlinearSpreadOut(0.5)
-        params_to_pretrain.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
-    elif args.aux_task=='matching_image':
+    if args.aux_task=='set_pred':
+        raise NotImplementedError
+        # hype_loss = SetPredLoss().to(device)
+    elif args.aux_task=='cross_modal_matching' and args.representation=='slot':
+        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                   temperature=args.temperature, \
+                                   comparison='im_lang', \
+                                   im_blocks=None
+                                    ).to(device)
+    elif args.aux_task=='cross_modal_matching' and args.representation=='whole':
         hype_loss = ContrastiveLoss(temperature=args.temperature)
-        params_to_pretrain.extend(hype_loss.parameters())
-        models_to_save.append(hype_loss)
+    elif args.aux_task=='im_matching' and args.representation=='slot':
+        hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                   temperature=args.temperature, \
+                                   comparison='im_im', \
+                                   im_blocks=None
+                                    ).to(device)
+    else:
+        raise AssertionError('There are only three types of aux_tasks that require special loss')
+
+    params_to_pretrain.extend(hype_loss.parameters())
+    models_to_save.append(hype_loss)
+
+    ''' scorer '''
+    if args.representation=='slot':
+        simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
+                                           comparison='eval', \
+                                           iters=50, reg=0.1, temperature=1, \
+                                           im_blocks=None, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
+        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+        # TODO: hard coded number of examples
+        # im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
+                                        # num_obj=args.num_slots).to(device)
+    else:
+        simple_val_scorer = CosineScorer(temperature=1).to(device)
+        im_im_scorer_model = MLPMeanScore(args.hidden_size*args.num_slots, args.hidden_size, \
+                                        rep_type = args.representation,\
+                                        blocks = None).to(device)
+    params_to_finetune = list(im_im_scorer_model.parameters())
+    models_to_save.append(im_im_scorer_model)
 
     # optimizer
     optfunc = {
@@ -260,7 +305,7 @@ if __name__ == "__main__":
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
 
-    def pretrain(epoch, n_steps=100):
+    def pretrain(epoch, n_steps=500):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train()
@@ -298,17 +343,16 @@ if __name__ == "__main__":
             # Learn representations of images
             # flatten the n_way and n_support+n_query dimensions
             image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
-            
-            if args.aux_task=='caption_slot' or args.aux_task=='caption_image':
+            if args.aux_task=='caption':
                 n_total = image_slot.shape[1]
                 hint_seq = hint_seq.reshape(n_way * n_total, max_hint_length);
                 hint_mask = hint_mask.reshape(n_way * n_total, -1)
                 hint_length = hint_length.reshape(n_way * n_total)
-                if (args.aux_task=='caption_slot'):
+                if (args.representation=='slot'):
                     assert(len(image_slot.shape)==4), "The examples_full should have shape: n_way X (n_support+n_query) X num_slots X dim"
                     image_slot = image_slot.reshape(n_way * n_total, args.num_slots, args.hidden_size);
                     hypo_out, attns = hint_model(image_slot, hint_seq, hint_length)
-                else:
+                elif (args.representation=='whole'):
                     assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
                     image_slot = image_slot.reshape(n_way * n_total, args.hidden_size);
                     hypo_out, attns = hint_model(image_slot, hint_seq, hint_length)
@@ -316,9 +360,9 @@ if __name__ == "__main__":
                 seq_len = hint_seq.size(1)
                 
                 if (args.visualize_attns):
-                    if (args.aux_task=='caption_slot'):
+                    if (args.representation=='slot'):
                         plt.subplot(111).imshow(attns[2].detach().t())
-                    elif(args.aux_task=='caption_image'):
+                    elif(args.representation=='whole'):
                         fig, axes = plt.subplots(2, 7)
                         for i, a in enumerate(attns[2].detach()):
                             axes[i//7][i%7].imshow(a.reshape(56, 56))
@@ -349,7 +393,7 @@ if __name__ == "__main__":
                 metric = {'acc': (hypo_pred==hypo_gt).float().mean().item()} 
                 aux_loss_total += hypo_loss.item()
                 cls_acc += metric['acc']
-            elif args.aux_task=='matching_slot' or args.aux_task=='matching_image':
+            elif args.aux_task=='cross_modal_matching':
                 n_total = image_slot.shape[1]
                 hint_seq = hint_seq.flatten(0, 1);
                 hint_mask = hint_mask.flatten(0, 1);
@@ -359,37 +403,48 @@ if __name__ == "__main__":
                 else:
                     hint_rep = hint_model(hint_seq, hint_length) 
 
-                if (args.aux_task=='matching_slot'):
+                if (args.representation=='slot'):
                     assert(len(image_slot.shape)==4), "The examples_full should have shape: n_way X (n_shot+n_query) X num_slots X dim"
                     assert(hint_rep.shape==(n_way * n_total, max_hint_length, args.hidden_size))
                     matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
                                                             y_mask=((hint_seq==special_idx["sos_index"]) | \
                                                                     (hint_seq==special_idx["eos_index"]) | \
                                                                     (hint_seq==special_idx["pad_index"])));
-                else:
+                elif (args.representation=='whole'):
                     assert(len(image_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
                     assert(hint_rep.shape==(n_way * n_total, args.hidden_size))
                     hypo_loss, metric = hype_loss(im=image_slot, s=hint_rep)
+                else:
+                    raise ValueError('Invalid representation format name')
                 
                 if args.visualize_attns:
                     fig = plt.figure()
                     ax = plt.subplot(111)
-                    im = ax.imshow(matching[2][0].detach().cpu(), vmin=0, vmax=1)
+                    im = ax.imshow(matching[0][0].detach().cpu(), vmin=0)
                     ylabels = list(range(args.num_slots))
                     ax.set_xticks(np.arange(len(hint_seq[0])))
-                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=90)
+                    ax.set_xticklabels([train_i2w[h.item()] for h in hint_seq[0]], rotation=45)
+                    # ax.set_xticks(np.arange(len(xlabels)))
+                    # ax.set_xticklabels(xlabels)
                     ax.set_yticks(np.arange(len(ylabels)))
                     ax.set_yticklabels(ylabels)
                     ax.set_aspect('auto')
-                    fig.colorbar(im, ax=ax)
+                    plt.colorbar(im, ax=ax)
                     plt.show()
 
-                loss = hypo_loss + spread_loss(image_slot.flatten(0, 1))
+                loss = hypo_loss
                 aux_loss_total += hypo_loss.item()
-                cls_acc += (metric['part_acc_im_lang'] + metric['part_acc_lang_im'])/2
+                cls_acc += (metric['acc_im_lang'] + metric['acc_lang_im'])/2
+            elif args.aux_task=='im_matching':
+                matching, hypo_loss, metric = hype_loss(image_slot)
+                loss = hypo_loss
+                aux_loss_total += hypo_loss.item()
+                cls_acc += metric['acc']
             else:
                 raise ValueError("invalid auxiliary task name")
 
+            if args.visualize_attns:
+                continue
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
             pretrain_optimizer.step()
@@ -405,6 +460,38 @@ if __name__ == "__main__":
         pbar.close()
         print('====> {:>12}\tEpoch: {:>3}\tAuxiliary Loss: {:.4f} Auxiliary Acc: {:.4f}'.format('(train)', epoch, aux_loss_total, cls_acc))
         return loss, metric
+
+    def simple_eval(epoch):
+        for m in models_to_save:
+            if (isinstance(m, nn.Module)):
+                m.eval()
+
+        concept_avg_meter = AverageMeter(raw=True)
+
+        with torch.no_grad():
+            for batch_idx, (x, target, (lang, lang_length, lang_mask, _)) in enumerate(val_loader):
+                # x size: [n_way, n_support + n_query, dim, w, h] 
+                n_way = x.size(0)
+                n_query = x.size(1) - args.n_shot
+                x = x.to(device)
+                target = target.to(device)
+
+                # Learn representations of images and examples
+                image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
+
+                if "_image" in args.aux_task:
+                    image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
+
+                score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
+                y_hat = torch.argmax(score, dim=-1).cpu().numpy()
+                y_query = np.repeat(range(n_way), n_query).astype(np.uint8)
+                accuracy = accuracy_score(y_query, y_hat)
+                concept_avg_meter.update(accuracy, n_way*n_query, raw_scores=(y_hat==y_query))
+        
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
+            '(test)', epoch, concept_avg_meter.avg))
+
+        return concept_avg_meter.avg, concept_avg_meter.raw_scores
 
     def finetune(epoch, n_steps=100):
         for m in models_to_save:
@@ -489,17 +576,44 @@ if __name__ == "__main__":
     best_test_acc = 0
     best_test_same_acc = 0
     best_test_acc_ci = 0
+    best_simple_eval_acc = 0
     metrics = defaultdict(lambda: [])
+
+    if args.load_checkpoint:
+        with open(os.path.join(args.exp_dir, 'metrics.json')) as f:
+            metrics = json.load(f)
+            metrics = defaultdict(list, metrics)
+            print('record loaded correctly')
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
 
-    for epoch in range(1, args.pt_epochs+1):
-        train_loss, pt_metric = pretrain(epoch)
-        for k, v in pt_metric.items():
-            metrics[k].append(v)
+    if args.aux_task=='imagenet_pretrain':
+        simple_val_acc = simple_eval(1)
+        metrics['simple_val_acc'].append(simple_val_acc)
+
         save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
         if args.save_checkpoint:
             save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=True, folder=args.exp_dir)
+
+    else:
+        for epoch in range(1, args.pt_epochs+1):
+            train_loss, pt_metric = pretrain(epoch)
+            for k, v in pt_metric.items():
+                metrics[k].append(v)
+
+            simple_val_acc, simple_val_acc_raw = simple_eval(epoch)
+            metrics['simple_val_acc'].append(simple_val_acc)
+            metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc)/np.sqrt(len(simple_val_acc)))
+
+            save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
+
+            is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
+            if is_best_epoch:
+                best_simple_eval_acc = metrics['simple_val_acc'][-1]
+
+            if args.save_checkpoint:
+                save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
+        
 
     if args.freeze_slots:
         # for m in models_to_save:
@@ -525,9 +639,12 @@ if __name__ == "__main__":
             best_test_acc_ci = test_acc_ci
 
         if args.save_checkpoint:
-            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
+            save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, \
+                             is_best=is_best_epoch, folder=args.exp_dir,\
+                             filename='checkpoint_finetuned.pth.tar',\
+                             best_filename='finetuned_model_best.pth.tar')
 
-        metrics['train_acc'].append(train_loss)
+        metrics['train_loss'].append(train_loss)
         metrics['test_acc'].append(test_acc)
         metrics['test_acc_ci'].append(test_acc_ci)
 

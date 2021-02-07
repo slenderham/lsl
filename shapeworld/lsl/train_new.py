@@ -90,6 +90,9 @@ if __name__ == "__main__":
     parser.add_argument('--visualize_attns',
                         action='store_true',
                         help='If true, visualize attention masks of slots and matching/caption if applicable')
+    parser.add_argument('--visualize_latent_state',
+                         action='store_true',
+                         help='If true, preform PCA and visualize structure of slot latent states.')
     parser.add_argument('--temperature',
                         default=0.5,
                         type=float,

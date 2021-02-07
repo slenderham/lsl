@@ -417,7 +417,7 @@ class ConvNetSNopool(nn.Module):
 class ResNet(nn.Module):
     maml = False  # Default
 
-    def __init__(self, block, list_of_num_layers, list_of_out_dims, flatten=True):
+    def __init__(self, block, list_of_num_layers, list_of_out_dims, half_reses=[False,False,False,False], flatten=True):
         # list_of_num_layers specifies number of layers in each stage
         # list_of_out_dims specifies number of output channel for each stage
         super(ResNet, self).__init__()
@@ -440,7 +440,7 @@ class ResNet(nn.Module):
         indim = 64
         for i in range(4):
             for j in range(list_of_num_layers[i]):
-                B = block(indim, list_of_out_dims[i], False)
+                B = block(indim, list_of_out_dims[i], half_res=half_reses[i])
                 trunk.append(B)
                 indim = list_of_out_dims[i]
 
@@ -458,6 +458,84 @@ class ResNet(nn.Module):
         out = self.trunk(x)
         return out
 
+
+class FPN(nn.Module):
+    def __init__(self, hidden_size, fpm_dim):
+        super().__init__()
+        conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        bn1 = nn.BatchNorm2d(64)
+        relu = nn.ReLU()
+        init_layer(conv1)
+        init_layer(bn1)
+        pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        self.layers = nn.ModuleList([nn.Sequential(conv1, bn1, relu, pool1)])
+
+        indim = 64
+        list_of_num_layers = [2,2,2,2]
+        list_of_out_dims = [64, 128, 256, 512]
+        for i in range(4):
+            for j in range(list_of_num_layers[i]):
+                B = SimpleBlock(indim, list_of_out_dims[i], half_res=True)
+                self.layers.append(B);
+                indim = list_of_out_dims[i]
+        
+        self.toplayer = nn.Conv2d(512, fpm_dim, kernel_size=1, stride=1, padding=0) 
+
+        # Lateral layers
+        self.latlayer1 = nn.Conv2d(512, fpm_dim, kernel_size=1, stride=1, padding=0)
+        self.latlayer2 = nn.Conv2d(256, fpm_dim, kernel_size=1, stride=1, padding=0)
+        self.latlayer3 = nn.Conv2d(128, fpm_dim, kernel_size=1, stride=1, padding=0)
+        self.latlayer4 = nn.Conv2d(64, fpm_dim, kernel_size=1, stride=1, padding=0)
+
+        self.fusionlayer = nn.Sequential(
+            nn.Conv2d(4*fpm_dim, hidden_size, kernel_size=3, bias=False),
+            nn.BatchNorm2d(4*fpm_dim),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden_size, hidden_size, kernel_size=1, bias=False)
+        )
+
+        self.final_feat_dim = 54
+
+
+    def _upsample_add(self, x, y):
+        '''Upsample and add two feature maps.
+        Args:
+          x: (Variable) top feature map to be upsampled.
+          y: (Variable) lateral feature map.
+        Returns:
+          (Variable) added feature map.
+        Note in PyTorch, when input size is odd, the upsampled feature map
+        with `F.upsample(..., scale_factor=2, mode='nearest')`
+        maybe not equal to the lateral feature map size.
+        e.g.
+        original input size: [N,_,15,15] ->
+        conv2d feature map size: [N,_,8,8] ->
+        upsampled feature map size: [N,_,16,16]
+        So we choose bilinear upsample which supports arbitrary output sizes.
+        '''
+        _,_,H,W = y.size()
+        return F.interpolate(x, size=(H,W), mode='bilinear', align_corners=True) + y
+
+    def forward(self, x):
+        c0 = self.layers[0](x); # 64 X H/4 X H/4
+        c1 = self.layers[1](c0); # 64 X H/8 X H/8
+        c2 = self.layers[2](c1); # 128 X H/16 X H/16
+        c3 = self.layers[3](c2); # 256 X H/32 X H/32
+        c4 = self.layers[4](c3); # 512 X H/64 X H/64
+        
+        p5 = self.toplayer(c4) # fpm_dim X H/32 X H/32
+        p4 = self._upsample_add(p5, self.latlayer1(c4)) # fpm_dim X H/32 X H/32
+        p3 = self._upsample_add(p4, self.latlayer2(c3)) # fpm_dim X H/16 X H/16
+        p2 = self._upsample_add(p3, self.latlayer3(c2)) # fpm_dim X H/8 X H/8
+        p1 = self._upsample_add(p2, self.latlayer4(c1)) # fpm_dim X H/4 X H/4
+
+        fusion = torch.cat([p4, p3, p2, p1], dim=1)
+        fusion = self.fusionlayer(fusion)
+
+        return fusion
+
+    
 
 def Conv4():
     return ConvNet(4)
@@ -508,3 +586,10 @@ def ResNet50(flatten=True):
 
 def ResNet101(flatten=True):
     return ResNet(BottleneckBlock, [3, 4, 23, 3], [256, 512, 1024, 2048], flatten)
+
+def VGG16():
+    model = models.vgg16_bn(pretrained=False).features;
+    model.add_module('avgpool', nn.AvgPool2d(3, 2));
+    model.add_module('flatten', Flatten());
+    model.final_feat_dim = 4608;
+    return model;

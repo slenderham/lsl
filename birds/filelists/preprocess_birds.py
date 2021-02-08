@@ -19,7 +19,7 @@ import scipy
 LR_HR_RETIO = 4
 IMSIZE = 256
 LOAD_SIZE = int(IMSIZE * 76 / 64)
-BIRD_DIR = 'Data/birds'
+BIRD_DIR = './'
 
 def colorize(img):
     if img.ndim == 2:
@@ -42,7 +42,6 @@ def transform(image, image_size, is_crop, bbox):
     transformed_image =\
         scipy.misc.imresize(image, [image_size, image_size], 'bicubic')
     return np.array(transformed_image)
-
 
 def imread(path):
     img = scipy.misc.imread(path)
@@ -78,7 +77,6 @@ def load_filenames(data_dir):
     print('Load filenames from: %s (%d)' % (filepath, len(filenames)))
     return filenames
 
-
 def load_bbox(data_dir):
     bbox_path = os.path.join(data_dir, 'CUB_200_2011/bounding_boxes.txt')
     df_bounding_boxes = pd.read_csv(bbox_path,
@@ -100,7 +98,6 @@ def load_bbox(data_dir):
         filename_bbox[key] = bbox
     #
     return filename_bbox
-
 
 def save_data_list(inpath, outpath, filenames, filename_bbox):
     hr_images = []
@@ -131,20 +128,13 @@ def save_data_list(inpath, outpath, filenames, filename_bbox):
         pickle.dump(lr_images, f_out)
         print('save to: ', outfile)
 
-
 def convert_birds_dataset_pickle(inpath):
     # Load dictionary between image filename to its bbox
     filename_bbox = load_bbox(inpath)
     # ## For Train data
-    train_dir = os.path.join(inpath, 'train/')
-    train_filenames = load_filenames(train_dir)
-    save_data_list(inpath, train_dir, train_filenames, filename_bbox)
-
-    # ## For Test data
-    test_dir = os.path.join(inpath, 'test/')
-    test_filenames = load_filenames(test_dir)
-    save_data_list(inpath, test_dir, test_filenames, filename_bbox)
-
+    outpath = os.path.join(inpath, 'preprocessed/')
+    filenames = load_filenames(inpath)
+    save_data_list(inpath, outpath, filenames, filename_bbox)
 
 if __name__ == '__main__':
     convert_birds_dataset_pickle(BIRD_DIR)

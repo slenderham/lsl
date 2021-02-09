@@ -302,7 +302,7 @@ if __name__ == "__main__":
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
 
-    def pretrain(epoch, n_steps=500):
+    def pretrain(epoch, n_steps=100):
         for m in models_to_save:
             if (isinstance(m, nn.Module)):
                 m.train()
@@ -476,10 +476,12 @@ if __name__ == "__main__":
                 # Learn representations of images and examples
                 image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
 
-                if "_image" in args.aux_task:
-                    image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
+                support = image_slot[:, :args.n_shot].reshape(n_way, args.n_shot, args.num_slots, args.hidden_size).flatten(0, 1) # n_way*n_shot, n_s, h
+                query = x[:, args.n_shot:].flatten(0, 1) # n_way*n_query, n_s, h
+                support_expanded = support.unsqueeze(1).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
+                query_expanded = query.unsqueeze(0).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
 
-                score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
+                score = simple_val_scorer(support_expanded, query_expanded).reshape(n_way. args.n_shot, n_way*n_query).mean(1).t() # this will be of size (n_way*n_query, n_way)
                 y_hat = torch.argmax(score, dim=-1).cpu().numpy()
                 y_query = np.repeat(range(n_way), n_query).astype(np.uint8)
                 accuracy = accuracy_score(y_query, y_hat)
@@ -509,9 +511,6 @@ if __name__ == "__main__":
 
             # Learn representations of images and examples
             image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
-
-            if "_image" in args.aux_task:
-                image_slot = image_slot.reshape(n_way, n_query+args.n_shot, 1, args.hidden_size)
 
             score = im_im_scorer_model(image_slot, args.n_shot).squeeze() # this will be of size (n_way*n_query, n_way)
             y_query = torch.from_numpy(np.repeat(range(n_way), n_query)).to(device)

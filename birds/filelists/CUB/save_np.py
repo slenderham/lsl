@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.skip_preprocess:
+    if not args.skip_preprocess:
         # load bounding boxes into filename_bbox
         bbox_path = os.path.join(args.filelist_prefix, 'CUB_200_2011/bounding_boxes.txt')
         df_bounding_boxes = pd.read_csv(bbox_path,

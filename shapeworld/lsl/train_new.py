@@ -793,7 +793,7 @@ if __name__ == "__main__":
             else:
                 metrics['simple_val_acc'].append(simple_val_acc)
                 metrics['simple_val_auc'].append(simple_val_auc)
-                metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc)/np.sqrt(len(simple_val_acc)))
+                metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc_raw)/np.sqrt(len(simple_val_acc_raw)))
 
             save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
 

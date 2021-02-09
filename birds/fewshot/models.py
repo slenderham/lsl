@@ -1079,7 +1079,7 @@ class SinkhornScorer(Scorer):
         
         return matching, scores
 
-    def forward_im_im(self, x):
+    def forward_im_im(self, x, n_shot):
         b, n_s, h = x.shape
         x = x.reshape(b, n_s, h)
         x_expand = torch.repeat_interleave(x, repeats=b, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
@@ -1447,6 +1447,32 @@ class TransformerAgg(Scorer):
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
         return self.base_scorer(x, y)[1]+self.bias
+
+class TransformerAgg(Scorer):
+    def __init__(self, hidden_size):
+        super(TransformerAgg, self).__init__()
+        self.hidden_size = hidden_size
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=hidden_size, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.base_scorer = SinkhornScorer(hidden_size, iters=10, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
+        self.bias = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, n_shot):
+        n_way, n_total, num_slot, h = x.shape
+        x = x.flatten(0, 1).transpose(0, 1);
+        assert(x.shape==(num_slot, n_way*n_total, h))
+        x = self.model(x).transpose(0, 1)
+        # x.shape = n_way*n_total, h
+        x = x.reshape(n_way, n_total, num_slot, self.hidden_size)
+        support = x[:, :n_shot].reshape(n_way, n_shot, num_slot, self.hidden_size).flatten(0, 1) # n_way*n_shot, n_s, h
+        query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, n_s, h
+        support_expanded = support.unsqueeze(1).expand(n_way*n_shot, n_way*(n_total-n_shot), num_slot, h).flatten(0, 1)
+        query_expanded = query.unsqueeze(0).expand(n_way*n_shot, n_way*(n_total-n_shot), num_slot, h).flatten(0, 1)
+        scores = self.base_scorer(support_expanded, query_expanded)
+        scores = scores.reshape(n_way, n_shot, n_way*(n_total-n_shot)).mean(1).t()
+        assert(scores.shape==(n_way*(n_total-n_shot), n_way))
+        return scores
+
 
 class ContrastiveLoss(Scorer):
     """

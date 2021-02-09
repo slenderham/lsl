@@ -78,9 +78,6 @@ if __name__ == "__main__":
     parser.add_argument('--skip_eval',
                         action="store_true",
                         help="If true, skip the zero shot evaluation and only save the pretrained features.")
-    parser.add_argument('--data_dir',
-                        default=None,
-                        help='Specify custom data directory (must have shapeworld folder)')
     parser.add_argument('--pt_lr',
                         type=float,
                         default=0.001,
@@ -406,7 +403,7 @@ if __name__ == "__main__":
                 if (args.representation=='slot'):
                     assert(len(image_slot.shape)==4), "The examples_full should have shape: n_way X (n_shot+n_query) X num_slots X dim"
                     assert(hint_rep.shape==(n_way * n_total, max_hint_length, args.hidden_size))
-                    matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, word_idx=hint_seq, \
+                    matching, hypo_loss, metric = hype_loss(x=image_slot.flatten(0, 1), y=hint_rep, \
                                                             y_mask=((hint_seq==special_idx["sos_index"]) | \
                                                                     (hint_seq==special_idx["eos_index"]) | \
                                                                     (hint_seq==special_idx["pad_index"])));

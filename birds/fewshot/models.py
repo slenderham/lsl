@@ -1415,40 +1415,6 @@ class SetCriterion(nn.Module):
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 class TransformerAgg(Scorer):
-    def __init__(self, hidden_size, input_size=None):
-        super(TransformerAgg, self).__init__()
-        
-        self.hidden_size = hidden_size
-        self.input_size = input_size
-
-        if (input_size is not None):
-            self.proj = nn.Linear(input_size, hidden_size)
-        else:
-            self.proj = nn.Identity()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
-        self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
-        self.base_scorer = SinkhornScorer(hidden_size, iters=10, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
-        self.bias = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x, y):
-        b, n_ex, num_rel, h = x.shape
-        assert(self.input_size==None or h==self.input_size)
-        assert(y.shape==(b, num_rel, h))
-        x = self.proj(x)
-        y = self.proj(y)
-        x = x.flatten(1, 2)
-        x += self.image_id[:,0:1,:]
-        y += self.image_id[:,1:2,:]
-        x = x.transpose(0, 1)
-        y = y.transpose(0, 1)
-        whole_rep = self.model(torch.cat([x, y], dim=0))
-        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
-        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
-        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
-        return self.base_scorer(x, y)[1]+self.bias
-
-class TransformerAgg(Scorer):
     def __init__(self, hidden_size):
         super(TransformerAgg, self).__init__()
         self.hidden_size = hidden_size
@@ -1468,7 +1434,7 @@ class TransformerAgg(Scorer):
         query = x[:, n_shot:].flatten(0, 1) # n_way*n_query, n_s, h
         support_expanded = support.unsqueeze(1).expand(n_way*n_shot, n_way*(n_total-n_shot), num_slot, h).flatten(0, 1)
         query_expanded = query.unsqueeze(0).expand(n_way*n_shot, n_way*(n_total-n_shot), num_slot, h).flatten(0, 1)
-        scores = self.base_scorer(support_expanded, query_expanded)
+        scores = self.base_scorer(support_expanded, query_expanded)[1]
         scores = scores.reshape(n_way, n_shot, n_way*(n_total-n_shot)).mean(1).t()
         assert(scores.shape==(n_way*(n_total-n_shot), n_way))
         return scores

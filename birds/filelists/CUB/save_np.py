@@ -97,7 +97,7 @@ if __name__ == "__main__":
             bird_img_fname = os.path.join(class_dir, bird_img)
             img = Image.open(bird_img_fname).convert("RGB")
 
-            if args.skip_preprocess:
+            if not args.skip_preprocess:
                 transform(img, LOAD_SIZE, filename_bbox[bird_img_fname])
 
             full_bird_img_fname = os.path.join(

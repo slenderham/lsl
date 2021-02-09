@@ -481,7 +481,7 @@ if __name__ == "__main__":
                 support_expanded = support.unsqueeze(1).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
                 query_expanded = query.unsqueeze(0).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
 
-                score = simple_val_scorer(support_expanded, query_expanded)[1].reshape(n_way. args.n_shot, n_way*n_query).mean(1).t() # this will be of size (n_way*n_query, n_way)
+                score = simple_val_scorer(support_expanded, query_expanded)[1].reshape(n_way, args.n_shot, n_way*n_query).mean(1).t() # this will be of size (n_way*n_query, n_way)
                 y_hat = torch.argmax(score, dim=-1).cpu().numpy()
                 y_query = np.repeat(range(n_way), n_query).astype(np.uint8)
                 accuracy = accuracy_score(y_query, y_hat)

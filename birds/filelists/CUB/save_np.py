@@ -68,12 +68,12 @@ if __name__ == "__main__":
 
     if not args.skip_preprocess:
         # load bounding boxes into filename_bbox
-        bbox_path = os.path.join(args.filelist_prefix, 'CUB_200_2011/bounding_boxes.txt')
+        bbox_path = 'CUB_200_2011/bounding_boxes.txt'
         df_bounding_boxes = pd.read_csv(bbox_path,
                                         delim_whitespace=True,
                                         header=None).astype(int)
         #
-        filepath = os.path.join(args.filelist_prefix, 'CUB_200_2011/images.txt')
+        filepath = 'CUB_200_2011/images.txt'
         df_filenames = pd.read_csv(filepath, delim_whitespace=True, header=None)
         filenames = df_filenames[1].tolist()
         print('Total filenames: ', len(filenames), filenames[0])

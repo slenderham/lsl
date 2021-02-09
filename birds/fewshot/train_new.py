@@ -477,7 +477,7 @@ if __name__ == "__main__":
                 image_slot = image_part_model(x, is_ex=True, visualize_attns=args.visualize_attns)
 
                 support = image_slot[:, :args.n_shot].reshape(n_way, args.n_shot, args.num_slots, args.hidden_size).flatten(0, 1) # n_way*n_shot, n_s, h
-                query = x[:, args.n_shot:].flatten(0, 1) # n_way*n_query, n_s, h
+                query = image_slot[:, args.n_shot:].flatten(0, 1) # n_way*n_query, n_s, h
                 support_expanded = support.unsqueeze(1).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
                 query_expanded = query.unsqueeze(0).expand(n_way*args.n_shot, n_way*n_query, args.num_slots, args.hidden_size).flatten(0, 1)
 

@@ -109,4 +109,3 @@ if __name__ == "__main__":
 
         np_fname = os.path.join(class_dir, "img.npz")
         np.savez_compressed(np_fname, **bird_imgs_np)
-        print(bird_class)

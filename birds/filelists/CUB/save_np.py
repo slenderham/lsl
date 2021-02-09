@@ -98,7 +98,7 @@ if __name__ == "__main__":
             img = Image.open(bird_img_fname).convert("RGB")
 
             if not args.skip_preprocess:
-                transform(img, LOAD_SIZE, filename_bbox[bird_img_fname])
+                transform(img, LOAD_SIZE, filename_bbox[os.path.join(bird_class, bird_img)])
 
             full_bird_img_fname = os.path.join(
                 args.filelist_prefix, args.original_cub_dir, bird_class, bird_img

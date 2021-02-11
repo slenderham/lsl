@@ -237,6 +237,8 @@ class RelationalSlotAttention(nn.Module):
         elif self.cross_slot_norm=='nonlinear':
             b, n_s, d = x.shape
             logits = torch.einsum('bid, bjd->bij', x, x) * self.scale # batch, slot, slot
+            diag_mask = torch.eye(n_s).reshape(1, n_s, n_s).expand(b, n_s, n_s).to(x.device) > 0.5
+            logits[diag_mask] = -1e10
             weights = logits.softmax(dim= -1) # batch, slot, slot
             x = x-(weights.reshape(b, n_s, n_s, 1)*x.reshape(b, n_s, 1, d)).sum(2)
         return x

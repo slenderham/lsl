@@ -240,7 +240,7 @@ class RelationalSlotAttention(nn.Module):
             diag_mask = torch.eye(n_s).reshape(1, n_s, n_s).expand(b, n_s, n_s).to(x.device) > 0.5
             logits[diag_mask] = -1e10
             weights = logits.softmax(dim= -1) # batch, slot, slot
-            x = x-self.scale*(weights.reshape(b, n_s, n_s, 1)*x.reshape(b, 1, n_s, d)).sum(2)
+            x = x-(weights.reshape(b, n_s, n_s, 1)*x.reshape(b, 1, n_s, d)).sum(2)
         return x
 
     def _rel_msg(self, x):

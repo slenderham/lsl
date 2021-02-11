@@ -296,7 +296,7 @@ class RelationalSlotAttention(nn.Module):
               ).reshape(b, n_s, d)
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
 
-            obj_slots = self.cross_slot_norm(obj_slots)
+            obj_slots = self.slot_norm(obj_slots)
 
         return obj_slots, attns
 

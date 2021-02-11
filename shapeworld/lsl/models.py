@@ -188,7 +188,7 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = 'nonlinear'):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
@@ -196,6 +196,10 @@ class RelationalSlotAttention(nn.Module):
         self.dim = dim
         self.scale = dim ** -0.5
         self.gumbel_attention = gumbel_attention
+        self.cross_slot_norm = cross_slot_norm
+        assert(cross_slot_norm in [None, 'linear', 'nonlinear'])
+        # linear norm centers and scales the slots
+        # nonlinear uses one step gradient descent using uniform component of infonce
 
         self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
         self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
@@ -221,6 +225,21 @@ class RelationalSlotAttention(nn.Module):
         self.norm_input  = nn.LayerNorm(dim)
         self.norm_obj_slots = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)        
+
+    def slot_norm(self, x):
+        if self.cross_slot_norm is None:
+            pass
+        elif self.cross_slot_norm=='linear':
+            b, n_s, d = x.shape
+            mu = x.mean(1,2).reshape(b, 1, 1).expand(b, n_s, d)
+            sigma = x.std(1,2).reshape(b, 1, 1).expand(b, n_s, d)
+            x = (x-mu)/(sigma+1e-6)
+        elif self.cross_slot_norm=='nonlinear':
+            b, n_s, d = x.shape
+            logits = torch.einsum('bid, bjd->bij', x, x) * self.scale # batch, slot, slot
+            weights = logits.softmax(dim= -1) # batch, slot, slot
+            x = x-(weights.reshape(b, n_s, n_s, 1)*x.reshape(b, n_s, 1, d)).sum(2)
+        return x
 
     def _rel_msg(self, x):
         b, n_s, h = x.shape
@@ -276,6 +295,8 @@ class RelationalSlotAttention(nn.Module):
                 slots_prev.reshape(b*n_s, d)
               ).reshape(b, n_s, d)
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
+
+            obj_slots = self.cross_slot_norm(obj_slots)
 
         return obj_slots, attns
 

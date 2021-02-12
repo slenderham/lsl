@@ -202,7 +202,7 @@ class RelationalSlotAttention(nn.Module):
         # nonlinear uses one step gradient descent using uniform component of infonce
 
         self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim).log())
+        self.slots_sigma = nn.Parameter((torch.ones(1, 1, dim)*self.scale).log())
 
         self.to_q = nn.Linear(dim, dim, bias=False)
         self.to_k = nn.Linear(dim, dim, bias=False)

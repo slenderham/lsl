@@ -188,7 +188,7 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = 'nonlinear'):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = None):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
@@ -201,8 +201,8 @@ class RelationalSlotAttention(nn.Module):
         # linear norm centers and scales the slots
         # nonlinear uses one step gradient descent using uniform component of infonce
 
-        self.slots_mu = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
-        self.slots_sigma = nn.Parameter(torch.FloatTensor(1, 1, dim).uniform_(-1, 1)*self.scale)
+        self.slots_mu = nn.Parameter(torch.zeros(1, 1, dim))
+        self.slots_sigma = nn.Parameter(torch.ones(1, 1, dim).log())
 
         self.to_q = nn.Linear(dim, dim, bias=False)
         self.to_k = nn.Linear(dim, dim, bias=False)

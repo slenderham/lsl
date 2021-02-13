@@ -354,7 +354,7 @@ if __name__ == "__main__":
     if args.representation=='slot':
         simple_val_scorer = SinkhornScorer(hidden_dim=args.hidden_size, \
                                            comparison='eval', \
-                                           iters=50, reg=0.1, temperature=1, \
+                                           iters=50, reg=0.1, temperature=1.0, \
                                            im_blocks=None, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
         im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
         # TODO: hard coded number of examples

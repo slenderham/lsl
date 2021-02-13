@@ -1080,7 +1080,7 @@ class SinkhornScorer(Scorer):
         self.comparison = comparison
         self.im_blocks = im_blocks
         self.partial_mass = partial_mass
-        self.temperature = kwargs['temperature']
+        self.temperature = kwargs.get('temperature', nn.Parameter(torch.log(torch.ones(1)*0.1)))
         if (self.comparison=='im_lang'):
             if im_blocks is None:
                 self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
@@ -1286,9 +1286,9 @@ class SinkhornScorer(Scorer):
         Z = Z.exp() 
         
         if (alpha_x is not None):
-            final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/self.temperature
+            final_scores = (scores*Z[:,:-1,:-1]).sum(dim=(1,2))/torch.exp(self.temperature)
         else:
-            final_scores = (scores*Z).sum(dim=(1,2))/self.temperature
+            final_scores = (scores*Z).sum(dim=(1,2))/torch.exp(self.temperature)
         
         return Z, final_scores
 
@@ -1391,9 +1391,10 @@ class ContrastiveLoss(Scorer):
     Compute contrastive loss
     """
 
-    def __init__(self, temperature=0.1, cross_domain_weight=0.5):
+    def __init__(self, temperature=None, cross_domain_weight=0.5):
         super(ContrastiveLoss, self).__init__()
-        self.sim = CosineScorer(temperature)
+        self.temperature = temperature if temperature is not None else nn.Parameter(torch.log(torch.ones(1)*0.1))
+        self.sim = CosineScorer(temperature=1)
         self.cross_domain_weight = cross_domain_weight
 
     def forward(self, im, s):
@@ -1402,7 +1403,7 @@ class ContrastiveLoss(Scorer):
         n = im.shape[0]
         n_ex = im.shape[1]
 
-        scores = self.sim.score_im_s(im, s) #--> N x N x n_ex
+        scores = self.sim.score_im_s(im, s)/torch.exp(self.temperature) #--> N x N x n_ex
         metric = {}
         pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
         pos = scores.masked_select(pos_mask)

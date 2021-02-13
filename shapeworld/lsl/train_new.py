@@ -334,15 +334,13 @@ if __name__ == "__main__":
         hype_loss = SetPredLoss().to(device)
     elif args.aux_task=='cross_modal_matching' and args.representation=='slot':
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
-                                   temperature=args.temperature, \
                                    comparison='im_lang', \
                                    im_blocks=None
                                     ).to(device)
     elif args.aux_task=='cross_modal_matching' and args.representation=='whole':
-        hype_loss = ContrastiveLoss(temperature=args.temperature)
+        hype_loss = ContrastiveLoss()
     elif args.aux_task=='im_matching' and args.representation=='slot':
         hype_loss = SinkhornScorer(hidden_dim=args.hidden_size, \
-                                   temperature=args.temperature, \
                                    comparison='im_im', \
                                    im_blocks=None
                                     ).to(device)

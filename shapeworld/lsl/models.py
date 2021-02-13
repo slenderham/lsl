@@ -1073,14 +1073,15 @@ class BilinearScorer(DotPScorer):
         return super(BilinearScorer, self).batchwise_score(x, wy)
 
 class SinkhornScorer(Scorer):
-    def __init__(self, hidden_dim=None, iters=20, reg=0.1, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0, **kwargs):
+    def __init__(self, hidden_dim=None, iters=20, reg=None, temperature=None, cross_domain_weight=0.5, comparison='im_lang', im_blocks=[6, 30], im_dustbin=None, partial_mass=0):
         super(SinkhornScorer, self).__init__()
         assert(comparison in ['eval', 'im_im', 'im_lang'])
         self.cross_domain_weight = cross_domain_weight
         self.comparison = comparison
         self.im_blocks = im_blocks
         self.partial_mass = partial_mass
-        self.temperature = kwargs.get('temperature', nn.Parameter(torch.log(torch.ones(1)*0.1)))
+        self.reg = torch.log(reg) if reg is not None else nn.Parameter(torch.log(torch.ones(1)*0.1)))
+        self.temperature = torch.log(temperature) if temperature is not None else nn.Parameter(torch.log(torch.ones(1)*0.1)))
         if (self.comparison=='im_lang'):
             if im_blocks is None:
                 self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
@@ -1102,7 +1103,6 @@ class SinkhornScorer(Scorer):
         self.base_scorer = CosineScorer(temperature=1)
         self.clip_dustbin = nn.Tanh()
         self.iters = iters
-        self.reg = reg
 
     def forward(self, *args, **kwargs):
         if self.comparison=='im_lang':
@@ -1295,7 +1295,7 @@ class SinkhornScorer(Scorer):
     def log_ipot(self, Z, log_mu, log_nu, scores_mask, iters: int):
         v = log_nu
         T = log_mu.unsqueeze(2) + log_nu.unsqueeze(1)
-        A = Z/self.reg
+        A = Z/torch.exp(self.reg)
         if scores_mask is not None:
             T = T.masked_fill(scores_mask, -1e6)
             A = A.masked_fill(scores_mask, -1e6)
@@ -1318,16 +1318,16 @@ class SinkhornScorer(Scorer):
         if scores_mask is not None:
             v = v.masked_fill(scores_mask[:,0,:], -1e6)
         for i in range(iters):
-            u += self.reg * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
+            u += torch.exp(self.reg) * (log_mu - torch.logsumexp(self.M(Z, u, v), dim=2))
             if scores_mask is not None:
-                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
+                v += torch.exp(self.reg) * (log_nu - torch.logsumexp(self.M(Z, u, v) + scores_mask[:,0:1,:].to(Z.dtype)*1e6, dim=1))
                 v = v.masked_fill(scores_mask[:,0,:], -1e6)
             else:
-                v += self.reg * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
+                v += torch.exp(self.reg) * (log_nu - torch.logsumexp(self.M(Z, u, v), dim=1))
         return self.M(Z, u, v)
 
     def M(self, Z, u, v):
-        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / self.reg
+        return (Z + u.unsqueeze(2) + v.unsqueeze(1)) / torch.exp(self.reg)
 
 class SetPredLoss(nn.Module):
     def __init__(self):
@@ -1366,7 +1366,7 @@ class TransformerAgg(Scorer):
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size)/(hidden_size**0.5))
-        self.base_scorer = SinkhornScorer(hidden_size, iters=10, reg=0.1, comparison='eval', temperature=0.1, im_blocks=None)
+        self.base_scorer = SinkhornScorer(hidden_size, iters=10, comparison='eval', im_blocks=None)
         self.bias = nn.Parameter(torch.zeros(1))
 
     def forward(self, x, y):

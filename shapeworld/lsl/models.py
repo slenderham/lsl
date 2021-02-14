@@ -313,16 +313,13 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(3, dim, 5),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 5),
                 nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(dim, dim, 5),
                 nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 5, bias=False),
+                nn.Conv2d(dim, dim, 5),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
                 ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True),

@@ -188,7 +188,7 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = None):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = None, relative_pos_enc = True):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters
@@ -196,7 +196,7 @@ class RelationalSlotAttention(nn.Module):
         self.dim = dim
         self.scale = dim ** -0.5
         self.gumbel_attention = gumbel_attention
-        self.cross_slot_norm = cross_slot_norm
+        self.relative_pos_enc = relative_pos_enc
         assert(cross_slot_norm in [None, 'linear', 'nonlinear'])
         # linear norm centers and scales the slots
         # nonlinear uses one step gradient descent using uniform component of infonce
@@ -222,26 +222,18 @@ class RelationalSlotAttention(nn.Module):
             nn.Linear(hidden_dim, dim)
         )
 
+        if relative_pos_enc:
+            self.pos_content_weight = nn.Linear(dim, 1)
+            self.to_pos = nn.Linear(dim, 4) # 2 for center, 2 for scale
+            height = width = 48
+            self.coord = torch.cat([
+                                    torch.linspace(-1, 1, height).reshape(height, 1, 1).expand(height, width, 1),
+                                    torch.linspace(-1, 1, width).reshape(1, width, 1).expand(height, width, 1)], 
+                                dim=-1).flatten(0, 1).reshape(1, height*width, 2)
+
         self.norm_input  = nn.LayerNorm(dim)
         self.norm_obj_slots = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)        
-
-    def slot_norm(self, x):
-        if self.cross_slot_norm is None:
-            pass
-        elif self.cross_slot_norm=='linear':
-            b, n_s, d = x.shape
-            mu = x.mean(1,2).reshape(b, 1, 1).expand(b, n_s, d)
-            sigma = x.std(1,2).reshape(b, 1, 1).expand(b, n_s, d)
-            x = (x-mu)/(sigma+1e-6)
-        elif self.cross_slot_norm=='nonlinear':
-            b, n_s, d = x.shape
-            logits = torch.einsum('bid, bjd->bij', x, x) * self.scale # batch, slot, slot
-            diag_mask = torch.eye(n_s).reshape(1, n_s, n_s).expand(b, n_s, n_s).to(x.device) > 0.5
-            logits[diag_mask] = -1e10
-            weights = logits.softmax(dim= -1) # batch, slot, slot
-            x = x-(weights.reshape(b, n_s, n_s, 1)*x.reshape(b, 1, n_s, d)).sum(2)
-        return x
 
     def _rel_msg(self, x):
         b, n_s, h = x.shape
@@ -276,9 +268,22 @@ class RelationalSlotAttention(nn.Module):
             slots_prev = obj_slots
             obj_slots = self.norm_obj_slots(obj_slots)
             q = self.to_q(obj_slots)
-            # q = torch.cat(q.split(dim_split, 2), 0) # head, batch, slot, dim
+            
+            if self.relative_pos_enc:
+                q_pos = self.to_pos(obj_slots)
+                x_cent, y_cent, x_scale, y_scale = torch.split(q_pos, [1,1,1,1], dim=-1) # batch, slot, 4
+                x_cent = torch.tanh(x_cent).squeeze(-1)
+                y_cent = torch.tanh(y_cent).squeeze(-1)
+                x_scale = F.softplus(x_scale).squeeze(-1) + 1e-2
+                y_scale = F.softplus(y_scale).squeeze(-1) + 1e-2
+                pos_dots = (x_cent.pow(2).unsqueeze(2)+self.coords[:,:,0].pow(2).unsqueeze(1)+torch.einsum('bi, bj->bij', x_cent, self.coords[:,:,0]))/x_scale \
+                         + (y_cent.pow(2).unsqueeze(2)+self.coords[:,:,1].pow(2).unsqueeze(1)+torch.einsum('bi, bj->bij', y_cent, self.coords[:,:,1]))/y_scale
+                content_dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
+                pos_content_weight = torch.sigmoid(self.pos_content_weight(obj_slots))
+                dots = pos_content_weight*pos_dots + (1-pos_content_weight)*content_dots
+            else:
+                dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
 
-            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
             if self.gumbel_attention:
                 noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
                 dots = dots + noise
@@ -298,12 +303,10 @@ class RelationalSlotAttention(nn.Module):
               ).reshape(b, n_s, d)
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
 
-            obj_slots = self.slot_norm(obj_slots)
-
         return obj_slots, attns
 
 class SANet(nn.Module):
-    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True):
+    def __init__(self, im_size, num_slots=6, dim=64, iters = 3, eps = 1e-8, slot_model = 'slot_attn', use_relation = True, relative_pos_enc = True):
         super(SANet, self).__init__()
         assert(slot_model in ['slot_attn', 'conv', 'pretrained'])
         self.slot_model = slot_model
@@ -313,20 +316,24 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 5),
-                nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 5),
-                nn.ReLU(inplace=True), 
-                nn.Conv2d(dim, dim, 5),
+                nn.Conv2d(dim, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
-                ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True),
+                nn.Conv2d(dim, dim, 5, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(dim, dim, 5, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(dim, dim, 5, bias=False),
+                nn.BatchNorm2d(dim),
+                nn.ReLU(inplace=True),
             )
 
+            if not relative_pos_enc:
+                self.encoder.add_module(ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True))
             if use_relation:
-                self.slot_attn = RelationalSlotAttention(num_slots, dim, iters, eps, 2*dim)
+                self.slot_attn = RelationalSlotAttention(num_slots, dim, iters, eps, 2*dim, relative_pos_enc=relative_pos_enc)
             else:
                 self.slot_attn = SlotAttention(num_slots, dim, iters, eps, 2*dim)
             self.final_feat_dim=dim
@@ -416,7 +423,7 @@ class SANet(nn.Module):
         # plt.show()
 
 class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size, bias=True, coord_type='sine'):
+    def __init__(self, height, width, hidden_size, bias=True, coord_type='cartesian', add_conv=True):
         super(ImagePositionalEmbedding, self).__init__()
         self.coord_type = coord_type
 
@@ -427,7 +434,10 @@ class ImagePositionalEmbedding(nn.Module):
 
         if (coord_type=='cartesian'):
             self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
-            self.pos_emb = nn.Conv2d(4, hidden_size, 1, bias=bias)
+            if add_conv:
+                self.pos_emb = nn.Conv2d(4, hidden_size, 1, bias=bias)
+            else:
+                self.pos_emb = nn.Identity()
         elif (coord_type=='polar'):
             coords = []
             for xx in [x_coord_neg, x_coord_pos]:
@@ -444,9 +454,12 @@ class ImagePositionalEmbedding(nn.Module):
         else:
             raise ValueError
         
-    def forward(self, x):
+    def forward(self, x=None):
         # add positional embedding to the feature vector
-        return x+self.pos_emb(self.coords)
+        if x is not None:
+            return x+self.pos_emb(self.coords)
+        else:
+            return self.pos_emb(self.coords)
 
 ''' Text Modules '''
 

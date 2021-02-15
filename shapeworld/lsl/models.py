@@ -317,18 +317,19 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(3, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(3, 32, 5, bias=False),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(32, 32, 5, bias=False),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(32, 32, 5, bias=False),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(dim, dim, 5, bias=False),
-                nn.BatchNorm2d(dim),
+                nn.Conv2d(32, 32, 5, bias=False),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True),
+                nn.Conv2d(32, dim, 1)
             )
 
             if not relative_pos_enc:

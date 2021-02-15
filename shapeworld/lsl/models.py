@@ -272,8 +272,8 @@ class RelationalSlotAttention(nn.Module):
                 x_cent, y_cent, x_scale, y_scale = torch.split(self.to_pos(obj_slots), [1,1,1,1], dim=-1) # batch, slot, 4
                 x_cent = torch.tanh(x_cent).squeeze(-1)
                 y_cent = torch.tanh(y_cent).squeeze(-1)
-                x_scale = F.softplus(x_scale) + 1e-2
-                y_scale = F.softplus(y_scale) + 1e-2
+                x_scale = torch.sigmoid(x_scale) + 1e-2
+                y_scale = torch.sigmoid(y_scale) + 1e-2
                 coords = self.coords.expand(b, -1, -1)
                 pos_dots = -(x_cent.pow(2).unsqueeze(2)+coords[:,:,0].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', x_cent, coords[:,:,0]))/(0.5*x_scale) \
                          + -(y_cent.pow(2).unsqueeze(2)+coords[:,:,1].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', y_cent, coords[:,:,1]))/(0.5*y_scale)

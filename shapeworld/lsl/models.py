@@ -275,10 +275,10 @@ class RelationalSlotAttention(nn.Module):
                 x_scale = F.softplus(x_scale) + 1e-2
                 y_scale = F.softplus(y_scale) + 1e-2
                 coords = self.coords.expand(b, -1, -1)
-                pos_dots = -(x_cent.pow(2).unsqueeze(2)+coords[:,:,0].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', x_cent, coords[:,:,0]))/(0.1*x_scale) \
-                         + -(y_cent.pow(2).unsqueeze(2)+coords[:,:,1].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', y_cent, coords[:,:,1]))/(0.1*y_scale)
+                pos_dots = -(x_cent.pow(2).unsqueeze(2)+coords[:,:,0].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', x_cent, coords[:,:,0]))/(0.5*x_scale) \
+                         + -(y_cent.pow(2).unsqueeze(2)+coords[:,:,1].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', y_cent, coords[:,:,1]))/(0.5*y_scale)
                 content_dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
-                dots = pos_dots + content_dots # batch, slot, image loc
+                dots = (pos_dots + content_dots) / 2 # batch, slot, image loc
             else:
                 dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
 

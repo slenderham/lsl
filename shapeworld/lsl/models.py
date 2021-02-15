@@ -226,7 +226,7 @@ class RelationalSlotAttention(nn.Module):
             self.pos_content_weight = nn.Linear(dim, 1)
             self.to_pos = nn.Linear(dim, 4) # 2 for center, 2 for scale
             height = width = 48
-            self.register_buffer(torch.cat([
+            self.register_buffer('coords', torch.cat([
                                     torch.linspace(-1, 1, height).reshape(height, 1, 1).expand(height, width, 1),
                                     torch.linspace(-1, 1, width).reshape(1, width, 1).expand(height, width, 1)], 
                                 dim=-1).flatten(0, 1).reshape(1, height*width, 2))

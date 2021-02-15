@@ -316,7 +316,7 @@ class SANet(nn.Module):
 
         if (slot_model=='slot_attn'):
             self.encoder = nn.Sequential(
-                nn.Conv2d(dim, dim, 5, bias=False),
+                nn.Conv2d(3, dim, 5, bias=False),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(dim, dim, 5, bias=False),

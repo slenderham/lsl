@@ -277,8 +277,8 @@ class RelationalSlotAttention(nn.Module):
                 coords = self.coords.expand(b, -1, -1)
                 pos_dots = -(x_cent.pow(2).unsqueeze(2)+coords[:,:,0].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', x_cent, coords[:,:,0]))/0.1*x_scale \
                          + -(y_cent.pow(2).unsqueeze(2)+coords[:,:,1].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', y_cent, coords[:,:,1]))/0.1*y_scale
-                content_dots = torch.einsum('bid,bjd->bij', q, k) # batch, slot, image loc
-                dots = (pos_dots + content_dots) * self.scale / 2.0 # batch, slot, image loc
+                content_dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc
+                dots = (pos_dots + content_dots) / 2.0 # batch, slot, image loc
             else:
                 dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
 

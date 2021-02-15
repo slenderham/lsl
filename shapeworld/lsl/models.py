@@ -223,7 +223,6 @@ class RelationalSlotAttention(nn.Module):
         )
 
         if relative_pos_enc:
-            self.pos_content_weight = nn.Linear(dim, 1)
             self.to_pos = nn.Linear(dim, 4) # 2 for center, 2 for scale
             height = width = 48
             self.register_buffer('coords', torch.cat([
@@ -270,8 +269,7 @@ class RelationalSlotAttention(nn.Module):
             q = self.to_q(obj_slots)
             
             if self.relative_pos_enc:
-                q_pos = self.to_pos(obj_slots)
-                x_cent, y_cent, x_scale, y_scale = torch.split(q_pos, [1,1,1,1], dim=-1) # batch, slot, 4
+                x_cent, y_cent, x_scale, y_scale = torch.split(self.to_pos(obj_slots), [1,1,1,1], dim=-1) # batch, slot, 4
                 x_cent = torch.tanh(x_cent).squeeze(-1)
                 y_cent = torch.tanh(y_cent).squeeze(-1)
                 x_scale = F.softplus(x_scale) + 1e-2
@@ -281,7 +279,7 @@ class RelationalSlotAttention(nn.Module):
                          + -(y_cent.pow(2).unsqueeze(2)+coords[:,:,1].pow(2).unsqueeze(1)-torch.einsum('bi, bj->bij', y_cent, coords[:,:,1]))/y_scale
                 content_dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
                 pos_content_weight = torch.sigmoid(self.pos_content_weight(obj_slots))
-                dots = pos_content_weight*pos_dots + (1-pos_content_weight)*content_dots
+                dots = pos_dots + content_dots
             else:
                 dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
 

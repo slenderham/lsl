@@ -693,7 +693,8 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
 
             score = im_im_scorer_model(examples_slot, image_slot).squeeze()
-            loss = F.binary_cross_entropy_with_logits(score, label.float())
+            # loss = F.binary_cross_entropy_with_logits(score, label.float())
+            loss = F.margin_ranking_loss(score, torch.zeros_like(score), label.int()*2-1, margin=1.0)
             pred_loss_total += loss.item()
             main_acc += ((score>0).long()==label).float().mean().item()
 
@@ -779,25 +780,25 @@ if __name__ == "__main__":
             for k, v in pt_metric.items():
                 metrics[k].append(v)
 
-            simple_val_acc, simple_val_acc_raw = simple_eval(epoch, 'val')
+            # simple_val_acc, simple_val_acc_raw = simple_eval(epoch, 'val')
             simple_val_auc, val_labels, val_scores = eval_auc(epoch, 'val')
             if has_same:
-                simpel_val_same_acc, simple_val_same_acc_raw = simple_eval(epoch, 'val_same')
+                # simpel_val_same_acc, simple_val_same_acc_raw = simple_eval(epoch, 'val_same')
                 simple_val_same_auc, val_same_labels, val_same_scores = eval_auc(epoch, 'val_same')
-                metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
+                # metrics['simple_val_acc'].append((simple_val_acc+simpel_val_same_acc)/2)
                 metrics['simple_val_auc'].append(roc_auc_score(val_labels+val_same_labels, val_scores+val_same_scores))
-                all_simple_val_acc = simple_val_acc_raw+simple_val_same_acc_raw
-                metrics['simple_val_acc_ci'].append(1.96*np.std(all_simple_val_acc)/np.sqrt(len(all_simple_val_acc)))
+                # all_simple_val_acc = simple_val_acc_raw+simple_val_same_acc_raw
+                # metrics['simple_val_acc_ci'].append(1.96*np.std(all_simple_val_acc)/np.sqrt(len(all_simple_val_acc)))
             else:
-                metrics['simple_val_acc'].append(simple_val_acc)
+                # metrics['simple_val_acc'].append(simple_val_acc)
                 metrics['simple_val_auc'].append(simple_val_auc)
-                metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc_raw)/np.sqrt(len(simple_val_acc_raw)))
+                # metrics['simple_val_acc_ci'].append(1.96*np.std(simple_val_acc_raw)/np.sqrt(len(simple_val_acc_raw)))
 
             save_defaultdict_to_fs(metrics, os.path.join(args.exp_dir, 'metrics.json'))
 
-            is_best_epoch = metrics['simple_val_acc'][-1] > best_simple_eval_acc;
+            is_best_epoch = metrics['simple_val_auc'][-1] > best_simple_eval_acc;
             if is_best_epoch:
-                best_simple_eval_acc = metrics['simple_val_acc'][-1]
+                best_simple_eval_acc = metrics['simple_val_auc'][-1]
 
             if args.save_checkpoint:
                 save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)

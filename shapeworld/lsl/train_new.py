@@ -693,8 +693,7 @@ if __name__ == "__main__":
             examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
 
             score = im_im_scorer_model(examples_slot, image_slot).squeeze()
-            # loss = F.binary_cross_entropy_with_logits(score, label.float())
-            loss = F.margin_ranking_loss(score, torch.zeros_like(score), label.int()*2-1, margin=1.0)
+            loss = F.binary_cross_entropy_with_logits(score, label.float())
             pred_loss_total += loss.item()
             main_acc += ((score>0).long()==label).float().mean().item()
 

@@ -1367,6 +1367,47 @@ class TransformerAgg(Scorer):
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
         return self.base_scorer(x, y)[1]+self.bias
 
+class RelationNetAgg(Scorer):
+    def __init__(self, hidden_size):
+        super(RelationNetAgg, self).__init__()
+        
+        self.hidden_size = hidden_size
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=1, dim_feedforward=hidden_size, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size*3)/((hidden_size*3)**0.5))
+        self.base_scorer = SinkhornScorer(hidden_size, iters=10, comparison='eval', im_blocks=None)
+        self.bias = nn.Parameter(torch.zeros(1))
+
+    def expand_and_pair(self, x):
+        b, num_obj, h = x.shape
+        x_i = torch.unsqueeze(x, 1)  # b. 1, n_s, h
+        x_i = x_i.expand(b, num_obj, num_obj, h)  # b. n_s, n_s, h, x1x2x3...x1x2x3...x1x2x3...
+        x_j = torch.unsqueeze(x, 2)  # b, n_s, 1, h
+        x_j = x_j.expand(b, num_obj, num_obj, h)  # b. n_s, n_s, h: x1x1x1...x2x2x2....x3x3x3 
+        x_rel = torch.cat([x_i, x_j, x_i-x_j], dim=-1).flatten(1, 2)
+        non_diag_idx = list(set(range(num_obj**2)) - set([n*num_obj+n for n in range(num_obj)])) # remove self to self pairs
+        x_rel = x_rel[:, non_diag_idx, :]
+        return x_rel
+
+    def forward(self, x, y):
+        b, n_ex, num_obj, h = x.shape
+        assert(self.input_size==None or h==self.input_size)
+        assert(y.shape==(b, num_obj, h))
+        num_rel = num_obj**2
+        x = x.flatten(1, 2)
+        x = self.expand_and_pair(x)
+        y = self.expand_and_pair(y)
+        x += self.image_id[:,0:1,:]
+        y += self.image_id[:,1:2,:]
+        x = x.transpose(0, 1)
+        y = y.transpose(0, 1)
+        whole_rep = self.model(torch.cat([x, y], dim=0))
+        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h))
+        x = whole_rep[:n_ex*num_rel].transpose(0, 1)
+        y = whole_rep[n_ex*num_rel:].transpose(0, 1)
+        return self.base_scorer(x, y)[1]+self.bias
+
 class ContrastiveLoss(Scorer):
     """
     Compute contrastive loss

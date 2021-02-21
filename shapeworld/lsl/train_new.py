@@ -356,7 +356,7 @@ if __name__ == "__main__":
                                            comparison='eval', \
                                            iters=50, reg=0.1, temperature=1.0, \
                                            im_blocks=None, im_dustbin=hype_loss.dustbin_scorer_im).to(device)
-        im_im_scorer_model = TransformerAgg(args.hidden_size).to(device)
+        im_im_scorer_model = RelationNetAgg(args.hidden_size).to(device)
         # TODO: hard coded number of examples
         # im_im_scorer_model = SortPoolScorer(hidden_size=args.hidden_size, num_ex=4, temperature=1,\
                                         # num_obj=args.num_vision_slots).to(device)
@@ -803,7 +803,6 @@ if __name__ == "__main__":
             if args.save_checkpoint:
                 save_checkpoint({repr(m): m.state_dict() for m in models_to_save}, is_best=is_best_epoch, folder=args.exp_dir)
         
-
     if args.freeze_slots:
         # for m in models_to_save:
         #     if (isinstance(m, ExWrapper)):

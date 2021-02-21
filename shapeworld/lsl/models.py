@@ -1393,9 +1393,9 @@ class RelationNetAgg(Scorer):
     def forward(self, x, y):
         b, n_ex, num_obj, h = x.shape
         assert(y.shape==(b, num_obj, h))
-        num_rel = num_obj**2
+        num_rel = num_obj**2-num_obj
         x = x.flatten(0, 1)
-        x = self.expand_and_pair(x).reshape(b, n_ex, num_rel, h).flatten(1, 2)
+        x = self.expand_and_pair(x).reshape(b, n_ex, num_rel, 3*h).flatten(1, 2)
         y = self.expand_and_pair(y)
         x += self.image_id[:,0:1,:]
         y += self.image_id[:,1:2,:]

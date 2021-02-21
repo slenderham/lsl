@@ -1392,7 +1392,6 @@ class RelationNetAgg(Scorer):
 
     def forward(self, x, y):
         b, n_ex, num_obj, h = x.shape
-        assert(self.input_size==None or h==self.input_size)
         assert(y.shape==(b, num_obj, h))
         num_rel = num_obj**2
         x = x.flatten(1, 2)

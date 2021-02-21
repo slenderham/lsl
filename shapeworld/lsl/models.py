@@ -1402,7 +1402,7 @@ class RelationNetAgg(Scorer):
         x = x.transpose(0, 1)
         y = y.transpose(0, 1)
         whole_rep = self.model(torch.cat([x, y], dim=0))
-        assert(whole_rep.shape==(num_rel*(n_ex+1), b, h)), f"{whole_rep.shape, num_rel}"
+        assert(whole_rep.shape==(num_rel*(n_ex+1), b, 3*h)), f"{whole_rep.shape, num_rel}"
         x = whole_rep[:n_ex*num_rel].transpose(0, 1)
         y = whole_rep[n_ex*num_rel:].transpose(0, 1)
         return self.base_scorer(x, y)[1]+self.bias

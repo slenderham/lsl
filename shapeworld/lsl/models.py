@@ -263,6 +263,7 @@ class RelationalSlotAttention(nn.Module):
             if self.gumbel_attention:
                 noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
                 dots = dots + noise
+            dots = F.log_softmax(dots, dim=-1)
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)

@@ -258,12 +258,11 @@ class RelationalSlotAttention(nn.Module):
             slots_prev = obj_slots
             obj_slots = self.norm_obj_slots(obj_slots)
             q = self.to_q(obj_slots)
-            dots = torch.einsum('bid,bjd->bij', q, k) * self.scale # batch, slot, image loc    
+            dots = torch.einsum('bid,bjd->bij', q, k) # batch, slot, image loc    
 
             if self.gumbel_attention:
                 noise = distributions.Gumbel(0, 1).sample(dots.shape).to(dots.device)
                 dots = dots + noise
-            dots = F.log_softmax(dots, dim=-1)
             attn = dots.softmax(dim=1) + self.eps
             attns.append(attn)
             attn = attn / attn.sum(dim=-1, keepdim=True)
@@ -1373,8 +1372,8 @@ class RelationNetAgg(Scorer):
         
         self.hidden_size = hidden_size
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=4, dim_feedforward=hidden_size*12, dropout=0.0)
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=1, dim_feedforward=hidden_size*3, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size*3)/((hidden_size*3)**0.5))
         self.base_scorer = SinkhornScorer(hidden_size*3, iters=10, comparison='eval', im_blocks=None)
         self.bias = nn.Parameter(torch.zeros(1))

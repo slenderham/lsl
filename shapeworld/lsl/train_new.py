@@ -185,7 +185,7 @@ if __name__ == "__main__":
     train_dataset = ShapeWorld(
         split='train',
         vocab=None,
-        augment=False,
+        augment=True,
         precomputed_features=None,
         max_size=args.max_train,
         preprocess=preprocess,

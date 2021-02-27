@@ -664,8 +664,8 @@ if __name__ == "__main__":
                 batch_size = len(image)
 
                 # Learn representations of images and examples
-                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
+                examples_slot, _ = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
+                image_slot, _ = image_part_model(image, is_ex=False) # --> N x n_slot x C
 
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)

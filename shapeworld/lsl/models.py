@@ -499,7 +499,7 @@ class TextRep(nn.Module):
 class TextRepTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=True):
         super(TextRepTransformer, self).__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim

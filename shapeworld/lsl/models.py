@@ -450,7 +450,7 @@ class TextRep(nn.Module):
         self.return_agg = return_agg
         self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional)
         if output_size is not None:
-            self.mlp = nn.Linear(128, hidden_size, bias=False)
+            self.mlp = nn.Linear(hidden_size, output_size, bias=False)
 
     def forward(self, seq, length):
         batch_size = seq.size(0)

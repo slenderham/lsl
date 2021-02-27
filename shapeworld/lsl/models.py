@@ -307,8 +307,7 @@ class SANet(nn.Module):
                 nn.BatchNorm2d(64),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(64, dim, 1),
-                ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True),
-                nn.LayerNorm(dim)
+                ImagePositionalEmbedding(im_size-4*4, im_size-4*4, dim, bias=True)
             )
 
             if use_relation:

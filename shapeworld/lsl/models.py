@@ -188,7 +188,7 @@ class SlotAttention(nn.Module):
         return slots, attns
 
 class RelationalSlotAttention(nn.Module):
-    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = True, cross_slot_norm = None):
+    def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128, gumbel_attention = False, cross_slot_norm = None):
         super().__init__()
         self.num_slots = num_slots
         self.iters = iters

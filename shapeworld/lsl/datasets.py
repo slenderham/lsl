@@ -666,6 +666,7 @@ class ShapeWorld(data.Dataset):
                     feats = image2
                     # Use the QUERY hint of the new example
                     pretrain_hint[-1] = pretrain_hint2[-1];
+                    pretrain_hint_length[-1] = pretrain_hint_length2[-1];
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
                     world[-1] = world2[-1]
@@ -674,6 +675,8 @@ class ShapeWorld(data.Dataset):
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
+                    pretrain_hint[-1] = pretrain_hint2[swap]
+                    pretrain_hint_length[-1] = pretrain_hint_length2[swap]
                     test_hint = support_hint2
                     test_hint_length = support_hint_length2
                     world[-1] = world2[swap]
@@ -712,11 +715,11 @@ class ShapeWorld(data.Dataset):
                 if swap == N_EX:
                     feats = image
                 else:
-                    feats = examples[swap, ...]
+                    feats = examples[swap, ...].copy()
                     if label == 1:
                         examples[swap, ...] = image
-                        pretrain_hint[swap] = pretrain_hint[-1]
-                        pretrain_hint_length[swap] = pretrain_hint_length[-1]
+                        pretrain_hint[swap], pretrain_hint[-1] = pretrain_hint[-1], pretrain_hint[swap]
+                        pretrain_hint_length[swap], pretrain_hint_length[-1] = pretrain_hint_length[-1], pretrain_hint_length[swap]
                         world[swap], world[-1] = world[-1], world[swap]
                         world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
                         prop[swap], prop[-1] = prop[-1], prop[swap]

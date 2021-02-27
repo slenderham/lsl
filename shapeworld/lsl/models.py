@@ -1061,7 +1061,7 @@ class SinkhornScorer(Scorer):
         self.im_blocks = im_blocks
         self.partial_mass = partial_mass
         self.reg = torch.log(torch.tensor(reg)) if reg is not None else nn.Parameter(torch.log(torch.ones(1)*0.1))
-        self.temperature = torch.log(torch.tensor(temperature)) if temperature is not None else nn.Parameter(torch.log(torch.ones(1)*0.5))
+        self.temperature = torch.log(torch.tensor(temperature)) if temperature is not None else nn.Parameter(torch.log(torch.ones(1)/128))
         if (self.comparison=='im_lang'):
             if im_blocks is None:
                 self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))

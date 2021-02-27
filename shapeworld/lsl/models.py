@@ -1064,17 +1064,17 @@ class SinkhornScorer(Scorer):
         self.temperature = torch.log(torch.tensor(temperature)) if temperature is not None else nn.Parameter(torch.log(torch.ones(1)*0.1))
         if (self.comparison=='im_lang'):
             if im_blocks is None:
-                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+                self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
             else:
-                self.dustbin_scorer_im = nn.ModuleList([nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1)), 
-                                                        nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))])
-            self.dustbin_scorer_lang = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+                self.dustbin_scorer_im = nn.ModuleList([nn.Linear(hidden_dim, 1), 
+                                                        nn.Linear(hidden_dim, 1)])
+            self.dustbin_scorer_lang = nn.Linear(hidden_dim, 1)
         elif (self.comparison=='im_im'):
             if im_blocks is None:
-                self.dustbin_scorer_im = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))
+                self.dustbin_scorer_im = nn.Linear(hidden_dim, 1)
             else:
-                self.dustbin_scorer_im = nn.ModuleList([nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1)), 
-                                                        nn.Sequential(nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, 1))])
+                self.dustbin_scorer_im = nn.ModuleList([nn.Linear(hidden_dim, 1), 
+                                                        nn.Linear(hidden_dim, 1)])
         elif (self.comparison=='eval'):
             if im_dustbin is not None:
                 self.dustbin_scorer_im = im_dustbin

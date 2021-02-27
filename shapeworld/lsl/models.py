@@ -224,7 +224,6 @@ class RelationalSlotAttention(nn.Module):
         self.norm_input  = nn.LayerNorm(dim)
         self.norm_obj_slots = nn.LayerNorm(dim)
         self.norm_pre_ff = nn.LayerNorm(dim)   
-        self.final_ln = nn.LayerNorm(dim)     
 
     def _rel_msg(self, x):
         b, n_s, h = x.shape
@@ -280,7 +279,6 @@ class RelationalSlotAttention(nn.Module):
               ).reshape(b, n_s, d)
             obj_slots = obj_slots + self.obj_mlp(self.norm_pre_ff(obj_slots))
         
-        obj_slots = self.final_ln(obj_slots)
         return obj_slots, attns
 
 class SANet(nn.Module):
@@ -451,7 +449,6 @@ class TextRep(nn.Module):
         self.output_size = output_size
         self.return_agg = return_agg
         self.gru = nn.GRU(self.embedding_dim, hidden_size, bidirectional=bidirectional)
-        self.final_ln = nn.LayerNorm(hidden_size)
         if output_size is not None:
             self.mlp = nn.Linear(hidden_size, output_size, bias=False)
         else:
@@ -496,7 +493,6 @@ class TextRep(nn.Module):
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2
 
-        hidden = self.final_ln(hidden)
         hidden = self.mlp(hidden)
 
         return hidden

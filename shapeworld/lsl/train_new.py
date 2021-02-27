@@ -87,6 +87,9 @@ if __name__ == "__main__":
                         choices=['imagenet_pretrain', 'caption', 'cross_modal_matching', 'im_matching'],
                         default='cross_modal_matching',
                         help='Whether to predict caption or match objects to captions')
+    parser.add_argument('--use_class_lang',
+                        action='store_true',
+                        help='If true, use the caption that refers to the central relation.')
     parser.add_argument('--visualize_attns',
                         action='store_true',
                         help='If true, visualize attention masks of slots and matching/caption if applicable')
@@ -399,7 +402,7 @@ if __name__ == "__main__":
         cls_acc = 0
         pbar = tqdm(total=n_steps)
         for batch_idx in range(n_steps):
-            examples, image, label, hint_seq, hint_length, *rest = \
+            examples, image, label, hint_seq, hint_length, pretrain_hint_seq, pretrain_hint_length, *rest = \
                 train_dataset.sample_train(args.batch_size)
 
             examples = examples.to(device)
@@ -407,6 +410,22 @@ if __name__ == "__main__":
             label = label.to(device)
             batch_size = len(image)
             n_ex = examples.shape[1]
+            num_caps_per_image = pretrain_hint_seq.shape[2]
+            
+            if not args.use_class_lang:
+                # if use image-specific, instead of class specific language,
+                # use only example images, sample one caption for each image
+                hint_seq = pretrain_hint_seq[:,:-1].flatten(0, 1)  # batch_size, n_ex+1, num_caps_per_image, cap_len
+                hint_length = pretrain_hint_length[:,:-1].flatten(0, 1)
+                rand_caps = torch.randint(0, num_caps_per_image, (batch_size*n_ex,))
+                hint_seq = hint_seq[torch.arange(0, batch_size*n_ex), rand_caps]
+                hint_length = hint_length[torch.arange(0, batch_size*n_ex), rand_caps]
+                examples = examples.flatten(0, 1)
+            else:
+                # if use class specific language, sample one example for each concept
+                # unless matching im to im, in which case use all images
+                if args.aux_task!='im_matching':
+                    examples = examples[torch.arange(batch_size), torch.randint(0, n_ex, (batch_size,))]
 
             if args.aux_task=='set_pred':
                 world = rest[-2] # this should be a list of lists
@@ -419,7 +438,8 @@ if __name__ == "__main__":
 
             if args.debug_example:
                 rand_idx = np.random.randint(0, args.batch_size) # sample a random index from current batch
-                print([train_i2w[k.item()] for k in hint_seq[rand_idx]]) # get hint in words
+                for i in range(4):
+                    print([train_i2w[k.item()] for k in hint_seq[rand_idx*4+i]]) # get hint in words
                 print(label[rand_idx])
                 if (args.aux_task=='set_pred'):
                     for w in world[rand_idx]:
@@ -429,7 +449,7 @@ if __name__ == "__main__":
                 print(examples[rand_idx][0].shape)
                 fig, axes = plt.subplots(5)
                 for i in range(4):
-                    axes[i].imshow(examples[rand_idx][i].permute(1, 2, 0)) # plot examples, transpose to put channel in the last dim
+                    axes[i].imshow(examples[4*rand_idx+i].permute(1, 2, 0)) # plot examples, transpose to put channel in the last dim
                     axes[i].axis('off')
                 axes[4].imshow(image[rand_idx].permute(1, 2, 0))
                 axes[4].axis('off')
@@ -445,7 +465,7 @@ if __name__ == "__main__":
 
             # Learn representations of images and examples
             image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
-            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=args.aux_task=='im_matching', visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
@@ -460,15 +480,12 @@ if __name__ == "__main__":
                 pos_loss_total += losses['position'].item()
                 cls_acc += metric['acc']
             elif args.aux_task=='caption':
-                hint_seq = torch.repeat_interleave(hint_seq, repeats=n_ex, dim=0)  # repeat captions to match each image
                 if (args.representation=='slot'):
-                    assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
-                    hypo_out, attns = hint_model(examples_slot.flatten(0, 1), hint_seq, \
-                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
+                    assert(len(examples_slot.shape)==3), "The examples_full should have shape: batch_size X num_slots X dim"
+                    hypo_out, attns = hint_model(examples_slot, hint_seq, hint_length.to(device))
                 else:
-                    assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex, X dim"
-                    hypo_out = hint_model(examples_slot.flatten(0, 1), hint_seq, \
-                        torch.repeat_interleave(hint_length, repeats=n_ex, dim=0).to(device))
+                    assert(len(examples_slot.shape)==2), "The examples_full should be of shape: batch_size X dim"
+                    hypo_out = hint_model(examples_slot, hint_seq, hint_length.to(device))
                 seq_len = hint_seq.size(1)
 
                 if (args.visualize_attns):
@@ -506,16 +523,16 @@ if __name__ == "__main__":
                     hint_rep = hint_model(hint_seq, hint_length) 
 
                 if (args.representation=='slot'):
-                    assert(len(examples_slot.shape)==4), "The examples_full should have shape: batch_size X n_ex X (num_slots or ) X dim"
-                    assert(hint_rep.shape==(batch_size, max_hint_length if args.hypo_model!='slot' else args.num_lang_slots, args.hidden_size))
+                    assert(len(examples_slot.shape)==3), "The examples_full should have shape: batch_size X num_slots X dim"
+                    assert(hint_rep.shape==(batch_size*n_ex, max_hint_length if args.hypo_model!='slot' else args.num_lang_slots, args.hidden_size))
                     if args.hypo_model=='slot':
                         y_mask = None
                     else:
                         y_mask = ((hint_seq==pad_index) | (hint_seq==sos_index) | (hint_seq==eos_index))
-                    matching, hypo_loss, metric = hype_loss(x=examples_slot.flatten(0, 1), y=hint_rep, y_mask=y_mask)
+                    matching, hypo_loss, metric = hype_loss(x=examples_slot, y=hint_rep, y_mask=y_mask)
                 else:
-                    assert(len(examples_slot.shape)==3), "The examples_full should be of shape: batch_size X n_ex X dim"
-                    assert(hint_rep.shape[0]==batch_size)
+                    assert(len(examples_slot.shape)==2), "The examples_full should be of shape: batch_size X dim"
+                    assert(hint_rep.shape[0]==batch_size*n_ex)
                     hypo_loss, metric = hype_loss(im=examples_slot, s=hint_rep)
                 
                 if args.visualize_attns:

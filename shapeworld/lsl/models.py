@@ -1170,18 +1170,17 @@ class SinkhornScorer(Scorer):
         # x.shape = batch_size, num_obj_x, h 
         # y.shape = batch_size, num_obj_y, h 
         # y_mask.shape = batch_size, num_obj_y
-        n = y.shape[0]
-        n_ex = x.shape[0]//n 
-        assert(x.shape[0]==n*n_ex)
+        n = y.shape[0] 
+        assert(x.shape[0]==n)
         assert(y_mask is None or y_mask.shape==y.shape[:2])
         x_expand = torch.repeat_interleave(x, repeats=n, dim=0) # --> [x1], [x1], [x1], ... [x2], [x2], [x2], ... [xn], [xn], [xn
-        y_expand = y.repeat(n*n_ex, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
+        y_expand = y.repeat(n, 1, 1)  # --> y1, y2, ... yn, y1, y2, ... yn, y1, y2, ... yn
         scores = self.base_scorer.score(x_expand, y_expand, get_diag=False)
-        assert(scores.shape==(n**2*n_ex, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
+        assert(scores.shape==(n**2, x.shape[1], y.shape[1])), f"scores's shape is wrong: {scores.shape}"
         # pad the score matrix where language is special token
         if y_mask is not None:
-            y_mask = y_mask.unsqueeze(1).repeat(n*n_ex, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
-            y_mask = torch.cat([y_mask, (torch.ones(n**2*n_ex, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
+            y_mask = y_mask.unsqueeze(1).repeat(n, x.shape[1]+1, 1) # the similarity of each image to special language token is -inf
+            y_mask = torch.cat([y_mask, (torch.ones(n**2, x.shape[1]+1, 1)<0.5).to(y_mask.device)], dim=2) # append dustbin dimension as FALSE
 
         if self.im_blocks is not None:
             x_split = torch.split(x_expand, self.im_blocks, dim=1)
@@ -1194,18 +1193,17 @@ class SinkhornScorer(Scorer):
                                                               alpha_both=-100*torch.ones(1).to(scores.device), \
                                                               scores_mask=y_mask, iters=self.iters)
 
-        assert(matching.shape==(n**2*n_ex, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
-        scores = scores.reshape(n*n_ex, n)
-        matching = matching.reshape(n*n_ex, n, x.shape[1]+1, y.shape[1]+1)
+        assert(matching.shape==(n**2, x.shape[1]+1, y.shape[1]+1)), f"{matching.shape}"
+        scores = scores.reshape(n, n)
+        matching = matching.reshape(n, n, x.shape[1]+1, y.shape[1]+1)
         
         metric = {}
-        pos_mask = (torch.block_diag(*([torch.ones(n_ex, 1)]*n))>0.5).to(scores.device)
+        pos_mask = (torch.eye(n)>0.5).to(scores.device)
         pos = scores.masked_select(pos_mask)
-        neg_by_lang = scores.masked_select(~pos_mask).reshape(n*n_ex, n-1)
-        neg_by_im = (scores.t()).masked_select(~pos_mask.t()).reshape(n, (n-1)*n_ex)
-        neg_by_im = torch.repeat_interleave(neg_by_im, dim=0, repeats=n_ex)
-        scores_reshaped_by_lang = torch.cat([pos.reshape(n*n_ex, 1), neg_by_lang], dim=1)
-        scores_reshaped_by_im = torch.cat([pos.reshape(n*n_ex, 1), neg_by_im], dim=1)
+        neg_by_lang = scores.masked_select(~pos_mask).reshape(n, n-1)
+        neg_by_im = (scores.t()).masked_select(~pos_mask.t()).reshape(n, (n-1))
+        scores_reshaped_by_lang = torch.cat([pos.reshape(n, 1), neg_by_lang], dim=1)
+        scores_reshaped_by_im = torch.cat([pos.reshape(n, 1), neg_by_im], dim=1)
         loss = -self.cross_domain_weight*F.log_softmax(scores_reshaped_by_lang, dim=1)[:,0].mean()\
                -(1-self.cross_domain_weight)*F.log_softmax(scores_reshaped_by_im, dim=1)[:,0].mean()
 

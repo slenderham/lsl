@@ -5,6 +5,7 @@ Dataset utilities
 import os
 import json
 import logging
+import copy
 
 import torch
 import numpy as np
@@ -98,23 +99,6 @@ def get_max_hint_length(data_dir=None):
         raise RuntimeError("Can't find any splits in {}".format(data_dir))
     return max_len
 
-def get_max_world_length(data_dir=None):
-    """
-    Get the maximum number of words in a sentence across all splits
-    """
-    if data_dir is None:
-        data_dir = DATA_DIR
-    max_len = 0
-    for split in ['train', 'val', 'test', 'val_same', 'test_same']:
-        worlds_file = os.path.join(data_dir, 'shapeworld', split, 'worlds.json')
-        if os.path.exists(worlds_file):
-            with open(worlds_file) as fp:
-                worlds = json.load(fp)
-            split_max_len = max([len(inst) for concept in worlds for inst in concept])
-            if split_max_len > max_len:
-                max_len = split_max_len
-    return max_len
-
 def get_black_mask(imgs):
     if len(imgs.shape) == 4:
         # Then color is 1st dim
@@ -128,7 +112,6 @@ def get_black_mask(imgs):
     is_black = is_black.unsqueeze(col_dim).expand_as(imgs)
 
     return is_black
-
 
 class ShapeWorld(data.Dataset):
     r"""Loader for ShapeWorld data as in L3.
@@ -235,13 +218,21 @@ class ShapeWorld(data.Dataset):
         ex_features = np.load(os.path.join(split_dir, ex_features_name))['arr_0']
         with open(os.path.join(split_dir, 'hints.json')) as fp:
             hints = json.load(fp)
+        
+        try:
+            with open(os.path.join(split_dir, 'pretrain_hints.json')) as fp:
+                pretrain_hints = json.load(fp)
+        except FileNotFoundError:
+            pretrain_hints = None
 
         try:
             with open(os.path.join(split_dir, 'worlds.json')) as fp:
                 worlds = json.load(fp)
+                properties = np.load(os.path.join(split_dir, 'properties.npz'))['arr_0']
             self.create_labels(worlds)
         except FileNotFoundError:
             worlds = None
+            properties = None
 
         test_hints = os.path.join(split_dir, 'test_hints.json')
         if self.fixed_noise_colors is not None:
@@ -278,6 +269,8 @@ class ShapeWorld(data.Dataset):
         self.ex_features = ex_features
         self.hints = hints
         self.worlds = worlds
+        self.properties = properties
+        self.pretrain_hints = pretrain_hints
 
         if self.vocab is None:
             self.create_vocab(hints, test_hints)
@@ -294,7 +287,6 @@ class ShapeWorld(data.Dataset):
 
         # this is the maximum number of tokens in a sentence
         max_length = get_max_hint_length(data_dir)
-        max_world_size = get_max_world_length(data_dir)
 
         hints, hint_lengths = [], []
         for hint in self.hints:
@@ -318,6 +310,35 @@ class ShapeWorld(data.Dataset):
 
         hints = np.array(hints)
         hint_lengths = np.array(hint_lengths)
+
+        pretrain_hints, pretrain_hint_lengths = [], []
+        for concept_hints in self.pretrain_hints:
+            pretrain_hints.append([])
+            pretrain_hint_lengths.append([])
+            for image_hints in concept_hints:
+                pretrain_hints[-1].append([])
+                pretrain_hint_lengths[-1].append([])
+                for image_hint in image_hints:
+                    image_hint_tokens = image_hint.split()
+                    # Hint processing
+                    if self.language_filter == 'color':
+                        image_hint_tokens = [t for t in image_hint_tokens if t in COLORS]
+                    elif self.language_filter == 'nocolor':
+                        image_hint_tokens = [t for t in image_hint_tokens if t not in COLORS]
+                    if self.shuffle_words:
+                        random.shuffle(hint_tokens)
+
+                    hint = [SOS_TOKEN, *image_hint_tokens, EOS_TOKEN]
+                    hint_length = len(hint)
+
+                    hint.extend([PAD_TOKEN] * (max_length + 2 - hint_length))
+                    hint = [self.w2i.get(w, self.w2i[UNK_TOKEN]) for w in hint]
+
+                    pretrain_hints[-1][-1].append(hint)
+                    pretrain_hint_lengths[-1][-1].append(hint_length)
+
+        pretrain_hints = np.array(pretrain_hints)
+        pretrain_hint_lengths = np.array(pretrain_hint_lengths)
 
         if self.test_hints is not None:
             test_hints, test_hint_lengths = [], []
@@ -358,25 +379,32 @@ class ShapeWorld(data.Dataset):
             else:
                 hint_i = i
                 test_hint_i = i
+            
             if self.test_hints is not None:
                 th = test_hints[test_hint_i]
                 thl = test_hint_lengths[test_hint_i]
             else:
                 th = hints[test_hint_i]
                 thl = hint_lengths[test_hint_i]
-            if self.worlds!=None:
+            
+            if self.worlds is not None:
                 world = worlds[i]
-                len_world = []
-                for concept in world:
-                    num_obj = len(concept)
-                    len_world.append(num_obj)
-                    concept.extend([{'color': '', 'shape': '', 'pos': (float('inf'), float('inf'))}]*(max_world_size - num_obj))
-                len_world = np.array(len_world)
+                prop = properties[i] # num_ex, num_obj, num_property_dims
+                len_world = np.sum(prop[:, :, 0], axis=-1)
             else:
-                world = np.array([hints[test_hint_i]]*(N_EX+1))
-                len_world = np.array([hint_lengths[test_hint_i]]*(N_EX+1))
-            data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i],
-                      hint_lengths[hint_i], th, thl, world, len_world)
+                prop = np.array([hints[hint_i]]*(N_EX+1))
+                world = np.array([hints[hint_i]]*(N_EX+1))
+                len_world = np.array([hint_lengths[hint_i]]*(N_EX+1))
+            
+            if self.pretrain_hints is not None:
+                pt_hint = pretrain_hints[hint_i]
+                pt_hint_length = pretrain_hint_lengths[hint_i]
+            else:
+                pt_hint = np.array([hints[hint_i]]*(N_EX+1))
+                pt_hint_length = np.array([hint_lengths[hint_i]]*(N_EX+1))
+            
+            data_i = (ex_features[i], in_features[i], labels[i], hints[hint_i], 
+                      hint_lengths[hint_i], pt_hint, pt_hint_length, th, thl, world, prop, len_world)
             data.append(data_i)
 
         self.data = data
@@ -440,16 +468,21 @@ class ShapeWorld(data.Dataset):
         batch_image = []
         batch_label = []
         batch_hint = []
+        batch_pretrain_hint = []
         batch_hint_length = []
+        batch_pretrain_hint_length = []
         batch_worlds = []
         batch_world_lens = []
+        batch_props = []
         if self.test_hints is not None:
             batch_test_hint = []
             batch_test_hint_length = []
 
         for _ in range(n_batch):
             index = random.randint(n_train)
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = \
+            examples, image, label, \
+            hint, hint_length, pretrain_hint, pretrain_hint_length, \
+            test_hint, test_hint_length, world, prop, world_len = \
                 self.__getitem__(index)
 
             batch_examples.append(examples)
@@ -457,9 +490,12 @@ class ShapeWorld(data.Dataset):
             batch_label.append(label)
             batch_hint.append(hint)
             batch_hint_length.append(hint_length)
+            batch_pretrain_hint.append(pretrain_hint)
+            batch_pretrain_hint_length.append(pretrain_hint_length)
             if self.worlds is not None:
                 batch_worlds.append(world)
                 batch_world_lens.append(world_len)
+                batch_props.append(prop)
             if self.test_hints is not None:
                 batch_test_hint.append(test_hint)
                 batch_test_hint_length.append(test_hint_length)
@@ -470,6 +506,9 @@ class ShapeWorld(data.Dataset):
         batch_hint = torch.stack(batch_hint)
         batch_hint_length = torch.from_numpy(
             np.array(batch_hint_length)).long()
+        batch_pretrain_hint = torch.from_numpy(np.stack(batch_pretrain_hint))
+        batch_pretrain_hint_length = torch.from_numpy(
+            np.array(batch_pretrain_hint_length)).long()
         if self.test_hints is not None:
             batch_test_hint = torch.stack(batch_test_hint)
             batch_test_hint_length = torch.from_numpy(
@@ -484,8 +523,8 @@ class ShapeWorld(data.Dataset):
             batch_worlds = None
             batch_world_lens = None
         return (
-            batch_examples, batch_image, batch_label, batch_hint,
-            batch_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds, batch_world_lens
+            batch_examples, batch_image, batch_label, batch_hint, batch_hint_length, batch_pretrain_hint, 
+            batch_pretrain_hint_length, batch_test_hint, batch_test_hint_length, batch_worlds, batch_world_lens
         )
 
     def add_fixed_noise_colors(self,
@@ -589,7 +628,8 @@ class ShapeWorld(data.Dataset):
 
     def __getitem__(self, index):
         if self.split == 'train' and self.augment:
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = self.data[
+            examples, image, label, hint, hint_length, pretrain_hint, pretrain_hint_length, \
+            test_hint, test_hint_length, world, prop, world_len = self.data[
                 index]
 
             # tie a language to a concept convert to pytorch.
@@ -600,23 +640,37 @@ class ShapeWorld(data.Dataset):
             sample_label = random.randint(2)
             n_train = len(self.data)
 
+            examples = examples.copy()
+            image = image.copy()
+
+            if self.pretrain_hints is not None:
+                pretrain_hint = pretrain_hint.copy()
+                pretrain_hint_length = pretrain_hint_length.copy()
+            
+            if self.worlds is not None:
+                world = world.copy()
+                world_len = world_len.copy()
+                prop = prop.copy()
+
             if sample_label == 0:
                 # if we are training, we need to negatively sample data and
                 # return a tuple (example_z, hint_z, 1) or...
                 # return a tuple (example_z, hint_other_z, 0).
                 # Sample a new test hint as well.
-                examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2, world2, world2_len = self.data[
-                    random.randint(n_train)]
+                examples2, image2, _, support_hint2, support_hint_length2, pretrain_hint2, pretrain_hint_length2, query_hint2, query_hint_length2, world2, prop2, world2_len \
+                    = self.data[random.randint(n_train)]
 
                 # pick either an example or an image.
                 swap = random.randint(N_EX + 1)
                 if swap == N_EX:
                     feats = image2
                     # Use the QUERY hint of the new example
+                    pretrain_hint[-1] = pretrain_hint2[-1];
                     test_hint = query_hint2
                     test_hint_length = query_hint_length2
                     world[-1] = world2[-1]
                     world_len[-1] = world2_len[-1]
+                    prop[-1] = prop2[-1]
                 else:
                     feats = examples2[swap, ...]
                     # Use the SUPPORT hint of the new example
@@ -624,11 +678,13 @@ class ShapeWorld(data.Dataset):
                     test_hint_length = support_hint_length2
                     world[-1] = world2[swap]
                     world_len[-1] = world2_len[swap]
+                    prop[-1] = prop2[swap]
 
                 test_hint = torch.from_numpy(test_hint).long()
 
                 feats = torch.from_numpy(feats).float()
                 examples = torch.from_numpy(examples).float()
+                pretrain_hint = torch.from_numpy(pretrain_hint).long()
 
                 # this is a 0 since feats does not match this hint.
                 if self.fixed_noise_colors is not None:
@@ -649,25 +705,29 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 0, hint, hint_length, test_hint, test_hint_length, world, world_len
+                return examples, feats, 0, hint, hint_length, pretrain_hint, pretrain_hint_length, test_hint, test_hint_length, world, prop, world_len
             else:  # sample_label == 1
                 swap = random.randint((N_EX + 1 if label == 1 else N_EX))
                 # pick either an example or an image.
                 if swap == N_EX:
                     feats = image
                 else:
-                    feats = examples[swap, ...].copy()
+                    feats = examples[swap, ...]
                     if label == 1:
                         examples[swap, ...] = image
+                        pretrain_hint[swap] = pretrain_hint[-1]
+                        pretrain_hint_length[swap] = pretrain_hint_length[-1]
                         world[swap], world[-1] = world[-1], world[swap]
                         world_len[swap], world_len[-1] = world_len[-1], world_len[swap]
+                        prop[swap], prop[-1] = prop[-1], prop[swap]
                     else:
                         swap_from = random.randint(N_EX)
                         examples[swap, ...] = examples[swap_from, ...]
-                        world[-1] = world[swap]
                         world[swap] = world[swap_from]
-                        world_len[-1] = world_len[swap]
                         world_len[swap] = world_len[swap_from]
+                        prop[swap] = prop[swap_from]
+                        pretrain_hint[swap] = pretrain_hint[swap_from]
+                        pretrain_hint_length[swap] = pretrain_hint_length[swap_from]
                 # This is a positive example, so whatever example we've chosen,
                 # assume the query hint matches the support hint.
                 test_hint = hint
@@ -694,10 +754,10 @@ class ShapeWorld(data.Dataset):
                     feats = self.preprocess(feats)
                     examples = torch.stack(
                         [self.preprocess(e) for e in examples])
-                return examples, feats, 1, hint, hint_length, test_hint, test_hint_length, world, world_len
+                return examples, feats, 1, hint, hint_length, pretrain_hint, pretrain_hint_length, test_hint, test_hint_length, world, prop, world_len
 
         else:  # val, val_same, test, test_same
-            examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len = self.data[
+            examples, image, label, hint, hint_length, pretrain_hint, pretrain_hint_length, test_hint, test_hint_length, world, prop, world_len = self.data[
                 index]
 
             # no fancy stuff. just return image.
@@ -708,7 +768,9 @@ class ShapeWorld(data.Dataset):
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
             world_len = torch.from_numpy(world_len).long()
-
+            prop = torch.from_numpy(prop).float()
+            pretrain_hint = torch.from_numpy(pretrain_hint).float()
+            
             # this is a 0 since feats does not match this hint.
             if self.fixed_noise_colors is not None:
                 examples, image = self.add_fixed_noise_colors(
@@ -724,7 +786,7 @@ class ShapeWorld(data.Dataset):
             if self.preprocess is not None:
                 image = self.preprocess(image)
                 examples = torch.stack([self.preprocess(e) for e in examples])
-            return examples, image, label, hint, hint_length, test_hint, test_hint_length, world, world_len
+            return examples, image, label, hint, hint_length, pretrain_hint, pretrain_hint_length, test_hint, test_hint_length, world, prop, world_len
 
     def to_text(self, hints):
         texts = []

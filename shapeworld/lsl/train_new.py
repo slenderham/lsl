@@ -283,7 +283,7 @@ if __name__ == "__main__":
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
     backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
                            dim=args.hidden_size, slot_model=image_model, \
-                           use_relation=args.use_relational_model, iters=7 if args.visualize_attns else 3)
+                           use_relation=args.use_relational_model, iters=7 if args.visualize_attns else 4)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -392,6 +392,7 @@ if __name__ == "__main__":
             if (not isinstance(m, TransformerAgg)) and (not isinstance(m, RelationNetAgg)) and (not isinstance(m, SortPoolScorer)):
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
+        print(hype_loss.temperature.exp(), hype_loss.reg.exp())
 
     def pretrain(epoch, n_steps=500):
         for m in models_to_save:
@@ -464,8 +465,8 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
-            examples_slot = image_part_model(examples, is_ex=args.aux_task=='im_matching', visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
+            image_slot, _ = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
+            examples_slot, attns = image_part_model(examples, is_ex=args.aux_task=='im_matching', visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
@@ -563,6 +564,9 @@ if __name__ == "__main__":
                 cls_acc += metric['acc']
             else:
                 raise ValueError("invalid auxiliary task name")
+
+            last_attn_logits = attns[-1]-F.log_softmax(attns[-1], dim=1);
+            loss -= (last_attn_logits*torch.exp(last_attn_logits)).sum(dim=1).mean()
 
             if args.visualize_attns:
                 continue

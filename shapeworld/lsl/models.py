@@ -39,7 +39,7 @@ class ExWrapper(nn.Module):
         else:
             x_flat = x
 
-        x_enc = self.model(x_flat, **kwargs)
+        x_enc, others = self.model(x_flat, **kwargs)
 
         if is_ex:
             if (isinstance(x_enc, dict)):
@@ -55,7 +55,7 @@ class ExWrapper(nn.Module):
             else:
                 x_enc = x_enc.detach()
 
-        return x_enc
+        return x_enc, others
 
 class Identity(nn.Module):
     def forward(self, x):
@@ -360,7 +360,10 @@ class SANet(nn.Module):
             x = self.encoder(img)
             if visualize_attns:
                 plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
-        return x
+        if attns is not None:
+            return x, attns
+        else:
+            return x
 
     def _visualize_attns(self, img, attns, num_iters, num_slots):
         cmap = plt.get_cmap(name='Set3')

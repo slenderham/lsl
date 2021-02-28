@@ -829,7 +829,7 @@ if __name__ == "__main__":
 
     for epoch in range(1, args.ft_epochs+1):
         train_loss = finetune(epoch)
-        train_acc, _ = test(epoch, 'train')
+        # train_acc, _ = test(epoch, 'train')
         val_acc, _ = test(epoch, 'val')
         test_acc, test_raw_scores = test(epoch, 'test')
         if has_same:
@@ -862,7 +862,7 @@ if __name__ == "__main__":
                              filename='checkpoint_finetuned.pth.tar',\
                              best_filename='finetuned_model_best.pth.tar')
 
-        metrics['train_acc'].append(train_acc)
+        # metrics['train_acc'].append(train_acc)
         metrics['val_acc'].append(val_acc)
         metrics['val_same_acc'].append(val_same_acc)
         metrics['test_acc'].append(test_acc)

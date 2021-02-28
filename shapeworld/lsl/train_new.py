@@ -566,7 +566,7 @@ if __name__ == "__main__":
                 raise ValueError("invalid auxiliary task name")
 
             last_attn_logits = F.log_softmax(attns[-1], dim=1);
-            loss -= 0.1*(last_attn_logits*torch.exp(last_attn_logits)).sum(dim=1).mean()
+            loss -= (last_attn_logits*torch.exp(last_attn_logits)).sum(dim=1).mean()
 
             if args.visualize_attns:
                 continue

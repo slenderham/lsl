@@ -392,7 +392,6 @@ if __name__ == "__main__":
                 print(m.load_state_dict(sds[repr(m)]))
         print("loaded checkpoint")
         print(hype_loss.temperature.exp(), hype_loss.reg.exp())
-        print(image_part_model.model.slot_attn.slots_sigma.exp())
 
     def pretrain(epoch, n_steps=500):
         for m in models_to_save:

@@ -40,7 +40,7 @@ class ExWrapper(nn.Module):
         else:
             x_flat = x
 
-        x_enc, others = self.model(x_flat, **kwargs)
+        x_enc = self.model(x_flat, **kwargs)
 
         if is_ex:
             if (isinstance(x_enc, dict)):
@@ -56,7 +56,7 @@ class ExWrapper(nn.Module):
             else:
                 x_enc = x_enc.detach()
 
-        return x_enc, others
+        return x_enc
 
 class Identity(nn.Module):
     def forward(self, x):

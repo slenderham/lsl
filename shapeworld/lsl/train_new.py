@@ -283,7 +283,7 @@ if __name__ == "__main__":
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
     backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
                            dim=args.hidden_size, slot_model=image_model, \
-                           use_relation=args.use_relational_model, iters=5)
+                           use_relation=args.use_relational_model, iters=10)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -378,8 +378,8 @@ if __name__ == "__main__":
     pretrain_optimizer = optfunc(params_to_pretrain, lr=args.pt_lr)
     finetune_optimizer = optfunc(params_to_finetune, lr=args.ft_lr)
     # models_to_save.append(optimizer)
-    # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
-    after_scheduler = optim.lr_scheduler.CosineAnnealingLR(pretrain_optimizer, T_max=500*args.pt_epochs-1000)
+    after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
+    # after_scheduler = optim.lr_scheduler.CosineAnnealingLR(pretrain_optimizer, T_max=500*args.pt_epochs-1000)
     pt_scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
     ft_scheduler = optim.lr_scheduler.StepLR(finetune_optimizer, 80*args.ft_epochs, 0.5)
     print(sum([p.numel() for p in params_to_pretrain]))

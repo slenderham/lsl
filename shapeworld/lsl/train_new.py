@@ -283,7 +283,7 @@ if __name__ == "__main__":
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
     backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
                            dim=args.hidden_size, slot_model=image_model, \
-                           use_relation=args.use_relational_model, iters=10)
+                           use_relation=args.use_relational_model, iters=5)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]

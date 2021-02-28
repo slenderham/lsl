@@ -320,9 +320,7 @@ if __name__ == "__main__":
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=128, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
                         'bi_gru': TextRep(embedding_model, hidden_size=128, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
-                        'uni_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=False, return_agg=args.representation=='whole'),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, bidirectional=True, return_agg=args.representation=='whole'),
-                        'slot': TextRepSlot(embedding_model, hidden_size=128, return_agg=args.representation=='whole', num_slots=args.num_lang_slots)
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())

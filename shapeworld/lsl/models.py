@@ -10,6 +10,7 @@ from matplotlib import colors
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
 from vision import VGG16
+from modules import *
 
 def _cartesian_product(x, y):
     return torch.stack([torch.cat([x[i], y[j]], dim=0) for i in range(len(x)) for j in range(len(y))])
@@ -401,39 +402,6 @@ class SANet(nn.Module):
 
         # plt.show()
 
-class ImagePositionalEmbedding(nn.Module):
-    def __init__(self, height, width, hidden_size, bias=True, coord_type='sine'):
-        super(ImagePositionalEmbedding, self).__init__()
-        self.coord_type = coord_type
-
-        x_coord_pos = torch.linspace(0, 1, height).reshape(1, height, 1).expand(1, height, width)
-        x_coord_neg = torch.linspace(1, 0, height).reshape(1, height, 1).expand(1, height, width)
-        y_coord_pos = torch.linspace(0, 1, width).reshape(1, 1, width).expand(1, height, width)
-        y_coord_neg = torch.linspace(1, 0, width).reshape(1, 1, width).expand(1, height, width)
-
-        if (coord_type=='cartesian'):
-            self.register_buffer('coords', torch.cat([x_coord_pos, x_coord_neg, y_coord_pos, y_coord_neg], dim=0).unsqueeze(0))
-            self.pos_emb = nn.Conv2d(4, hidden_size, 1, bias=bias)
-        elif (coord_type=='polar'):
-            coords = []
-            for xx in [x_coord_neg, x_coord_pos]:
-                for yy in [y_coord_neg, y_coord_pos]:
-                    coords.append(torch.sqrt(xx**2+yy**2))
-                    coords.append(torch.atan2(xx, yy))
-            self.register_buffer('coords', torch.cat(coords, dim=0).unsqueeze(0))
-            self.pos_emb = nn.Conv2d(8, hidden_size, 1, bias=bias)
-        elif (coord_type=='sine'):
-            div_term = 2*math.pi*torch.exp(-math.log(10000.0)*torch.arange(0., hidden_size, 2)/hidden_size).reshape(hidden_size//2, 1, 1)
-            self.register_buffer('coords', torch.cat([torch.sin((x_coord_pos * div_term)[0::2]), torch.cos((x_coord_pos * div_term)[1::2]), \
-                                                      torch.sin((y_coord_pos * div_term)[0::2]), torch.cos((y_coord_pos * div_term)[1::2])], dim=0).unsqueeze(0))
-            self.pos_emb = nn.Identity()
-        else:
-            raise ValueError
-        
-    def forward(self, x):
-        # add positional embedding to the feature vector
-        return x+self.pos_emb(self.coords)
-
 ''' Text Modules '''
 
 class TextRep(nn.Module):
@@ -501,7 +469,7 @@ class TextRep(nn.Module):
         return hidden
 
 class TextRepTransformer(nn.Module):
-    def __init__(self, embedding_module, hidden_size, return_agg=False, bidirectional=True):
+    def __init__(self, embedding_module, hidden_size, output_size=None, return_agg=False):
         super(TextRepTransformer, self).__init__()
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=4, dim_feedforward=4*hidden_size, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
@@ -509,10 +477,46 @@ class TextRepTransformer(nn.Module):
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
         self.return_agg = return_agg
-        if not bidirectional:
-            self.register_buffer("mask", torch.tril(torch.ones(16, 16))<0.5)
+        if output_size is not None:
+            self.mlp = nn.Linear(hidden_size, output_size, bias=False)
         else:
-            self.mask = None
+            self.mlp = nn.Linear(hidden_size, hidden_size, bias=False)
+
+    def forward(self, seq, seq_len, src_key_padding_mask):
+        batch_size = seq.size(0)
+
+        # reorder from (B,L,D) to (L,B,D)
+        seq = seq.transpose(0, 1)
+        max_len = seq_len.max()
+
+        # embed your sequences
+        embed_seq = self.embedding(seq)
+        embed_seq = self.pe(embed_seq)
+        if (self.mask is not None):
+            hidden = self.model(embed_seq, \
+                            src_key_padding_mask=src_key_padding_mask,\
+                            mask=self.mask[:max_len, :max_len])
+        else:
+            hidden = self.model(embed_seq, \
+                            src_key_padding_mask=src_key_padding_mask)
+
+        # reorder back to (B,L,D)
+        hidden = hidden.transpose(0, 1)
+        
+        if (self.return_agg):
+            hidden = hidden[torch.arange(batch_size), seq_len-1, :] # return last hidden state
+
+        return self.mlp(hidden)
+
+class TextRepTreeTransformer(nn.Module):
+    def __init__(self, embedding_module, hidden_size, return_agg=False):
+        super(TextRepTreeTransformer, self).__init__()
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2, dim_feedforward=4*hidden_size, dropout=0.0)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.embedding = embedding_module
+        self.embedding_dim = embedding_module.embedding_dim
+        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
+        self.return_agg = return_agg
 
     def forward(self, seq, seq_len, src_key_padding_mask):
         batch_size = seq.size(0)
@@ -539,60 +543,6 @@ class TextRepTransformer(nn.Module):
             hidden = hidden[torch.arange(batch_size), seq_len-1, :] # return last hidden state
 
         return hidden
-
-class TextRepSlot(nn.Module):
-    def __init__(self, embedding_module, hidden_size, return_agg, num_slots = 4, iters = 3, eps = 1e-8, hidden_dim = 128):
-        super().__init__()
-        self.return_agg = return_agg
-        self.embedding = embedding_module
-        self.encoder = TextRep(embedding_module, hidden_size, return_agg=False, bidirectional=True)
-        self.slot = SlotAttention(num_slots, hidden_size, iters, eps, hidden_dim)
-
-    def forward(self, seq, seq_len, src_key_padding_mask=None, **kwargs):
-        visualize_attns = kwargs.get('visualize_attns', False)
-        token_seq = kwargs.get('token_seq', None)
-        num_iters=kwargs.get('num_iters')
-        num_slots=kwargs.get('num_slots')
-        if visualize_attns:
-            assert(token_seq is not None)
-        # embed your sequences, size: B, L, D
-        assert(src_key_padding_mask.shape==seq.shape)
-        embed_seq = self.encoder(seq, seq_len)
-        hidden, attns = self.slot(embed_seq, src_key_padding_mask=src_key_padding_mask)
-        if visualize_attns:
-            self._visualize_attns(token_seq, attns, (num_iters if num_iters is not None else self.iters), (num_slots if num_slots is not None else self.num_slots))
-        if (self.return_agg):
-            hidden = hidden.mean(dim=1) # return last hidden state
-        return hidden
-
-    def visualize_attns(self, seq, seq_len, attns, num_iters, num_slots):
-        fig, axes = plt.subplots(num_iters)
-        rand_idx = 0
-        for i in range(num_iters):
-            axes[i].imshow(attns[i][rand_idx][:, :seq_len[rand_idx]].transpose(0, 1).cpu().detach())
-            axes[i].set_yticks(list(range(num_slots)))
-            axes[i].set_yticklabels(list(range(num_slots)))
-            axes[i].tick_params(axis='x', bottom=False)
-        axes[-1].set_xticks(list(range(seq_len[rand_idx])))
-        axes[-1].set_xticklabels(seq[rand_idx][:seq_len[rand_idx]])
-        plt.show()
-
-class TextPositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.0, max_len=5000):
-        super(TextPositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
 
 class TextProposal(nn.Module):
     r"""Reverse proposal model, estimating:
@@ -713,42 +663,6 @@ class TextProposal(nn.Module):
             sampled_ids = torch.from_numpy(padded_ids).long()
 
         return sampled_ids, sampled_lengths
-
-class Attention(nn.Module):
-    """
-    Attention Network.
-    """
-    def __init__(self, encoder_dim, decoder_dim, attention_dim):
-        """
-        :param encoder_dim: feature size of encoded images
-        :param decoder_dim: size of decoder's RNN
-        :param attention_dim: size of the attention network
-        """
-        super(Attention, self).__init__()
-        self.encoder_att = nn.Linear(encoder_dim, attention_dim)  # linear layer to transform encoded image
-        self.decoder_att = nn.Linear(decoder_dim, attention_dim)  # linear layer to transform decoder's output
-        self.full_att = nn.Linear(attention_dim, 1)  # linear layer to calculate values to be softmax-ed
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
-
-    def forward(self, encoder_out, decoder_hidden, scope):
-        """
-        Forward propagation.
-        :param encoder_out: encoded slots, a tensor of dimension (batch_size, num_slots, encoder_dim)
-        :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
-        :param scope: scope for stick breaking which decreases every step, a tensor of dimension (batch_size, num_slots)
-        :return: attention weighted encoding, weights
-        """
-        
-        att1 = self.encoder_att(encoder_out)  # (batch_size, num_slots, attention_dim)
-        att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
-        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_slots)
-        alpha = self.softmax(att)  # (batch_size, num_slots)
-        alpha_tilde = scope[:alpha.shape[0],:]*alpha
-        scope[:alpha.shape[0],:] = scope[:alpha.shape[0],:]*(1-alpha)
-        attention_weighted_encoding = (encoder_out * alpha_tilde.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
-
-        return attention_weighted_encoding, alpha_tilde, scope
 
 class TextProposalWithAttn(nn.Module):
     r"""Reverse proposal model, estimating:
@@ -1485,54 +1399,3 @@ class MLPMeanScore(Scorer):
         
         assert(x.shape==y.shape)
         return (x*y).sum(dim=1)
-
-class SplitMLP(nn.Module):
-    def __init(self, input_size, output_size, num_slots):
-        super(SplitMLP, self).__init__()
-        self.mlp = MLP(input_size, num_slots*output_size, num_slots*output_size)
-        self.input_size = input_size
-        self.output_size = output_size
-        self.num_slots = num_slots
-
-    def forward(self, x):
-        b, h = x.shape
-        assert(h==self.input_size)
-        x = self.mlp(x)
-        x = torch.split(x, [self.output_size]*self.num_slots, dim=-1)
-        x = torch.stack(x, dim=1)
-        assert(x.shape==(b, self.num_slots, self.output_size))
-        return x
-
-class SortPoolScorer(nn.Module):
-    """
-        Adopted from Featurewise sort pooling. From:
-        FSPool: Learning Set Representations with Featurewise Sort Pooling.
-    """
-    def __init__(self, hidden_size, num_ex, num_obj, temperature):
-        """
-        in_channels: Number of channels in input
-        relaxed: Use sorting networks relaxation instead of traditional sorting
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(1, 1, num_obj*num_ex)/((num_obj*num_ex)**0.5))
-        self.bias = nn.Parameter(torch.zeros(1))
-        self.base_scorer = CosineScorer(temperature=temperature)
-
-    def forward(self, x, y):
-        """ FSPool
-        x: FloatTensor of shape (batch_size, num_obj, num_obj*num_ex).
-            This should contain the similarity scores between objects in query and 
-            objects in all support images (order doesn't matter since they are sorted)
-        Returns: pooled score
-        """
-        b, n_ex, num_slot, h = x.shape
-        assert(y.shape==(b, num_slot, h))
-
-        sims = self.base_scorer.score(y, x.flatten(1,2), get_diag=False) # --> b X num_obj_y X num_obj_X*n_ex
-        assert(sims.shape==(b, num_slot, num_slot*n_ex))
-
-        sims, perm = sims.sort(dim=2, descending=True)
-
-        sims = (sims * self.weight).sum(dim=2).mean(dim=1)+self.bias
-        assert(sims.shape[0]==b), sims.shape
-        return sims

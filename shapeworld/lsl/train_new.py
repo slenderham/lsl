@@ -283,7 +283,7 @@ if __name__ == "__main__":
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
     backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
                            dim=args.hidden_size, slot_model=image_model, \
-                           use_relation=args.use_relational_model, iters=5)
+                           use_relation=args.use_relational_model, iters=3)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -315,12 +315,12 @@ if __name__ == "__main__":
         models_to_save.append(hint_model)
 
     elif args.aux_task=='cross_modal_matching':
-        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
+        embedding_model = nn.Embedding(train_vocab_size, 128)
         output_size = args.hidden_size if args.representation=='slot' else args.hidden_size*args.num_vision_slots
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=128, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
                         'bi_gru': TextRep(embedding_model, hidden_size=128, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=args.hidden_size, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())
@@ -661,8 +661,8 @@ if __name__ == "__main__":
                 batch_size = len(image)
 
                 # Learn representations of images and examples
-                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False, num_iters=7) # --> N x n_ex x n_slot x C
+                image_slot = image_part_model(image, is_ex=False, num_iters=7) # --> N x n_slot x C
 
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)
@@ -707,8 +707,8 @@ if __name__ == "__main__":
             n_ex = examples.shape[1]
 
             # Learn representations of images and examples
-            image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
-            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
+            image_slot = image_part_model(image, is_ex=False, visualize_attns=False, num_iters=7) # --> N x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False, num_iters=7) # --> N x n_ex x n_slot x C
 
             score = im_im_scorer_model(examples_slot, image_slot).squeeze()
             loss = F.binary_cross_entropy_with_logits(score, label.float())

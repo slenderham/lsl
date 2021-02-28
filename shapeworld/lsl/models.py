@@ -496,7 +496,7 @@ class TextRep(nn.Module):
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2
 
-        hidden = self.mlp(hidden)+embed_seq.transpose(0, 1)
+        hidden = (self.mlp(hidden)+embed_seq.transpose(0, 1))/2
 
         return hidden
 

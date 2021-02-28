@@ -380,7 +380,8 @@ if __name__ == "__main__":
     # models_to_save.append(optimizer)
     # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
     after_scheduler = optim.lr_scheduler.CosineAnnealingLR(pretrain_optimizer, T_max=500*args.pt_epochs-1000)
-    scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    pt_scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
+    ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(pretrain_optimizer, T_max=100*args.ft_epochs)
     print(sum([p.numel() for p in params_to_pretrain]))
     print(sum([p.numel() for p in params_to_finetune]))
 
@@ -569,7 +570,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_pretrain, 1.0)
             pretrain_optimizer.step()
-            scheduler.step()
+            pt_scheduler.step()
             pretrain_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:
@@ -717,6 +718,7 @@ if __name__ == "__main__":
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params_to_finetune, 1.0)
             finetune_optimizer.step()
+            ft_scheduler.step()
             finetune_optimizer.zero_grad()
 
             if batch_idx % args.log_interval == 0:

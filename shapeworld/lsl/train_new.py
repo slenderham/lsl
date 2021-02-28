@@ -315,12 +315,12 @@ if __name__ == "__main__":
         models_to_save.append(hint_model)
 
     elif args.aux_task=='cross_modal_matching':
-        embedding_model = nn.Embedding(train_vocab_size, 256)
+        embedding_model = nn.Embedding(train_vocab_size, args.hidden_size)
         output_size = args.hidden_size if args.representation=='slot' else args.hidden_size*args.num_vision_slots
         hint_model = {
-                        'uni_gru': TextRep(embedding_model, hidden_size=256, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
-                        'bi_gru': TextRep(embedding_model, hidden_size=256, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=256, return_agg=args.representation=='whole', output_size=output_size),
+                        'uni_gru': TextRep(embedding_model, hidden_size=128, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_gru': TextRep(embedding_model, hidden_size=128, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
+                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())

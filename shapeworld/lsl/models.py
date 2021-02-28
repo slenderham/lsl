@@ -475,7 +475,7 @@ class TextRepTransformer(nn.Module):
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
+        self.pe = TextPositionalEncoding(embedding_dim, dropout=0.0, max_len=16)
         self.return_agg = return_agg
         if output_size is not None:
             self.mlp = nn.Linear(hidden_size, output_size, bias=False)

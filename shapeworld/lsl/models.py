@@ -361,10 +361,7 @@ class SANet(nn.Module):
             x = self.encoder(img)
             if visualize_attns:
                 plt.imshow(img[2].permute(1, 2, 0).detach().cpu())
-        if attns is not None:
-            return x, attns
-        else:
-            return x
+        return x
 
     def _visualize_attns(self, img, attns, num_iters, num_slots):
         cmap = plt.get_cmap(name='Set3')

@@ -465,8 +465,8 @@ if __name__ == "__main__":
                 hint_seq = hint_seq[:, :max_hint_length]
 
             # Learn representations of images and examples
-            image_slot, _ = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
-            examples_slot, attns = image_part_model(examples, is_ex=args.aux_task=='im_matching', visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
+            image_slot = image_part_model(image, is_ex=False, visualize_attns=False) # --> N x n_slot x C
+            examples_slot = image_part_model(examples, is_ex=args.aux_task=='im_matching', visualize_attns=args.visualize_attns) # --> N x n_ex x n_slot x C
 
             if args.aux_task=='set_pred':
                 slot_cls_score = image_cls_projection(torch.cat([examples_slot, image_slot.unsqueeze(1)], dim=1)).flatten(0,1)
@@ -661,8 +661,8 @@ if __name__ == "__main__":
                 batch_size = len(image)
 
                 # Learn representations of images and examples
-                examples_slot, _ = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
-                image_slot, _ = image_part_model(image, is_ex=False) # --> N x n_slot x C
+                examples_slot = image_part_model(examples, is_ex=True, visualize_attns=False) # --> N x n_ex x n_slot x C
+                image_slot = image_part_model(image, is_ex=False) # --> N x n_slot x C
 
                 if args.representation=='slot':
                     examples_slot = examples_slot.flatten(0, 1)

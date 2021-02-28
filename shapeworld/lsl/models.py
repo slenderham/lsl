@@ -1279,7 +1279,7 @@ class RelationNetAgg(Scorer):
         
         self.hidden_size = hidden_size
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=1, dim_feedforward=hidden_size*3, dropout=0.0)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=3, dim_feedforward=hidden_size*12, dropout=0.0)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=2)
         self.image_id = nn.Parameter(torch.randn(1, 2, hidden_size*3)/((hidden_size*3)**0.5))
         self.base_scorer = SinkhornScorer(hidden_size*3, iters=10, comparison='eval', im_blocks=None)

@@ -246,7 +246,7 @@ class RelationalSlotAttention(nn.Module):
         
         obj_mu = self.slots_mu.expand(b, n_s, -1)
         obj_sigma = torch.exp(self.slots_sigma.expand(b, n_s, -1))
-        obj_slots = obj_mu + torch.randn_like(obj_mu)*obj_sigma
+        obj_slots = torch.tanh(obj_mu + torch.randn_like(obj_mu)*obj_sigma)
 
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs) # batch, slot, dim

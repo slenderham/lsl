@@ -381,7 +381,7 @@ if __name__ == "__main__":
     # after_scheduler = optim.lr_scheduler.StepLR(pretrain_optimizer, 4000, 0.5)
     after_scheduler = optim.lr_scheduler.CosineAnnealingLR(pretrain_optimizer, T_max=500*args.pt_epochs-1000)
     pt_scheduler = GradualWarmupScheduler(pretrain_optimizer, 1.0, total_epoch=1000, after_scheduler=after_scheduler)
-    ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(finetune_optimizer, T_max=100*args.ft_epochs)
+    ft_scheduler = optim.lr_scheduler.StepLR(finetune_optimizer, 80*args.ft_epochs, 0.5)
     print(sum([p.numel() for p in params_to_pretrain]))
     print(sum([p.numel() for p in params_to_finetune]))
 

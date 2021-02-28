@@ -468,7 +468,7 @@ class TextRep(nn.Module):
         seq = seq.transpose(0, 1)
 
         # embed your sequences
-        embed_seq = self.embedding(seq)
+        embed_seq = self.embedding(seq)/math.sqrt(self.hidden_size)
 
         packed = rnn_utils.pack_padded_sequence(
             embed_seq,
@@ -496,7 +496,7 @@ class TextRep(nn.Module):
             if self.bidirectional:
                 hidden = (hidden[:,:,:self.hidden_size]+hidden[:,:,self.hidden_size:])/2
 
-        hidden = self.mlp(hidden)
+        hidden = self.mlp(hidden)+embed_seq
 
         return hidden
 

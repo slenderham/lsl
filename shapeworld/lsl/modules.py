@@ -102,7 +102,6 @@ class Encoder(nn.Module):
     def __init__(self, layer, N, hidden_size, output_size):
         super(Encoder, self).__init__()
         self.layers = clones(layer, N)
-        self.norm = nn.LayerNorm(hidden_size)
         self.proj = nn.Linear(hidden_size, output_size, bias=False)
 
     def forward(self, x, mask):
@@ -112,7 +111,6 @@ class Encoder(nn.Module):
             x, group_prob, break_prob = layer(x, ~mask, group_prob)
             break_probs.append(break_prob)
 
-        x = self.norm(x)
         break_probs = torch.stack(break_probs, dim=1)
         return self.proj(x)
 

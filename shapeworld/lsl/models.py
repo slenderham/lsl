@@ -519,10 +519,7 @@ class TextRepTreeTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        hidden = self.model(embed_seq, mask=src_key_padding_mask)
-
-        # reorder back to (B,L,D)
-        hidden = hidden.transpose(0, 1)
+        hidden = self.model(embed_seq.transpose(0, 1), mask=src_key_padding_mask)
         
         if (self.return_agg):
             hidden = hidden[torch.arange(batch_size), seq_len-1, :] # return last hidden state

@@ -25,12 +25,11 @@ class MultiHeadedAttention(nn.Module):
     def attention(self, query, key, value, mask=None, dropout=None, group_prob=None):
         "Compute 'Scaled Dot Product Attention'"
         d_k = query.size(-1)
-        scores = torch.matmul(query, key.transpose(-2, -1)) \
-                / math.sqrt(d_k)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
         if mask is not None:
-            seq_len=query.size()[-2]
-            b = torch.eye(seq_len).to(query.device)
-            scores = scores.masked_fill((mask|b) == 0, -1e9)
+            # seq_len=query.size()[-2]
+            # b = (torch.eye(seq_len).to(query.device) > 0).reshape(1, 1, seq_len, seq_len)
+            scores = scores.masked_fill((mask.unsqueeze(1)) == 0, -1e9)
 
         if group_prob is not None:
             p_attn = F.softmax(scores, dim = -1)
@@ -76,13 +75,12 @@ class GroupAttention(nn.Module):
 
         context = self.norm(context)
 
-        a = torch.diag(torch.ones(seq_len - 1, dtype=torch.long), 1).to(context.device)
-        b = torch.diag(torch.ones(seq_len, dtype=torch.long), 0).to(context.device)
-        c = torch.diag(torch.ones(seq_len - 1, dtype=torch.long), -1).to(context.device)
+        a = torch.diag(torch.ones(seq_len - 1, dtype=torch.long), 1).unsqueeze(0).to(context.device)
+        b = torch.diag(torch.ones(seq_len, dtype=torch.long), 0).unsqueeze(0).to(context.device)
+        c = torch.diag(torch.ones(seq_len - 1, dtype=torch.long), -1).unsqueeze(0).to(context.device)
         tri_matrix = torch.tril(torch.ones(seq_len, seq_len)).to(context.device)
 
-        #mask = eos_mask & (a+c) | b
-        mask = eos_mask & (a+c)
+        mask = eos_mask.unsqueeze(-2) & ((a+b+c)>0)
         
         key = self.linear_key(context)
         query = self.linear_query(context)
@@ -111,12 +109,12 @@ class Encoder(nn.Module):
         break_probs = []
         group_prob = 0.
         for layer in self.layers:
-            x, group_prob, break_prob = layer(x, mask, group_prob)
+            x, group_prob, break_prob = layer(x, ~mask, group_prob)
             break_probs.append(break_prob)
 
         x = self.norm(x)
         break_probs = torch.stack(break_probs, dim=1)
-        return self.proj(x), break_probs
+        return self.proj(x)
 
 class EncoderLayer(nn.Module):
     "Encoder is made up of self-attn and feed forward (defined below)"

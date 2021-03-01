@@ -503,7 +503,7 @@ class TextRepTreeTransformer(nn.Module):
     def __init__(self, embedding_module, hidden_size, output_size, return_agg=False):
         super(TextRepTreeTransformer, self).__init__()
         encoder_layer = EncoderLayer(hidden_size, dropout=0)
-        self.model = Encoder(encoder_layer, 3, hidden_size, output_size)
+        self.model = Encoder(encoder_layer, 2, hidden_size, output_size)
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)

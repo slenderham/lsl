@@ -92,7 +92,7 @@ class GroupAttention(nn.Module):
         neibor_attn = torch.sqrt(neibor_attn*neibor_attn.transpose(-2,-1) + 1e-9)
         neibor_attn = prior + (1. - prior)*neibor_attn
 
-        t = torch.log(neibor_attn + 1e-9).masked_fill(a==0, 0).matmul(tri_matrix)
+        t = torch.log(neibor_attn + 1e-9).masked_fill(a==0, -1e9).matmul(tri_matrix)
         g_attn = tri_matrix.matmul(t).exp().masked_fill((tri_matrix.int()-b)==0, 0)     
         g_attn = g_attn + g_attn.transpose(-2, -1) + neibor_attn.masked_fill(b==0, 1e-9)
         
@@ -102,6 +102,7 @@ class Encoder(nn.Module):
     def __init__(self, layer, N, hidden_size, output_size):
         super(Encoder, self).__init__()
         self.layers = clones(layer, N)
+        self.norm = nn.LayerNorm(hidden_size)
         self.proj = nn.Linear(hidden_size, output_size, bias=False)
 
     def forward(self, x, mask):
@@ -111,6 +112,7 @@ class Encoder(nn.Module):
             x, group_prob, break_prob = layer(x, ~mask, group_prob)
             break_probs.append(break_prob)
 
+        x = self.norm(x)
         break_probs = torch.stack(break_probs, dim=1)
         return self.proj(x)
 

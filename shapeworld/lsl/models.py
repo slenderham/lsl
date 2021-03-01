@@ -500,10 +500,10 @@ class TextRepTransformer(nn.Module):
         return self.mlp(hidden)
 
 class TextRepTreeTransformer(nn.Module):
-    def __init__(self, embedding_module, hidden_size, return_agg=False):
+    def __init__(self, embedding_module, hidden_size, output_size, return_agg=False):
         super(TextRepTreeTransformer, self).__init__()
-        
-        self.model = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        encoder_layer = EncoderLayer(hidden_size, dropout=0)
+        self.model = Encoder(encoder_layer, 3, hidden_size, output_size)
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.pe = TextPositionalEncoding(hidden_size, dropout=0.0, max_len=16)
@@ -519,13 +519,7 @@ class TextRepTreeTransformer(nn.Module):
         # embed your sequences
         embed_seq = self.embedding(seq)
         embed_seq = self.pe(embed_seq)
-        if (self.mask is not None):
-            hidden = self.model(embed_seq, \
-                            src_key_padding_mask=src_key_padding_mask,\
-                            mask=self.mask[:max_len, :max_len])
-        else:
-            hidden = self.model(embed_seq, \
-                            src_key_padding_mask=src_key_padding_mask)
+        hidden = self.model(embed_seq, mask=src_key_padding_mask)
 
         # reorder back to (B,L,D)
         hidden = hidden.transpose(0, 1)

@@ -283,7 +283,7 @@ if __name__ == "__main__":
     image_model = 'conv' if args.representation=='whole' else 'slot_attn'
     backbone_model = SANet(im_size=64, num_slots=args.num_vision_slots, \
                            dim=args.hidden_size, slot_model=image_model, \
-                           use_relation=args.use_relational_model, iters=3)
+                           use_relation=args.use_relational_model, iters=3 if not args.visualize_attns else 7)
     image_part_model = ExWrapper(backbone_model).to(device)
     params_to_pretrain = list(image_part_model.parameters())
     models_to_save = [image_part_model]
@@ -321,6 +321,7 @@ if __name__ == "__main__":
                         'uni_gru': TextRep(embedding_model, hidden_size=128, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
                         'bi_gru': TextRep(embedding_model, hidden_size=128, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
                         'bi_transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
+                        'tree_transformer': TextRepTreeTransformer(embedding_model, hidden_size=128, output_size=output_size, return_agg=args.representation=='whole')
                      }[args.hypo_model]
         hint_model = hint_model.to(device)
         params_to_pretrain.extend(hint_model.parameters())

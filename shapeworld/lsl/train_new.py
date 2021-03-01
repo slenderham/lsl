@@ -62,7 +62,7 @@ if __name__ == "__main__":
                         action='store_true',
                         help='Use relational model on top of slots or only slots.')
     parser.add_argument('--hypo_model',
-                        choices=['uni_gru', 'bi_gru', 'uni_transformer', 'bi_transformer', 'slot'],
+                        choices=['uni_gru', 'bi_gru', 'transformer', 'tree_transformer'],
                         default='bi_gru',
                         help='Which language model to use')
     parser.add_argument('--max_train',
@@ -320,7 +320,7 @@ if __name__ == "__main__":
         hint_model = {
                         'uni_gru': TextRep(embedding_model, hidden_size=128, bidirectional=False, return_agg=args.representation=='whole', output_size=output_size),
                         'bi_gru': TextRep(embedding_model, hidden_size=128, bidirectional=True, return_agg=args.representation=='whole', output_size=output_size),
-                        'bi_transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
+                        'transformer': TextRepTransformer(embedding_model, hidden_size=128, return_agg=args.representation=='whole', output_size=output_size),
                         'tree_transformer': TextRepTreeTransformer(embedding_model, hidden_size=128, output_size=output_size, return_agg=args.representation=='whole')
                      }[args.hypo_model]
         hint_model = hint_model.to(device)

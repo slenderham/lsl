@@ -93,7 +93,7 @@ class GroupAttention(nn.Module):
         neibor_attn = prior + (1. - prior)*neibor_attn
 
         t = torch.log(neibor_attn + 1e-9).masked_select(a==1).reshape(batch_size, seq_len-1)
-        t = torch.cat([torch.zeros(batch_size, 1), t], dim=-1)
+        t = torch.cat([torch.zeros(batch_size, 1).to(t.device), t], dim=-1)
         g_attn = torch.einsum('ik,kj,bk->bij', tri_matrix, tri_matrix, t) # B_ik B_kj A_k, B lower triangle
         g_attn = g_attn.exp().masked_fill((tri_matrix.int()-b)==0, 0)
         g_attn = g_attn + g_attn.transpose(-2, -1) + neibor_attn.masked_fill(b==0, 1e-9)
